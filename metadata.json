@@ -1,0 +1,7 @@
+{
+  "name": "Server Monitor - Ubuntu Server",
+  "description": "Painel corporativo e profissional de monitoramento de servidores e telemetria de infraestrutura Ubuntu Server com telemetria de hardware e módulo AdGuard Home AI integrado.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

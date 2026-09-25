@@ -1,0 +1,23 @@
+[Unit]
+Description=AdGuard Home AI - Analisador Inteligente de Bloqueios
+After=network.target adguard-home.service
+
+[Service]
+Type=simple
+User=samuel
+WorkingDirectory=/home/samuel/adguard-home-ai
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=ADGUARD_URL=http://127.0.0.1:8081
+Environment=ADGUARD_USERNAME=samuel
+Environment=ADGUARD_PASSWORD=sua_senha_adguard
+Environment=GEMINI_API_KEY=sua_chave_gemini_aqui
+
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
