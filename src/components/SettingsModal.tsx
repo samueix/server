@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Save, CheckCircle2, AlertCircle, RefreshCw, Key, Shield, Server } from 'lucide-react';
-import { loadConfig, saveConfig, AppConfig, DEFAULT_CONFIG } from '../config';
+import { X, Save, CheckCircle2, AlertCircle, RefreshCw, Shield, Server } from 'lucide-react';
+import { loadConfig, saveConfig, AppConfig, DEFAULT_CONFIG, API } from '../config';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -14,11 +14,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSaved
 }) => {
   const currentConfig = loadConfig();
-  const [apiUrl, setApiUrl] = useState(currentConfig.API_URL);
-  const [apiKey, setApiKey] = useState(currentConfig.API_KEY);
   const [cpuThreshold, setCpuThreshold] = useState(currentConfig.cpuThreshold ?? 80);
   const [ramThreshold, setRamThreshold] = useState(currentConfig.ramThreshold ?? 85);
   const [tempThreshold, setTempThreshold] = useState(currentConfig.tempThreshold ?? 75);
+  const [refreshInterval, setRefreshInterval] = useState(currentConfig.refreshIntervalSeconds ?? 3);
 
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
   const [testMessage, setTestMessage] = useState<string>('');
@@ -27,76 +26,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleTestConnection = async () => {
     setTestStatus('testing');
-    setTestMessage('Testando conexão com o Ubuntu Server...');
-
-    const cleanUrl = apiUrl.trim().replace(/\/+$/, '');
-
-    const controller1 = new AbortController();
-    const t1 = setTimeout(() => controller1.abort(), 6000);
+    setTestMessage('Testando endpoints relativos do Nginx (/api/status e /adguard-api/status)...');
 
     try {
-      // Testa o endpoint raiz /
-      const rootRes = await fetch(`${cleanUrl}/`, {
+      // 1. Testa o proxy do FastAPI (/api/status)
+      const apiRes = await fetch(`${API.server}/status`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-        signal: controller1.signal
+        signal: AbortSignal.timeout(4000)
       });
-      clearTimeout(t1);
 
-      if (!rootRes.ok) {
-        throw new Error(`Servidor respondeu com status HTTP ${rootRes.status}`);
+      if (!apiRes.ok) {
+        throw new Error(`Proxy /api/status respondeu com status HTTP ${apiRes.status}`);
       }
 
-      // Testa a autenticação com X-API-Key em /api/status
-      const controller2 = new AbortController();
-      const t2 = setTimeout(() => controller2.abort(), 6000);
+      const apiData = await apiRes.json();
 
-      const statusRes = await fetch(`${cleanUrl}/api/status`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          'X-API-Key': apiKey.trim()
-        },
-        signal: controller2.signal
-      });
-      clearTimeout(t2);
-
-      if (statusRes.status === 401) {
-        setTestStatus('error');
-        setTestMessage('API online, mas a API Key foi rejeitada (401). Verifique a chave no servidor.');
-        return;
+      // 2. Testa o proxy do AdGuard Home (/adguard-api/status)
+      let adguardMsg = '';
+      try {
+        const adguardRes = await fetch(`${API.adguard}/status`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(3000)
+        });
+        if (adguardRes.ok) {
+          const adguardData = await adguardRes.json();
+          adguardMsg = ` • AdGuard Home ${adguardData.version || 'Online'}`;
+        }
+      } catch {
+        adguardMsg = ' • AdGuard Home offline ou aguardando proxy';
       }
 
-      if (!statusRes.ok) {
-        setTestStatus('error');
-        setTestMessage(`Erro HTTP ${statusRes.status} no endpoint /api/status`);
-        return;
-      }
-
-      const statusData = await statusRes.json();
       setTestStatus('success');
-      setTestMessage(`Conectado com sucesso! Servidor: ${statusData.servidor || 'samuelserver'}`);
+      setTestMessage(`Conectado com sucesso via Nginx! Servidor: ${apiData.servidor || 'samuelserver'}${adguardMsg}`);
     } catch (err: any) {
-      clearTimeout(t1);
       setTestStatus('error');
       if (err.name === 'AbortError') {
-        setTestMessage('Tempo de conexão esgotado (timeout 6s).');
-      } else if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
-        setTestMessage('Bloqueio pelo navegador (Private Network Access / CORS).');
+        setTestMessage('Tempo esgotado (timeout 4s). Verifique se o Nginx e o FastAPI estão ativos.');
       } else {
-        setTestMessage(err.message || 'Falha ao conectar.');
+        setTestMessage(err.message || 'Falha ao conectar via Nginx.');
       }
     }
   };
 
   const handleSave = () => {
     const newConfig: AppConfig = {
-      API_URL: apiUrl.trim().replace(/\/+$/, ''),
-      API_KEY: apiKey.trim(),
       cpuThreshold: Number(cpuThreshold) || 80,
       ramThreshold: Number(ramThreshold) || 85,
       tempThreshold: Number(tempThreshold) || 75,
-      adguardUrl: currentConfig.adguardUrl || DEFAULT_CONFIG.adguardUrl,
+      refreshIntervalSeconds: Number(refreshInterval) || 3,
       serverIpv6: currentConfig.serverIpv6 || DEFAULT_CONFIG.serverIpv6
     };
     saveConfig(newConfig);
@@ -105,185 +84,161 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleResetDefault = () => {
-    setApiUrl(DEFAULT_CONFIG.API_URL);
-    setApiKey(DEFAULT_CONFIG.API_KEY);
     setCpuThreshold(DEFAULT_CONFIG.cpuThreshold ?? 80);
     setRamThreshold(DEFAULT_CONFIG.ramThreshold ?? 85);
     setTempThreshold(DEFAULT_CONFIG.tempThreshold ?? 75);
+    setRefreshInterval(DEFAULT_CONFIG.refreshIntervalSeconds ?? 3);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-md select-none transition-all">
-      <div className="w-full max-w-lg rounded-3xl apple-glass-dark border border-white/20 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] font-sans">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm select-none transition-all">
+      <div className="w-full max-w-lg rounded-2xl bg-[#0f172a] border border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[90vh] font-sans">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-white/5">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#0b1324]">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-blue-300 border border-white/15">
+            <div className="w-8 h-8 rounded-lg bg-blue-950/60 flex items-center justify-center text-blue-400 border border-blue-800/80">
               <Server className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-semibold tracking-tight text-white">
-                Configurações da Conexão
+                Configurações da Infraestrutura
               </h2>
-              <span className="text-[11px] text-white/50">
-                Parâmetros de comunicação REST com o host
+              <span className="text-[11px] text-slate-400">
+                Rotas de Proxy Nginx e Limiares Operacionais
               </span>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition"
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-4 overflow-y-auto text-xs font-mono">
-          <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 text-white/80 font-sans">
-            <div className="flex items-center gap-2 text-blue-300 font-semibold mb-0.5">
+        <div className="p-6 space-y-4 overflow-y-auto text-xs">
+          {/* Informação sobre Nginx e Autenticação */}
+          <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-300">
+            <div className="flex items-center gap-2 text-blue-400 font-semibold mb-1">
               <Shield className="w-4 h-4" />
-              <span>Autenticação por Cabeçalho HTTP</span>
+              <span>Arquitetura de Proxy Nginx (Mesma Origem)</span>
             </div>
-            <p className="text-[11px] text-white/60">
-              As consultas enviam <code>X-API-Key</code> em cada requisição REST para o endpoint FastAPI.
+            <p className="text-[11px] text-slate-400 leading-relaxed font-mono">
+              Todas as requisições utilizam caminhos relativos ao domínio (<code className="text-slate-200">/api/</code> e <code className="text-slate-200">/adguard-api/</code>). O Nginx injeta silenciosamente as chaves e credenciais no backend local, eliminando problemas de CORS e exposição de senhas.
             </p>
           </div>
 
-          {/* URL da API */}
-          <div className="space-y-1.5">
-            <label className="text-white font-medium block flex items-center gap-1.5 font-sans text-xs">
-              Endereço da API (URL Base)
-            </label>
-            <input
-              type="text"
-              value={apiUrl}
-              onChange={(e) => setApiUrl(e.target.value)}
-              placeholder="http://192.168.100.23:8000"
-              className="w-full px-3.5 py-2.5 rounded-2xl bg-black/30 border border-white/10 text-white placeholder-white/40 focus:outline-none focus:border-white/30 font-mono text-xs transition"
-            />
-            <span className="text-[11px] text-white/50 block font-sans">
-              Exemplo da rede local: http://192.168.100.23:8000
-            </span>
-          </div>
-
-          {/* API Key */}
-          <div className="space-y-1.5">
-            <label className="text-white font-medium block flex items-center gap-1.5 font-sans text-xs">
-              Chave de Acesso (X-API-Key)
-            </label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="••••••••••••"
-              className="w-full px-3.5 py-2.5 rounded-2xl bg-black/30 border border-white/10 text-white placeholder-white/40 focus:outline-none focus:border-white/30 font-mono text-xs transition"
-            />
-            <span className="text-[11px] text-white/50 block font-sans">
-              Chave cadastrada no script Python do servidor.
-            </span>
-          </div>
-
-          {/* Limiares de Alerta do Sistema */}
-          <div className="p-4 bg-white/5 rounded-2xl border border-white/10 space-y-3 font-sans">
-            <div className="flex items-center justify-between">
-              <span className="text-white font-medium text-xs">Limiares de Alerta Automático</span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                Gatilhos Visuais
-              </span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-white/70 block text-[11px]">CPU Máx (%)</label>
-                <input
-                  type="number"
-                  min="20"
-                  max="100"
-                  value={cpuThreshold}
-                  onChange={(e) => setCpuThreshold(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 rounded-xl bg-black/30 border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-white/30"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-white/70 block text-[11px]">RAM Máx (%)</label>
-                <input
-                  type="number"
-                  min="20"
-                  max="100"
-                  value={ramThreshold}
-                  onChange={(e) => setRamThreshold(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 rounded-xl bg-black/30 border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-white/30"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-white/70 block text-[11px]">Temp Máx (°C)</label>
-                <input
-                  type="number"
-                  min="40"
-                  max="110"
-                  value={tempThreshold}
-                  onChange={(e) => setTempThreshold(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 rounded-xl bg-black/30 border border-white/10 text-white font-mono text-xs focus:outline-none focus:border-white/30"
-                />
-              </div>
-            </div>
-            <span className="text-[11px] text-white/50 block">
-              Notificações e banners no topo serão disparados quando os recursos ultrapassarem estes limites.
-            </span>
-          </div>
-
           {/* Teste de Conexão */}
-          <div className="p-4 bg-black/25 rounded-2xl border border-white/10 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-white font-medium font-sans">Diagnóstico de Comunicação</span>
-              <button
-                type="button"
-                onClick={handleTestConnection}
-                disabled={testStatus === 'testing'}
-                className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white border border-white/15 font-medium transition flex items-center gap-1.5 text-xs disabled:opacity-50 font-sans shadow-sm"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 text-blue-300 ${testStatus === 'testing' ? 'animate-spin' : ''}`} />
-                Testar Conexão
-              </button>
-            </div>
+          <div className="space-y-2">
+            <button
+              onClick={handleTestConnection}
+              disabled={testStatus === 'testing'}
+              className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-blue-400 ${testStatus === 'testing' ? 'animate-spin' : ''}`} />
+              <span>{testStatus === 'testing' ? 'Testando Proxies...' : 'Testar Conexão dos Proxies (/api e /adguard-api)'}</span>
+            </button>
 
             {testStatus === 'success' && (
-              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 flex items-center gap-2.5 text-xs font-sans">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <div className="p-3 rounded-xl bg-emerald-950/40 border border-emerald-800/60 text-emerald-300 flex items-start gap-2 text-xs font-mono">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <span>{testMessage}</span>
               </div>
             )}
 
             {testStatus === 'error' && (
-              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 flex items-center gap-2.5 text-xs font-sans">
-                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+              <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-800/60 text-rose-300 flex items-start gap-2 text-xs font-mono">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 <span>{testMessage}</span>
               </div>
             )}
           </div>
+
+          <div className="border-t border-slate-800 pt-3">
+            <span className="text-xs font-semibold text-white block mb-3">Limiares de Alerta do NOC</span>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-slate-400 text-[11px] block">
+                  Alerta de CPU (%)
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="99"
+                  value={cpuThreshold}
+                  onChange={(e) => setCpuThreshold(Number(e.target.value))}
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 text-[11px] block">
+                  Alerta de RAM (%)
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="99"
+                  value={ramThreshold}
+                  onChange={(e) => setRamThreshold(Number(e.target.value))}
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 text-[11px] block">
+                  Alerta de Temperatura (°C)
+                </label>
+                <input
+                  type="number"
+                  min="50"
+                  max="95"
+                  value={tempThreshold}
+                  onChange={(e) => setTempThreshold(Number(e.target.value))}
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-400 text-[11px] block">
+                  Intervalo de Polling (segundos)
+                </label>
+                <input
+                  type="number"
+                  min="2"
+                  max="10"
+                  value={refreshInterval}
+                  onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                  className="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-white/10 bg-white/5 flex items-center justify-between">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 bg-[#0b1324]">
           <button
             onClick={handleResetDefault}
-            className="text-xs text-white/50 hover:text-white transition underline font-mono"
+            className="text-xs text-slate-400 hover:text-white transition font-mono"
           >
-            Restaurar Padrão
+            Restaurar Padrões
           </button>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 rounded-2xl text-white/80 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium transition"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition"
             >
               Cancelar
             </button>
             <button
               onClick={handleSave}
-              className="px-4 py-2 rounded-2xl bg-blue-500 hover:bg-blue-400 text-white font-medium text-xs transition flex items-center gap-1.5 shadow-lg shadow-blue-500/25"
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition flex items-center gap-1.5"
             >
               <Save className="w-3.5 h-3.5" />
-              Salvar Alterações
+              <span>Salvar Alterações</span>
             </button>
           </div>
         </div>

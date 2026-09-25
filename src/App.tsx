@@ -15,7 +15,7 @@ import { ServicesTab } from './components/tabs/ServicesTab';
 import { NetworkTab } from './components/tabs/NetworkTab';
 import { CommandsTab } from './components/tabs/CommandsTab';
 import { SystemTab } from './components/tabs/SystemTab';
-import { AdGuardAiDashboard } from './components/AdGuardAiDashboard';
+import { AdGuardHomeTab } from './components/tabs/AdGuardHomeTab';
 
 import { 
   NavigationTab, 
@@ -28,7 +28,7 @@ import {
   HistoryPoint 
 } from './types';
 import { apiService, NetworkTelemetry } from './services/api';
-import { loadConfig } from './config';
+import { loadConfig, SERVER_IPV4 } from './config';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('overview');
@@ -237,7 +237,7 @@ export default function App() {
 
   // Extract friendly hostname and IP
   const hostname = serverData?.sistema?.hostname || serverData?.servidor || statusData?.servidor || 'samuelserver';
-  const serverIp = currentConfig.API_URL.replace(/https?:\/\//, '').split(':')[0] || '192.168.100.23';
+  const serverIp = SERVER_IPV4;
 
   // Format uptime for header
   const uptimeFormatted = serverData?.uptime 
@@ -297,10 +297,10 @@ export default function App() {
             />
 
             {/* Offline Banner when telemetry server is unreachable (only on server tabs) */}
-            {connectionStatus !== 'connected' && activeTab !== 'adguard_ai' && (
+            {connectionStatus !== 'connected' && activeTab !== 'adguard' && activeTab !== 'adguard_ai' && (
               <OfflineBanner
                 serverIp={serverIp}
-                apiUrl={currentConfig.API_URL}
+                apiUrl="/api/status"
                 errorMessage={errorMessage}
                 onRetry={handleManualRefresh}
                 onOpenSettings={() => setIsSettingsOpen(true)}
@@ -309,13 +309,13 @@ export default function App() {
               />
             )}
 
-            {/* AdGuard AI Intelligence Center */}
-            {activeTab === 'adguard_ai' && (
-              <AdGuardAiDashboard />
+            {/* AdGuard Home Tab */}
+            {(activeTab === 'adguard' || activeTab === 'adguard_ai') && (
+              <AdGuardHomeTab />
             )}
 
             {/* Render Server Telemetry Tabs */}
-            {activeTab !== 'adguard_ai' && (
+            {activeTab !== 'adguard' && activeTab !== 'adguard_ai' && (
               <>
                 {activeTab === 'overview' && (
                   <OverviewTab

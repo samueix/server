@@ -136,13 +136,13 @@ export const SystemTab: React.FC<SystemTabProps> = ({
             </div>
 
             <div className="flex justify-between py-2.5">
-              <span className="text-white/50 font-sans">Porta de Escuta</span>
-              <span className="text-white/90">:8000</span>
+              <span className="text-white/50 font-sans">Acesso Web & Proxy</span>
+              <span className="text-white/90">Nginx :80 (rotas /api e /adguard-api)</span>
             </div>
 
             <div className="flex justify-between py-2.5">
-              <span className="text-white/50 font-sans">Autenticação de API</span>
-              <span className="text-white/90">Header <code>X-API-Key</code></span>
+              <span className="text-white/50 font-sans">Autenticação Backend</span>
+              <span className="text-white/90">Injeção Nginx (<code>X-API-Key</code>)</span>
             </div>
 
             <div className="flex justify-between py-2.5">

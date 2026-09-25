@@ -2,12 +2,13 @@ export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'er
 export type TransportType = 'websocket' | 'polling';
 
 export type NavigationTab = 
-  | 'adguard_ai'
   | 'overview' 
   | 'monitoring' 
   | 'processes' 
   | 'services' 
   | 'network' 
+  | 'adguard'
+  | 'adguard_ai'
   | 'commands' 
   | 'system';
 

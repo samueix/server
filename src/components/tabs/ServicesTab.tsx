@@ -21,8 +21,8 @@ interface TargetServiceDef {
 
 const MONITORED_SERVICES: TargetServiceDef[] = [
   { key: 'ssh', name: 'SSH Server', unit: 'ssh.service / sshd', desc: 'Serviço de acesso remoto criptografado OpenSSH (Porta 22)' },
-  { key: 'adguardhome', name: 'AdGuardHome', unit: 'AdGuardHome.service', desc: 'Bloqueador de anúncios DNS e controle de privacidade de rede (Porta 8081)' },
-  { key: 'server-panel', name: 'Servidor / API', unit: 'server-panel.service', desc: 'Daemon FastAPI do Server Panel (porta 8000)' },
+  { key: 'adguardhome', name: 'AdGuardHome', unit: 'AdGuardHome.service', desc: 'Bloqueador de anúncios DNS e controle de privacidade de rede' },
+  { key: 'server-panel', name: 'Server Panel', unit: 'server-panel.service', desc: 'Daemon FastAPI do Server Panel de telemetria' },
   { key: 'cron', name: 'Cron Daemon', unit: 'cron.service', desc: 'Agendador de tarefas periódicas do sistema operacional' },
   { key: 'systemd-resolved', name: 'systemd-resolved', unit: 'systemd-resolved.service', desc: 'Resolução de nomes DNS de rede local' },
   { key: 'docker', name: 'Docker Engine', unit: 'docker.service', desc: 'Gerenciador de contêineres e aplicações' }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Shield, 
   Terminal, 
@@ -8,19 +8,20 @@ import {
   Eye, 
   EyeOff, 
   Globe, 
-  ArrowUpRight,
-  ShieldCheck,
-  Ban,
-  Activity,
-  ChevronDown,
-  ChevronUp,
-  Lock,
-  Unlock,
-  Key
+  ArrowUpRight, 
+  ShieldCheck, 
+  Ban, 
+  Activity, 
+  ChevronDown, 
+  ChevronUp, 
+  Lock, 
+  Unlock, 
+  Key 
 } from 'lucide-react';
 import { SERVER_IPV6, SSH_IPV4_COMMAND, SSH_IPV6_COMMAND } from '../config';
 import { AdGuardStatsCard } from './AdGuardStatsCard';
 import { useSecurityVault } from '../context/SecurityVaultContext';
+import { getAdGuardStats, getAdGuardStatus, AdGuardStats, AdGuardStatus } from '../services/adguardService';
 
 interface QuickAccessCardProps {
   serverIp?: string;
@@ -33,10 +34,42 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
 }) => {
   const { isUnlocked, lock, requestUnlock } = useSecurityVault();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [showAdguardPass, setShowAdguardPass] = useState<boolean>(false);
   const [showSshPass, setShowSshPass] = useState<boolean>(false);
   const [selectedSshVersion, setSelectedSshVersion] = useState<'ipv6' | 'ipv4'>('ipv6');
   const [showDetailedAdGuardStats, setShowDetailedAdGuardStats] = useState<boolean>(showAdGuardStatsDefault);
+
+  const [adguardStats, setAdguardStats] = useState<AdGuardStats | null>(null);
+  const [adguardStatus, setAdguardStatus] = useState<AdGuardStatus | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchStats = async () => {
+      try {
+        const [statsData, statusData] = await Promise.all([
+          getAdGuardStats(),
+          getAdGuardStatus()
+        ]);
+        if (isMounted) {
+          setAdguardStats(statsData);
+          setAdguardStatus(statusData);
+        }
+      } catch {
+        if (isMounted) {
+          setAdguardStats(null);
+          setAdguardStatus(null);
+        }
+      }
+    };
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const isAdguardOnline = Boolean(adguardStatus?.online || adguardStats?.online);
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -44,7 +77,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const adguardUrl = `http://${serverIp}:8081/#`;
+  const adguardUrl = '/adguard-api/';
   const ipv4SshCmd = `ssh samuel@${serverIp}`;
   const ipv6SshCmd = `ssh samuel@[${SERVER_IPV6}]`;
   const currentSshCmd = selectedSshVersion === 'ipv6' ? ipv6SshCmd : ipv4SshCmd;
@@ -111,13 +144,22 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="text-sm font-semibold text-white tracking-tight">AdGuard Home</h3>
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                      15.0% Bloqueado
-                    </span>
+                    {isAdguardOnline && adguardStats ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        {adguardStats.blocked_percentage}% Bloqueado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                        AdGuard Home offline
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-white/60 mt-0.5">
-                    Painel de bloqueio de anúncios e proteção DNS (:8081)
+                    {isAdguardOnline 
+                      ? 'Painel de bloqueio de anúncios e proteção DNS (/adguard-api/)' 
+                      : 'Serviço offline ou aguardando proxy Nginx'}
                   </p>
                 </div>
               </div>
@@ -137,15 +179,21 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
             <div className="grid grid-cols-3 gap-2 mb-3 p-2.5 rounded-2xl bg-black/30 border border-white/10 font-mono text-center">
               <div>
                 <span className="text-[10px] text-white/50 block font-sans uppercase">Bloqueio</span>
-                <span className="text-sm font-bold text-emerald-400">15.0%</span>
+                <span className={`text-sm font-bold ${isAdguardOnline && adguardStats ? 'text-emerald-400' : 'text-slate-400'}`}>
+                  {isAdguardOnline && adguardStats ? `${adguardStats.blocked_percentage}%` : 'N/D'}
+                </span>
               </div>
               <div className="border-x border-white/10">
                 <span className="text-[10px] text-white/50 block font-sans uppercase">Consultas</span>
-                <span className="text-sm font-bold text-white">120</span>
+                <span className={`text-sm font-bold ${isAdguardOnline && adguardStats ? 'text-white' : 'text-slate-400'}`}>
+                  {isAdguardOnline && adguardStats ? adguardStats.num_dns_queries.toLocaleString('pt-BR') : 'N/D'}
+                </span>
               </div>
               <div>
                 <span className="text-[10px] text-white/50 block font-sans uppercase">Barrados</span>
-                <span className="text-sm font-bold text-rose-400">18</span>
+                <span className={`text-sm font-bold ${isAdguardOnline && adguardStats ? 'text-rose-400' : 'text-slate-400'}`}>
+                  {isAdguardOnline && adguardStats ? adguardStats.num_blocked_filtering.toLocaleString('pt-BR') : 'N/D'}
+                </span>
               </div>
             </div>
 
@@ -174,66 +222,17 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 </button>
               </div>
 
-              {/* User & Password Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {/* User */}
-                <div className="p-2.5 rounded-2xl bg-black/20 border border-white/10 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-white/40 text-[11px] font-sans">Usuário:</span>
-                    <span className="text-white font-semibold">samuel</span>
-                  </div>
-                  <button
-                    onClick={() => copyToClipboard('samuel', 'adguard-user')}
-                    className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition"
-                    title="Copiar usuário"
-                  >
-                    {copiedKey === 'adguard-user' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
+              {/* Autenticação Segura no Servidor */}
+              <div className="p-2.5 rounded-2xl bg-black/20 border border-white/10 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
+                  <span className="text-white/40 text-[11px] font-sans">Autenticação:</span>
+                  <span className="text-emerald-300 font-semibold text-xs font-mono truncate">
+                    Injetada pelo Nginx
+                  </span>
                 </div>
-
-                {/* Password */}
-                <div className="p-2.5 rounded-2xl bg-black/20 border border-white/10 flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <span className="text-white/40 text-[11px] font-sans">Senha:</span>
-                    <span className="text-white font-semibold font-mono text-xs">
-                      {isUnlocked && showAdguardPass ? '12345678' : '••••••••••••'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <button
-                      onClick={() => {
-                        if (!isUnlocked) {
-                          requestUnlock('Visualizar senha do AdGuard Home', () => setShowAdguardPass(true));
-                        } else {
-                          setShowAdguardPass(!showAdguardPass);
-                        }
-                      }}
-                      className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition"
-                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (showAdguardPass ? 'Ocultar senha' : 'Ver senha')}
-                    >
-                      {!isUnlocked ? (
-                        <Lock className="w-3.5 h-3.5 text-amber-400" />
-                      ) : showAdguardPass ? (
-                        <EyeOff className="w-3.5 h-3.5 text-emerald-400" />
-                      ) : (
-                        <Eye className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!isUnlocked) {
-                          requestUnlock('Copiar senha do AdGuard Home', () => copyToClipboard('12345678', 'adguard-pass'));
-                        } else {
-                          copyToClipboard('12345678', 'adguard-pass');
-                        }
-                      }}
-                      className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition"
-                      title="Copiar senha"
-                    >
-                      {copiedKey === 'adguard-pass' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    </button>
-                  </div>
-                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-white/60">
+                  Nível Servidor
+                </span>
               </div>
             </div>
           </div>

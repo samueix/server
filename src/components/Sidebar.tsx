@@ -7,7 +7,7 @@ import {
   Network, 
   Terminal, 
   Server,
-  Sparkles,
+  Shield,
   X
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
@@ -37,7 +37,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'processes', label: 'Processos', icon: Cpu },
   { id: 'services', label: 'Serviços', icon: ShieldCheck },
   { id: 'network', label: 'Rede', icon: Network },
-  { id: 'adguard_ai', label: 'AdGuard & IA', icon: Sparkles, badge: 'IA' },
+  { id: 'adguard', label: 'AdGuard Home', icon: Shield },
   { id: 'commands', label: 'Comandos', icon: Terminal, badge: 'Em breve' },
   { id: 'system', label: 'Sistema', icon: Server }
 ];

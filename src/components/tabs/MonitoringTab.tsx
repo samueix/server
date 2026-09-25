@@ -339,9 +339,9 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
           </div>
 
           <div className="p-3 rounded-2xl bg-black/20 border border-white/10">
-            <span className="text-[10px] text-white/50 block font-sans">API ENDPOINT</span>
+            <span className="text-[10px] text-white/50 block font-sans">PROXY NGINX</span>
             <span className="text-white font-semibold block mt-0.5 truncate">
-              {server?.servidor ? 'samuelserver' : '192.168.100.23'}:8000
+              {server?.servidor ? 'samuelserver' : '192.168.100.23'}/api
             </span>
           </div>
 

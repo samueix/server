@@ -6,7 +6,7 @@ import {
   ProcessItem, 
   ServiceItem 
 } from '../types';
-import { CONFIG, loadConfig } from '../config';
+import { API } from '../config';
 
 // Armazena a leitura anterior de rede para cálculo de velocidade em tempo real (MB/s ou KB/s)
 let lastNetworkSnapshot: {
@@ -39,37 +39,45 @@ export class ApiError extends Error {
 }
 
 /**
- * Função base solicitada pelo usuário:
- * Faz requisições HTTP com header X-API-Key diretamente do navegador
+ * Função base para requisições HTTP relativas ao Nginx (/api/...)
+ * O Nginx injeta automaticamente o header X-API-Key para o FastAPI na porta 8000.
+ * O navegador nunca acessa a porta 8000 diretamente, evitando problemas de CORS e portas bloqueadas.
  */
-export async function apiFetch<T = any>(endpoint: string): Promise<T> {
-  const currentConfig = loadConfig();
-  const baseUrl = (currentConfig.API_URL || CONFIG.API_URL).trim().replace(/\/+$/, '');
-  const apiKey = currentConfig.API_KEY || CONFIG.API_KEY;
+export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal): Promise<T> {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const targetUrl = cleanEndpoint.startsWith('/api') 
+    ? cleanEndpoint 
+    : `${API.server}${cleanEndpoint}`;
 
   const headers: Record<string, string> = {
     'Accept': 'application/json'
   };
 
-  // Envia o header X-API-Key em rotas protegidas
-  if (endpoint !== '/' && apiKey) {
-    headers['X-API-Key'] = apiKey;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+  // Combina com o signal externo se fornecido
+  const onExternalAbort = () => controller.abort();
+  if (signal) {
+    if (signal.aborted) {
+      clearTimeout(timeoutId);
+      throw new ApiError('Requisição cancelada');
+    }
+    signal.addEventListener('abort', onExternalAbort);
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
-
   try {
-    const response = await fetch(`${baseUrl}${endpoint}`, {
+    const response = await fetch(targetUrl, {
       method: 'GET',
       headers,
       signal: controller.signal
     });
 
-    clearTimeout(timer);
+    clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', onExternalAbort);
 
     if (response.status === 401) {
-      throw new ApiError('API Key inválida (401)', 401);
+      throw new ApiError('Autenticação inválida no proxy (401)', 401);
     }
     if (response.status === 403) {
       throw new ApiError('Acesso proibido (403)', 403);
@@ -78,7 +86,7 @@ export async function apiFetch<T = any>(endpoint: string): Promise<T> {
       throw new ApiError(`Endpoint ${endpoint} não encontrado (404)`, 404);
     }
     if (response.status >= 500) {
-      throw new ApiError(`Erro no servidor (${response.status})`, response.status);
+      throw new ApiError(`Servidor offline ou erro no backend (${response.status})`, response.status);
     }
     if (!response.ok) {
       throw new ApiError(`HTTP ${response.status}`, response.status);
@@ -86,17 +94,19 @@ export async function apiFetch<T = any>(endpoint: string): Promise<T> {
 
     return await response.json();
   } catch (err: any) {
-    clearTimeout(timer);
+    clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener('abort', onExternalAbort);
+
     if (err instanceof ApiError) {
       throw err;
     }
     if (err.name === 'AbortError') {
-      throw new ApiError('Tempo de conexão esgotado (timeout 6s)', 408);
+      if (signal?.aborted) {
+        throw new ApiError('Requisição cancelada', 0);
+      }
+      throw new ApiError('Servidor offline (tempo de resposta esgotado)', 408);
     }
-    if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('NetworkError'))) {
-      throw new ApiError('Falha de rede/CORS ou bloqueio de conteúdo não seguro (HTTP) no navegador');
-    }
-    throw new ApiError(err.message || 'Não foi possível conectar ao servidor');
+    throw new ApiError('Servidor offline');
   }
 }
 
@@ -112,8 +122,8 @@ export async function getRootHealth(): Promise<{ status: string; servidor: strin
  * GET /api/server
  * Informações completas do sistema operacional e hardware
  */
-export async function getServerInfo(): Promise<ApiServerResponse> {
-  const data = await apiFetch<any>('/api/server');
+export async function getServerInfo(signal?: AbortSignal): Promise<ApiServerResponse> {
+  const data = await apiFetch<any>('/api/server', signal);
 
   return {
     servidor: data.servidor || data.sistema?.hostname || 'samuelserver',
@@ -160,8 +170,8 @@ export async function getServerInfo(): Promise<ApiServerResponse> {
  * GET /api/status
  * Resumo rápido do servidor
  */
-export async function getStatusSummary(): Promise<ApiStatusResponse> {
-  const data = await apiFetch<any>('/api/status');
+export async function getStatusSummary(signal?: AbortSignal): Promise<ApiStatusResponse> {
+  const data = await apiFetch<any>('/api/status', signal);
   return {
     servidor: data.servidor || 'samuelserver',
     cpu: {
@@ -191,9 +201,9 @@ export async function getStatusSummary(): Promise<ApiStatusResponse> {
  * GET /api/temperature
  * Leituras dos sensores térmicos do hardware
  */
-export async function getTemperature(): Promise<ApiTemperatureResponse> {
+export async function getTemperature(signal?: AbortSignal): Promise<ApiTemperatureResponse> {
   try {
-    const data = await apiFetch<any>('/api/temperature');
+    const data = await apiFetch<any>('/api/temperature', signal);
     const disponivel = Boolean(data.disponivel);
     const sensores = Array.isArray(data.sensores) ? data.sensores : [];
 
@@ -221,8 +231,8 @@ export async function getTemperature(): Promise<ApiTemperatureResponse> {
  * Leituras das interfaces de rede com cálculo de velocidade (Download e Upload)
  * baseado na diferença real entre duas leituras consecutivas (delta bytes / delta tempo)
  */
-export async function getNetwork(): Promise<NetworkTelemetry> {
-  const raw = await apiFetch<any>('/api/network');
+export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry> {
+  const raw = await apiFetch<any>('/api/network', signal);
   const now = performance.now();
 
   let rawList: any[] = [];
@@ -338,8 +348,8 @@ export async function getNetwork(): Promise<NetworkTelemetry> {
  * GET /api/processes
  * Lista dos processos em execução no servidor (30 processos retornados pela API)
  */
-export async function getProcesses(): Promise<ProcessItem[]> {
-  const raw = await apiFetch<any>('/api/processes');
+export async function getProcesses(signal?: AbortSignal): Promise<ProcessItem[]> {
+  const raw = await apiFetch<any>('/api/processes', signal);
   const list = Array.isArray(raw) 
     ? raw 
     : (Array.isArray(raw.processos) ? raw.processos : (Array.isArray(raw.processes) ? raw.processes : []));
@@ -357,8 +367,8 @@ export async function getProcesses(): Promise<ProcessItem[]> {
  * GET /api/services
  * Monitoramento dos serviços do systemd: ssh, AdGuardHome, server-panel, cron, systemd-resolved
  */
-export async function getServices(): Promise<ServiceItem[]> {
-  const raw = await apiFetch<any>('/api/services');
+export async function getServices(signal?: AbortSignal): Promise<ServiceItem[]> {
+  const raw = await apiFetch<any>('/api/services', signal);
   const list = Array.isArray(raw) 
     ? raw 
     : (Array.isArray(raw.servicos) ? raw.servicos : (Array.isArray(raw.services) ? raw.services : []));
@@ -396,7 +406,7 @@ export interface FullTelemetryResult {
 
 /**
  * Utilitário centralizado para buscar telemetria completa em uma única rodada de polling
- * Disparado aproximadamente a cada 2 segundos, evitando requisições concorrentes ou duplicadas.
+ * Disparado aproximadamente a cada 2 a 5 segundos, evitando requisições concorrentes ou duplicadas.
  */
 export const apiService = {
   apiFetch,
@@ -408,15 +418,15 @@ export const apiService = {
   getProcesses,
   getServices,
 
-  async fetchFullTelemetry(): Promise<FullTelemetryResult> {
+  async fetchFullTelemetry(signal?: AbortSignal): Promise<FullTelemetryResult> {
     try {
       // 1. Busca os dados principais do servidor
-      const serverDetails = await getServerInfo();
+      const serverDetails = await getServerInfo(signal);
 
       // 2. Busca o resumo de status
       let statusRes: ApiStatusResponse | null = null;
       try {
-        statusRes = await getStatusSummary();
+        statusRes = await getStatusSummary(signal);
       } catch (e) {
         if (serverDetails) {
           statusRes = {
@@ -434,10 +444,10 @@ export const apiService = {
 
       // 3. Busca de processos, serviços, rede e temperatura em paralelo
       const [procList, svcList, netData, tempData] = await Promise.allSettled([
-        getProcesses(),
-        getServices(),
-        getNetwork(),
-        getTemperature()
+        getProcesses(signal),
+        getServices(signal),
+        getNetwork(signal),
+        getTemperature(signal)
       ]);
 
       const temperature: ApiTemperatureResponse = tempData.status === 'fulfilled' 
@@ -467,7 +477,7 @@ export const apiService = {
         processes: [],
         services: [],
         network: null,
-        errorMessage: err?.message || 'Não foi possível conectar ao servidor'
+        errorMessage: err?.message || 'Servidor offline'
       };
     }
   }

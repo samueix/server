@@ -52,7 +52,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     return (
       <div className="py-24 text-center text-white/70 font-mono text-xs">
         <div className="inline-block w-6 h-6 border-2 border-white/80 border-t-transparent rounded-full animate-spin mb-3" />
-        <p>Conectando ao servidor em {serverIp}:8000...</p>
+        <p>Conectando ao servidor via Nginx (/api)...</p>
       </div>
     );
   }
@@ -131,8 +131,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             <span className="font-semibold text-white">{uptimeDays}d {uptimeHours}h {uptimeMinutes}m</span>
           </div>
           <div className="p-2.5 px-3 rounded-2xl bg-black/20 border border-white/10">
-            <span className="text-white/50 text-[10px] block font-sans uppercase tracking-wider">PORTA API</span>
-            <span className="font-semibold text-emerald-300">:8000</span>
+            <span className="text-white/50 text-[10px] block font-sans uppercase tracking-wider">PROXY NGINX</span>
+            <span className="font-semibold text-emerald-300">:80 (/api)</span>
           </div>
           <div className={`p-2.5 px-3 rounded-2xl border transition-all ${
             hasTemp && mainTemp !== null && mainTemp >= 75
@@ -465,7 +465,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             {[
               { nome: 'SSH Server (ssh)', servico: 'ssh' },
               { nome: 'AdGuardHome', servico: 'AdGuardHome' },
-              { nome: 'Server Panel API (:8000)', servico: 'server-panel' },
+              { nome: 'Server Panel (FastAPI)', servico: 'server-panel' },
               { nome: 'Cron Daemon', servico: 'cron' },
               { nome: 'systemd-resolved', servico: 'systemd-resolved' }
             ].map((s) => (
