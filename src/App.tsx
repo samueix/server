@@ -16,6 +16,7 @@ import { NetworkTab } from './components/tabs/NetworkTab';
 import { CommandsTab } from './components/tabs/CommandsTab';
 import { SystemTab } from './components/tabs/SystemTab';
 import { AdGuardHomeTab } from './components/tabs/AdGuardHomeTab';
+import { DocumentationTab } from './components/tabs/DocumentationTab';
 
 import { 
   NavigationTab, 
@@ -297,7 +298,11 @@ export default function App() {
             />
 
             {/* Offline Banner when telemetry server is unreachable (only on server tabs) */}
-            {connectionStatus !== 'connected' && activeTab !== 'adguard' && activeTab !== 'adguard_ai' && (
+            {connectionStatus !== 'connected' && 
+             activeTab !== 'adguard' && 
+             activeTab !== 'adguard_ai' && 
+             activeTab !== 'commands' && 
+             activeTab !== 'documentation' && (
               <OfflineBanner
                 serverIp={serverIp}
                 apiUrl="/api/status"
@@ -376,6 +381,10 @@ export default function App() {
                     isConnected={connectionStatus === 'connected'}
                     onOpenCodeViewer={() => setIsCodeViewerOpen(true)}
                   />
+                )}
+
+                {activeTab === 'documentation' && (
+                  <DocumentationTab />
                 )}
               </>
             )}

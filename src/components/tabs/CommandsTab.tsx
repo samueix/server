@@ -1,177 +1,255 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Terminal, 
-  RotateCw, 
-  Power, 
-  RefreshCw, 
-  ShieldAlert, 
-  Lock,
-  Play,
-  Square,
-  Activity
+  Copy, 
+  Check, 
+  Search, 
+  Server, 
+  Shield, 
+  Network, 
+  HardDrive, 
+  Cpu, 
+  FileText, 
+  Layers,
+  Info
 } from 'lucide-react';
 
-interface CommandItem {
-  id: string;
-  title: string;
+interface PracticalCommand {
   command: string;
-  description: string;
-  badge: 'Em breve';
-  icon: React.ElementType;
+  desc: string;
 }
 
-const COMMAND_ACTIONS: CommandItem[] = [
+interface CommandCategory {
+  id: string;
+  name: string;
+  icon: React.ElementType;
+  commands: PracticalCommand[];
+}
+
+const COMMAND_CATEGORIES: CommandCategory[] = [
   {
-    id: 'reboot',
-    title: 'Reiniciar servidor',
-    command: 'sudo systemctl reboot',
-    description: 'Envia sinal de reinicialização controlada para o kernel do Ubuntu Server.',
-    badge: 'Em breve',
-    icon: RotateCw
+    id: 'sistema',
+    name: 'SISTEMA',
+    icon: Server,
+    commands: [
+      { command: 'sudo apt update', desc: 'Atualiza o índice de pacotes disponíveis dos repositórios do Ubuntu.' },
+      { command: 'sudo apt upgrade -y', desc: 'Instala as versões mais recentes de todos os pacotes instalados com confirmação automática.' },
+      { command: 'sudo reboot', desc: 'Reinicia o Ubuntu Server de forma segura.' },
+      { command: 'uptime', desc: 'Exibe o tempo que o servidor está ligado, usuários conectados e a média de carga (load average).' },
+      { command: 'hostnamectl', desc: 'Exibe informações do sistema, hostname, arquitetura e versão do kernel.' },
+      { command: 'uname -a', desc: 'Imprime todas as informações detalhadas do kernel Linux em execução.' }
+    ]
   },
   {
-    id: 'poweroff',
-    title: 'Desligar servidor',
-    command: 'sudo systemctl poweroff',
-    description: 'Desliga com segurança todos os processos ativos e corta a energia da máquina.',
-    badge: 'Em breve',
-    icon: Power
+    id: 'servidor',
+    name: 'SERVIDOR',
+    icon: Terminal,
+    commands: [
+      { command: 'sudo systemctl status server-panel', desc: 'Verifica o status atual do serviço systemd do Server Panel.' },
+      { command: 'sudo systemctl restart server-panel', desc: 'Reinicia o serviço daemon do Server Panel para aplicar alterações.' },
+      { command: 'sudo journalctl -u server-panel -n 100 --no-pager', desc: 'Visualiza as últimas 100 linhas de logs do Server Panel no terminal.' }
+    ]
   },
   {
-    id: 'restart-adguard',
-    title: 'Reiniciar AdGuard Home',
-    command: 'sudo systemctl restart AdGuardHome',
-    description: 'Reinicia o serviço DNS do AdGuardHome sem afetar outros processos.',
-    badge: 'Em breve',
-    icon: RefreshCw
+    id: 'adguard',
+    name: 'ADGUARD',
+    icon: Shield,
+    commands: [
+      { command: 'sudo systemctl status AdGuardHome', desc: 'Verifica se o daemon do AdGuard Home está ativo e respondendo.' },
+      { command: 'sudo systemctl restart AdGuardHome', desc: 'Reinicia o serviço do AdGuard Home liberando portas e recarregando listas.' },
+      { command: 'sudo journalctl -u AdGuardHome -n 100 --no-pager', desc: 'Exibe os últimos 100 logs de inicialização e requisições do AdGuard Home.' }
+    ]
   },
   {
-    id: 'restart-ssh',
-    title: 'Reiniciar SSH',
-    command: 'sudo systemctl restart ssh',
-    description: 'Aplica alterações de configuração no daemon OpenSSH.',
-    badge: 'Em breve',
-    icon: RotateCw
+    id: 'ssh',
+    name: 'SSH',
+    icon: Terminal,
+    commands: [
+      { command: 'sudo systemctl status ssh', desc: 'Verifica se o servidor OpenSSH está ativo e escutando na porta 22.' },
+      { command: 'sudo systemctl restart ssh', desc: 'Reinicia o daemon OpenSSH aplicando novas diretivas do sshd_config.' }
+    ]
   },
   {
-    id: 'restart-server-panel',
-    title: 'Reiniciar Server Panel',
-    command: 'sudo systemctl restart server-panel',
-    description: 'Reinicia o daemon FastAPI do servidor de telemetria.',
-    badge: 'Em breve',
-    icon: RefreshCw
+    id: 'rede',
+    name: 'REDE',
+    icon: Network,
+    commands: [
+      { command: 'ip addr', desc: 'Lista todas as interfaces de rede com seus endereços IPv4 configurados.' },
+      { command: 'ip -6 addr', desc: 'Exibe especificamente os endereços IPv6 (globais e link-local) de cada interface.' },
+      { command: 'ip route', desc: 'Exibe a tabela de roteamento IPv4 e gateway padrão do sistema.' },
+      { command: 'ip -6 route', desc: 'Exibe a tabela de rotas e gateway para tráfego IPv6.' },
+      { command: 'ss -lntp', desc: 'Exibe todas as portas TCP abertas em modo de escuta com seus respectivos processos e PIDs.' }
+    ]
   },
   {
-    id: 'start-service',
-    title: 'Iniciar serviço',
-    command: 'sudo systemctl start <servico>',
-    description: 'Inicia uma unidade de serviço do systemd no Ubuntu.',
-    badge: 'Em breve',
-    icon: Play
+    id: 'armazenamento',
+    name: 'ARMAZENAMENTO',
+    icon: HardDrive,
+    commands: [
+      { command: 'lsblk', desc: 'Lista em árvore todos os dispositivos de bloco (discos, partições e pontos de montagem).' },
+      { command: 'df -h', desc: 'Exibe o uso do espaço em disco de cada partição em formato legível para humanos (GB/MB).' },
+      { command: 'df -Th', desc: 'Exibe o uso do disco juntamente com o tipo de sistema de arquivos (ext4, vfat, etc).' },
+      { command: 'sudo fdisk -l', desc: 'Lista a tabela de partições e geometria física de todos os discos rígidos e SSDs.' },
+      { command: 'sudo vgs', desc: 'Exibe informações resumidas sobre os grupos de volumes LVM (Volume Groups).' },
+      { command: 'sudo lvs', desc: 'Lista os volumes lógicos LVM configurados no servidor.' }
+    ]
   },
   {
-    id: 'stop-service',
-    title: 'Parar serviço',
-    command: 'sudo systemctl stop <servico>',
-    description: 'Interrompe a execução de um serviço gerenciado pelo systemd.',
-    badge: 'Em breve',
-    icon: Square
+    id: 'processos',
+    name: 'PROCESSOS',
+    icon: Cpu,
+    commands: [
+      { command: 'ps aux', desc: 'Lista todos os processos em execução no sistema com consumo de CPU, RAM e usuário.' },
+      { command: 'top', desc: 'Monitor interativo em tempo real de uso de CPU, memória e processos do sistema.' },
+      { command: 'htop', desc: 'Monitor de processos interativo colorido com suporte a teclado e rolagem.' }
+    ]
   },
   {
-    id: 'restart-generic-service',
-    title: 'Reiniciar serviço',
-    command: 'sudo systemctl restart <servico>',
-    description: 'Reinicia um serviço específico no sistema operacional.',
-    badge: 'Em breve',
-    icon: RotateCw
-  },
-  {
-    id: 'status-service',
-    title: 'Ver status de serviço',
-    command: 'sudo systemctl status <servico>',
-    description: 'Consulta o estado detalhado, PID e logs recentes da unidade no journal.',
-    badge: 'Em breve',
-    icon: Activity
+    id: 'logs',
+    name: 'LOGS',
+    icon: FileText,
+    commands: [
+      { command: 'sudo journalctl -xe', desc: 'Exibe os logs do sistema operacional a partir do final com mensagens detalhadas de erro.' },
+      { command: 'sudo journalctl -u server-panel', desc: 'Visualiza o histórico completo de logs do serviço do Server Panel.' },
+      { command: 'sudo journalctl -u AdGuardHome', desc: 'Visualiza o histórico completo de logs de eventos do AdGuard Home.' }
+    ]
   }
 ];
 
 export const CommandsTab: React.FC = () => {
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  const copyCommand = (cmd: string) => {
+    navigator.clipboard.writeText(cmd);
+    setCopiedCmd(cmd);
+    setTimeout(() => setCopiedCmd(null), 2000);
+  };
+
+  const filteredCategories = COMMAND_CATEGORIES.map(cat => {
+    let cmds = cat.commands;
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      cmds = cmds.filter(c => c.command.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
+    }
+    return {
+      ...cat,
+      commands: cmds
+    };
+  }).filter(cat => {
+    if (selectedCategory !== 'all' && cat.id !== selectedCategory) return false;
+    return cat.commands.length > 0;
+  });
+
   return (
-    <div className="space-y-5 font-sans">
-      {/* Header */}
-      <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 shadow-sm flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-950/60 border border-blue-800/80 flex items-center justify-center text-blue-400">
-            <Terminal className="w-5 h-5" />
+    <div className="space-y-6 font-sans">
+      {/* Header Informativo */}
+      <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#1e2d4d] gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 flex items-center justify-center">
+              <Terminal className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                Documentação Prática de Comandos do Servidor
+              </h2>
+              <span className="text-xs text-slate-400 font-mono">
+                Guia operacional de referência para administração via terminal SSH
+              </span>
+            </div>
           </div>
-          <div>
-            <span className="text-sm font-semibold tracking-tight text-white block">
-              Comandos do Sistema
-            </span>
-            <span className="text-xs text-slate-400">
-              Rotinas administrativas e atalhos operacionais (Somente Leitura)
-            </span>
-          </div>
+          <span className="text-xs font-mono text-slate-300 bg-slate-800 px-3 py-1 rounded border border-slate-700">
+            Copiar e colar no terminal
+          </span>
         </div>
-        <span className="text-[11px] font-mono px-3 py-1 rounded-full bg-slate-900 border border-slate-700 text-slate-400 flex items-center gap-1.5">
-          <Lock className="w-3.5 h-3.5 text-slate-400" />
-          Somente Leitura
-        </span>
+
+        <p className="text-xs text-slate-300 font-mono mt-3 leading-relaxed">
+          Nesta versão, por segurança do servidor, os comandos não são executados diretamente pelo navegador. 
+          Clique no botão de cópia de cada comando para colá-lo na sua sessão SSH: <code className="text-blue-300 bg-blue-950/40 px-1.5 py-0.5 rounded border border-blue-800">ssh samuel@192.168.100.23</code>
+        </p>
       </div>
 
-      {/* Security Advisory Bar */}
-      <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-4 flex items-start gap-3 text-xs text-slate-300">
-        <div className="w-8 h-8 rounded-lg bg-amber-950/40 border border-amber-800/60 flex items-center justify-center text-amber-400 shrink-0 mt-0.5">
-          <ShieldAlert className="w-4 h-4" />
+      {/* Barra de Busca e Filtro de Categorias */}
+      <div className="p-4 rounded-xl bg-[#0b1329] border border-[#1e2d4d] shadow flex flex-col md:flex-row items-center justify-between gap-4">
+        {/* Campo de Busca */}
+        <div className="relative w-full md:w-80">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            placeholder="Buscar comando ou palavra-chave..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 rounded-lg bg-[#070d1e] border border-[#1e2d4d] text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+          />
         </div>
-        <div className="space-y-0.5">
-          <span className="text-white font-semibold">Política de Segurança da Infraestrutura:</span>
-          <p className="text-slate-400 leading-relaxed text-[11px]">
-            A execução arbitrária de comandos não é permitida pelo navegador. As ações abaixo servem como guia operacional de referência dos comandos oficiais a serem executados diretamente no terminal do servidor via SSH (<code className="text-slate-200 font-mono">ssh samuel@192.168.100.23</code>).
-          </p>
+
+        {/* Botões de Categorias */}
+        <div className="flex items-center gap-1.5 flex-wrap w-full md:w-auto text-xs font-mono">
+          <button
+            onClick={() => setSelectedCategory('all')}
+            className={`px-2.5 py-1 rounded transition ${selectedCategory === 'all' ? 'bg-blue-600 text-white font-semibold' : 'bg-[#070d1e] text-slate-400 border border-[#1e2d4d] hover:text-white'}`}
+          >
+            Todos
+          </button>
+          {COMMAND_CATEGORIES.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={`px-2.5 py-1 rounded transition ${selectedCategory === cat.id ? 'bg-blue-600 text-white font-semibold' : 'bg-[#070d1e] text-slate-400 border border-[#1e2d4d] hover:text-white'}`}
+            >
+              {cat.name}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Lista Técnica de Comandos */}
-      <div className="space-y-3">
-        {COMMAND_ACTIONS.map((cmd) => {
-          const Icon = cmd.icon;
+      {/* Grid de Categorias e Comandos */}
+      <div className="space-y-6">
+        {filteredCategories.map(cat => {
+          const Icon = cat.icon;
 
           return (
-            <div 
-              key={cmd.id}
-              className="bg-[#0f172a] border border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-            >
-              <div className="flex items-start gap-3.5">
-                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 shrink-0 mt-0.5">
-                  <Icon className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-xs font-semibold text-white">
-                      {cmd.title}
-                    </span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900 text-slate-400 border border-slate-700">
-                      {cmd.badge}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {cmd.description}
-                  </p>
-                  <code className="inline-block mt-2 px-2.5 py-1 rounded-lg bg-[#070d18] border border-slate-800 text-[11px] font-mono text-blue-300">
-                    $ {cmd.command}
-                  </code>
-                </div>
+            <div key={cat.id} className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-[#1e2d4d]">
+                <Icon className="w-4 h-4 text-blue-400" />
+                <h3 className="text-xs font-bold text-white uppercase tracking-wider">{cat.name}</h3>
+                <span className="text-[11px] font-mono text-slate-500">({cat.commands.length} comandos)</span>
               </div>
 
-              <div className="sm:shrink-0">
-                <button
-                  disabled
-                  className="w-full sm:w-auto px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-500 text-xs font-mono cursor-not-allowed"
-                  title="Funcionalidade em breve - execução remota desabilitada"
-                >
-                  Em breve
-                </button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {cat.commands.map((item, idx) => {
+                  const isCopied = copiedCmd === item.command;
+
+                  return (
+                    <div 
+                      key={idx} 
+                      className="p-3.5 rounded-xl bg-[#070d1e] border border-[#1e2d4d] hover:border-slate-700 transition flex flex-col justify-between space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <code className="text-xs text-blue-300 font-mono font-bold break-all select-all">
+                          {item.command}
+                        </code>
+                        <button
+                          onClick={() => copyCommand(item.command)}
+                          className={`p-1.5 rounded-lg border transition shrink-0 ${
+                            isCopied 
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' 
+                              : 'bg-slate-800 text-slate-300 border-slate-700 hover:text-white hover:bg-slate-700'
+                          }`}
+                          title="Copiar comando"
+                        >
+                          {isCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 font-sans leading-relaxed">
+                        {item.desc}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );

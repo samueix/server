@@ -5,7 +5,7 @@ import {
   ClientStatItem, 
   UpstreamStatItem 
 } from '../types';
-import { loadConfig, ADGUARD_STATS_URL } from '../config';
+import { loadConfig, API } from '../config';
 import { apiFetch } from './api';
 
 /**
@@ -332,11 +332,8 @@ export async function fetchAdGuardStats(targetUrl?: string): Promise<AdGuardProc
     // Continua para próxima tentativa
   }
 
-  // 2. Tenta conexão direta no navegador com AdGuard Home (:8081/control/stats)
-  const config = loadConfig();
-  const endpoint = targetUrl || config.adguardUrl 
-    ? `${(config.adguardUrl || 'http://192.168.100.23:8081').replace(/\/+$/, '')}/control/stats`
-    : ADGUARD_STATS_URL;
+  // 2. Tenta conexão via proxy Nginx com AdGuard Home (/adguard-api/control/stats)
+  const endpoint = targetUrl || `${API.adguard}/control/stats`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 3000);

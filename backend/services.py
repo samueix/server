@@ -5,21 +5,30 @@ from typing import List, Dict, Any
 # Lista de serviços systemd importantes monitorados por padrão
 DEFAULT_IMPORTANT_SERVICES = [
     "ssh",
-    "ufw",
-    "nginx",
-    "apache2",
-    "docker",
+    "AdGuardHome",
     "adguard-home",
-    "systemd-resolved",
-    "cron",
-    "fail2ban",
-    "mysql",
-    "mariadb",
-    "postgresql",
-    "redis",
+    "server-panel",
     "server-monitor",
-    "tailscaled"
+    "cron",
+    "systemd-resolved",
+    "nginx",
+    "ufw",
+    "docker",
+    "fail2ban",
+    "tailscaled",
+    "n8n"
 ]
+
+SERVICE_PORTS = {
+    "ssh": 22,
+    "AdGuardHome": "53, 8081",
+    "adguard-home": "53, 8081",
+    "nginx": "80, 443",
+    "server-panel": 8000,
+    "server-monitor": 8000,
+    "n8n": 5678,
+    "systemd-resolved": 53
+}
 
 def format_systemd_uptime(active_enter_timestamp: str) -> str:
     """Extrai ou formata tempo ativo a partir do ActiveEnterTimestamp do systemd."""
@@ -43,7 +52,7 @@ def get_systemd_service_status(service_name: str) -> Dict[str, Any]:
         result = subprocess.run(
             [
                 "systemctl", "show", unit_name,
-                "--property=ActiveState,SubState,LoadState,ActiveEnterTimestamp,CPUUsageNSec,MemoryCurrent"
+                "--property=ActiveState,SubState,LoadState,UnitFileState,MainPID,Description,ActiveEnterTimestamp,CPUUsageNSec,MemoryCurrent"
             ],
             capture_output=True,
             text=True,
@@ -59,20 +68,33 @@ def get_systemd_service_status(service_name: str) -> Dict[str, Any]:
         load_state = props.get("LoadState", "not-found")
         active_state = props.get("ActiveState", "inactive")
         sub_state = props.get("SubState", "dead")
+        unit_file_state = props.get("UnitFileState", "disabled")
+        is_enabled = unit_file_state == "enabled"
+        main_pid = int(props.get("MainPID", "0")) if props.get("MainPID", "").isdigit() else None
+        if main_pid == 0:
+            main_pid = None
+        description = props.get("Description", "")
         
         # Se o serviço não existe/não foi instalado
         if load_state == "not-found":
             return {
                 "name": clean_name.replace(".service", ""),
+                "nome": clean_name.replace(".service", ""),
                 "status": "OFFLINE",
+                "ativo": False,
+                "habilitado_boot": False,
                 "installed": False,
+                "pid": None,
+                "descricao": "Serviço não instalado",
+                "porta": SERVICE_PORTS.get(clean_name.replace(".service", ""), None),
                 "cpu": "N/D",
                 "memory": "N/D",
                 "uptime": "Não instalado"
             }
 
         # Mapeamento do status para as 3 categorias obrigatórias
-        if active_state == "active" and sub_state in ["running", "listening"]:
+        is_active = (active_state == "active" and sub_state in ["running", "listening"])
+        if is_active:
             display_status = "ONLINE"
         elif active_state == "failed" or sub_state == "failed":
             display_status = "ERRO"
@@ -103,20 +125,36 @@ def get_systemd_service_status(service_name: str) -> Dict[str, Any]:
         elif display_status == "ERRO":
             uptime_display = "Falhou"
 
+        svc_short = clean_name.replace(".service", "")
         return {
-            "name": clean_name.replace(".service", ""),
+            "name": svc_short,
+            "nome": svc_short,
             "status": display_status,
+            "ativo": is_active,
+            "habilitado_boot": is_enabled,
             "installed": True,
             "sub_state": sub_state,
+            "pid": main_pid,
+            "tempo_ativo": uptime_display,
+            "ultima_inicializacao": active_time if active_time and active_time != "n/a" else "N/D",
+            "descricao": description or f"Serviço {svc_short}",
+            "porta": SERVICE_PORTS.get(svc_short, None),
             "cpu": cpu_str,
             "memory": memory_str,
             "uptime": uptime_display
         }
     except Exception as e:
+        svc_short = clean_name.replace(".service", "")
         return {
-            "name": clean_name.replace(".service", ""),
+            "name": svc_short,
+            "nome": svc_short,
             "status": "OFFLINE",
+            "ativo": False,
+            "habilitado_boot": False,
             "installed": False,
+            "pid": None,
+            "descricao": "Erro ao consultar serviço",
+            "porta": SERVICE_PORTS.get(svc_short, None),
             "cpu": "N/D",
             "memory": "N/D",
             "uptime": "Indisponível"

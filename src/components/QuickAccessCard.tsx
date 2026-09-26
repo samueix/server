@@ -322,7 +322,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <div className="flex items-center gap-1.5 text-[10px] font-sans font-semibold text-blue-300">
                     <span className="px-1.5 py-0.2 rounded bg-blue-500/20 border border-blue-500/30">IPv6</span>
-                    <span>ssh samuel@[2804:2d5c:a1:897e:5ecd:5bff:fe5a:7445]</span>
+                    <span>ssh samuel@[{SERVER_IPV6}]</span>
                   </div>
                   <button
                     onClick={() => copyToClipboard(ipv6SshCmd, 'ssh-ipv6')}

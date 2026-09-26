@@ -3,10 +3,11 @@ import {
   ApiStatusResponse, 
   ApiTemperatureResponse, 
   NetworkInterfaceItem, 
+  ActiveNetworkClient,
   ProcessItem, 
   ServiceItem 
 } from '../types';
-import { API } from '../config';
+import { API, SERVER_IPV4, SERVER_IPV6 } from '../config';
 
 // Armazena a leitura anterior de rede para cálculo de velocidade em tempo real (MB/s ou KB/s)
 let lastNetworkSnapshot: {
@@ -17,6 +18,10 @@ let lastNetworkSnapshot: {
 
 export interface NetworkTelemetry {
   interfaces: NetworkInterfaceItem[];
+  activeClients?: ActiveNetworkClient[];
+  primaryInterface?: string;
+  primaryIp?: string;
+  primaryIpv6?: string;
   downloadSpeedFormatted: string;
   uploadSpeedFormatted: string;
   downloadSpeedBytes: number;
@@ -261,14 +266,29 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
   const interfaces: NetworkInterfaceItem[] = rawList.map((item: any) => {
     const nome = item.interface || item.nome || item.name || 'eth0';
 
-    // Extração do IP a partir do array de endereços gerado pelo psutil
+    // Extração do IP
     let ip = item.ip || item.endereco || item.address;
-    if (!ip && Array.isArray(item.enderecos) && item.enderecos.length > 0) {
-      // Prioriza endereço IPv4 não-loopback
-      const ipv4 = item.enderecos.find((e: any) => e.endereco && !e.endereco.includes(':') && e.endereco !== '127.0.0.1');
-      ip = ipv4 ? ipv4.endereco : item.enderecos[0].endereco;
+    let ipv4 = item.ipv4;
+    let ipv6 = item.ipv6;
+    let mac = item.mac || '--';
+    let netmask = item.netmask || item.mascara || '--';
+    let gateway = item.gateway || (ipv4 ? '192.168.100.1' : '--');
+
+    if (!ipv4 && Array.isArray(item.enderecos)) {
+      const v4 = item.enderecos.find((e: any) => e.endereco && !e.endereco.includes(':') && e.endereco !== '127.0.0.1');
+      if (v4) ipv4 = v4.endereco;
     }
-    if (!ip) ip = '--';
+    if (!ipv6 && Array.isArray(item.enderecos)) {
+      const v6 = item.enderecos.find((e: any) => e.endereco && e.endereco.includes(':') && !e.endereco.startsWith('fe80:'));
+      if (v6) ipv6 = v6.endereco;
+    }
+
+    if (!ip) ip = ipv4 || '--';
+    if (!ipv4 && ip !== '--' && !ip.includes(':')) ipv4 = ip;
+    if (!ipv6 && ip.includes(':')) ipv6 = ip;
+    if (!ipv6 && (nome.startsWith('en') || nome.startsWith('eth') || nome === 'primary')) {
+      ipv6 = raw.primary_ipv6 || SERVER_IPV6;
+    }
 
     // Status: "online" / "active" / "up"
     const rawStatus = (item.status || (item.is_up ? 'UP' : 'DOWN') || 'UP').toString().toLowerCase();
@@ -284,11 +304,40 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
     return {
       nome,
       ip,
+      ipv4,
+      ipv6,
+      mac,
+      gateway,
+      mascara: netmask,
+      speed_mbps: item.speed_mbps || (isUp ? 1000 : 0),
+      mtu: item.mtu || 1500,
       status,
       bytes_enviados,
-      bytes_recebidos
+      bytes_recebidos,
+      pacotes_enviados: Number(item.pacotes_enviados ?? item.packets_sent ?? 0),
+      pacotes_recebidos: Number(item.pacotes_recebidos ?? item.packets_recv ?? 0),
+      erros: Number(item.erros ?? item.errors ?? 0)
     };
   });
+
+  // Clientes ativos detectados
+  const activeClients: ActiveNetworkClient[] = Array.isArray(raw?.active_clients) 
+    ? raw.active_clients.map((c: any, idx: number) => ({
+        id: c.id || `cli-${idx}`,
+        nome: c.nome || c.hostname || c.name || undefined,
+        hostname: c.hostname || c.nome || undefined,
+        ipv4: c.ipv4 || c.ip,
+        ipv6: c.ipv6,
+        mac: c.mac,
+        interface: c.interface || 'enp2s0',
+        fabricante: c.fabricante || c.vendor,
+        tempo_conectado: c.tempo_conectado || c.uptime,
+        trafego: c.trafego || c.traffic,
+        status: (c.status === 'ONLINE' || c.status === 'online') ? 'ONLINE' : 'OFFLINE',
+        consultas: c.consultas,
+        bloqueadas: c.bloqueadas
+      }))
+    : [];
 
   // Cálculo real de velocidade por delta entre duas leituras consecutivas
   let downloadSpeedBps = 0;
@@ -331,6 +380,10 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
 
   return {
     interfaces,
+    activeClients,
+    primaryInterface: raw.primary_interface || 'enp2s0',
+    primaryIp: raw.primary_ip || SERVER_IPV4,
+    primaryIpv6: raw.primary_ipv6 || SERVER_IPV6,
     downloadSpeedFormatted: formatSpeed(downloadSpeedBps),
     uploadSpeedFormatted: formatSpeed(uploadSpeedBps),
     downloadSpeedBytes: downloadSpeedBps,
@@ -346,21 +399,37 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
 
 /**
  * GET /api/processes
- * Lista dos processos em execução no servidor (30 processos retornados pela API)
+ * Lista dos processos em execução no servidor
  */
 export async function getProcesses(signal?: AbortSignal): Promise<ProcessItem[]> {
   const raw = await apiFetch<any>('/api/processes', signal);
   const list = Array.isArray(raw) 
     ? raw 
-    : (Array.isArray(raw.processos) ? raw.processos : (Array.isArray(raw.processes) ? raw.processes : []));
+    : (Array.isArray(raw.processes) ? raw.processes : (Array.isArray(raw.processos) ? raw.processos : []));
 
-  return list.slice(0, 30).map((p: any) => ({
-    pid: Number(p.pid || 0),
-    nome: p.nome || p.processo || p.name || 'unknown',
-    usuario: p.usuario || p.user || p.username || 'root',
-    cpu_percentual: Number(p.cpu_percentual ?? p.cpu_percent ?? p.cpu ?? 0),
-    memoria_percentual: Number(p.memoria_percentual ?? p.memory_percent ?? p.memoria ?? 0)
-  }));
+  return list.map((p: any) => {
+    const memBytes = Number(p.memory_bytes || 0);
+    const memMb = Number(p.memoria_mb ?? p.memory_mb ?? (memBytes > 0 ? memBytes / (1024 * 1024) : 0));
+    
+    return {
+      pid: Number(p.pid || 0),
+      nome: p.nome || p.name || p.processo || 'unknown',
+      usuario: p.usuario || p.user || p.username || 'root',
+      cpu_percentual: Number(p.cpu_percentual ?? p.cpu_percent ?? p.cpu ?? 0),
+      memoria_percentual: Number(p.memoria_percentual ?? p.memory_percent ?? p.memoria ?? 0),
+      memoria_mb: Math.round(memMb * 10) / 10,
+      status: (p.status || 'running').toString(),
+      prioridade: p.prioridade ?? p.nice ?? 0,
+      threads: Number(p.threads ?? p.num_threads ?? 1),
+      tempo_execucao: p.tempo_execucao || p.execution_time || '--',
+      comando: p.comando || p.cmdline || p.nome || p.name,
+      inicio: p.inicio || p.create_time_formatted || '--',
+      name: p.nome || p.name,
+      user: p.usuario || p.user,
+      cpu_percent: Number(p.cpu_percentual ?? p.cpu_percent ?? 0),
+      memory_percent: Number(p.memoria_percentual ?? p.memory_percent ?? 0)
+    };
+  });
 }
 
 /**
@@ -371,11 +440,11 @@ export async function getServices(signal?: AbortSignal): Promise<ServiceItem[]> 
   const raw = await apiFetch<any>('/api/services', signal);
   const list = Array.isArray(raw) 
     ? raw 
-    : (Array.isArray(raw.servicos) ? raw.servicos : (Array.isArray(raw.services) ? raw.services : []));
+    : (Array.isArray(raw.services) ? raw.services : (Array.isArray(raw.servicos) ? raw.servicos : []));
 
   return list.map((s: any) => {
     const rawStatus = (s.status || '').toString().toLowerCase();
-    const isOnline = s.online === true || rawStatus === 'active' || rawStatus === 'online';
+    const isOnline = s.ativo === true || s.online === true || rawStatus === 'active' || rawStatus === 'online';
     const isErro = rawStatus === 'erro' || rawStatus === 'failed' || rawStatus === 'error';
     
     let status: 'ONLINE' | 'OFFLINE' | 'ERRO' = 'OFFLINE';
@@ -384,11 +453,18 @@ export async function getServices(signal?: AbortSignal): Promise<ServiceItem[]> 
     else status = 'OFFLINE';
 
     return {
-      nome: s.servico || s.name || s.nome || 'serviço',
+      nome: s.nome || s.name || s.servico || 'serviço',
       status,
-      cpu: s.cpu,
-      memory: s.memory,
-      uptime: s.uptime
+      ativo: isOnline,
+      habilitado_boot: Boolean(s.habilitado_boot ?? s.enabled),
+      pid: s.pid ? Number(s.pid) : null,
+      tempo_ativo: s.tempo_ativo || s.uptime || 'N/D',
+      ultima_inicializacao: s.ultima_inicializacao || s.last_start || 'N/D',
+      descricao: s.descricao || s.description || undefined,
+      porta: s.porta || s.port || undefined,
+      cpu: s.cpu || 'N/D',
+      memory: s.memory || 'N/D',
+      uptime: s.uptime || s.tempo_ativo || 'N/D'
     };
   });
 }

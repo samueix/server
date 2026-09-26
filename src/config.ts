@@ -14,9 +14,18 @@ export const API = {
 };
 
 export const SERVER_IPV4 = "192.168.100.23";
-export const SERVER_IPV6 = "2804:2d5c:a1:897e:5ecd:5bff:fe5a:7445";
-export const SSH_IPV4_COMMAND = "ssh samuel@192.168.100.23";
-export const SSH_IPV6_COMMAND = "ssh samuel@[2804:2d5c:a1:897e:5ecd:5bff:fe5a:7445]";
+export const SERVER_IPV6 = "2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445";
+export const SSH_USER = "samuel";
+export const SSH_IPV4_COMMAND = `ssh ${SSH_USER}@${SERVER_IPV4}`;
+export const SSH_IPV6_COMMAND = `ssh ${SSH_USER}@[${SERVER_IPV6}]`;
+
+/**
+ * Retorna o comando SSH dinâmico baseado no IPv6 atual detectado ou fallback
+ */
+export function getDynamicSshCommand(ipv6?: string): string {
+  const currentIpv6 = ipv6 && ipv6 !== '--' && ipv6 !== 'N/D' ? ipv6 : SERVER_IPV6;
+  return `ssh ${SSH_USER}@[${currentIpv6}]`;
+}
 
 const STORAGE_KEY = 'server_panel_config_v3';
 

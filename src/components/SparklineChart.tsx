@@ -51,8 +51,33 @@ export const SparklineChart: React.FC<SparklineChartProps> = ({
       return [x, y];
     });
 
-    const pathString = coords.map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${pt[0].toFixed(1)} ${pt[1].toFixed(1)}`).join(' ');
-    const areaString = `${pathString} L ${width} ${height} L 0 ${height} Z`;
+    // Smooth wave-like cubic Bézier curve calculation
+    // Mantém precisão absoluta passando pelos pontos reais sem inventar valores
+    let pathString = '';
+    if (coords.length <= 1) {
+      pathString = coords.length === 1 ? `M 0 ${coords[0][1]} L ${width} ${coords[0][1]}` : '';
+    } else if (coords.length === 2) {
+      pathString = `M ${coords[0][0].toFixed(1)} ${coords[0][1].toFixed(1)} L ${coords[1][0].toFixed(1)} ${coords[1][1].toFixed(1)}`;
+    } else {
+      pathString = `M ${coords[0][0].toFixed(1)} ${coords[0][1].toFixed(1)}`;
+      for (let i = 0; i < coords.length - 1; i++) {
+        const p0 = coords[Math.max(0, i - 1)];
+        const p1 = coords[i];
+        const p2 = coords[i + 1];
+        const p3 = coords[Math.min(coords.length - 1, i + 2)];
+
+        // Fator de suavização (onda suave e fluida)
+        const tension = 0.2;
+        const cp1x = p1[0] + (p2[0] - p0[0]) * tension;
+        const cp1y = p1[1] + (p2[1] - p0[1]) * tension;
+        const cp2x = p2[0] - (p3[0] - p1[0]) * tension;
+        const cp2y = p2[1] - (p3[1] - p1[1]) * tension;
+
+        pathString += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+      }
+    }
+
+    const areaString = pathString ? `${pathString} L ${width} ${height} L 0 ${height} Z` : '';
 
     return {
       points: pathString,

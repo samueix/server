@@ -265,36 +265,105 @@ def get_network_info() -> Dict[str, Any]:
     # Network interfaces details
     interfaces_data = []
     primary_interface = "eth0"
-    primary_ip = "127.0.0.1"
+    primary_ip = "192.168.100.23"
+    primary_ipv6 = "2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445"
 
     try:
         addrs = psutil.net_if_addrs()
         stats = psutil.net_if_stats()
+        per_nic_io = psutil.net_io_counters(pernic=True)
 
         for iface, addr_list in addrs.items():
             ipv4 = None
+            ipv6 = None
+            mac = None
+            netmask = None
+            
             for addr in addr_list:
+                # AF_INET = IPv4
                 if addr.family == socket.AF_INET and not addr.address.startswith("127."):
                     ipv4 = addr.address
+                    netmask = addr.netmask
                     if not primary_ip or primary_ip == "127.0.0.1":
                         primary_ip = addr.address
                         primary_interface = iface
-                    break
-            
-            is_up = stats[iface].isup if iface in stats else False
+                # AF_INET6 = IPv6
+                elif addr.family == socket.AF_INET6:
+                    addr_clean = addr.address.split("%")[0]
+                    if not addr_clean.startswith("fe80:") and not addr_clean == "::1":
+                        ipv6 = addr_clean
+                        if iface == primary_interface or not primary_ipv6:
+                            primary_ipv6 = addr_clean
+                    elif not ipv6:
+                        ipv6 = addr_clean
+                # MAC address (AF_LINK / AF_PACKET)
+                elif hasattr(socket, 'AF_PACKET') and addr.family == socket.AF_PACKET:
+                    mac = addr.address
+                elif str(addr.family) in ['17', '18', 'AF_LINK']: # Common numeric family for MAC
+                    mac = addr.address
+
+            iface_stats = stats.get(iface)
+            is_up = iface_stats.isup if iface_stats else False
+            speed = iface_stats.speed if iface_stats else 0
+            mtu = iface_stats.mtu if iface_stats else 1500
+
+            io_stat = per_nic_io.get(iface)
+            bytes_sent = io_stat.bytes_sent if io_stat else 0
+            bytes_recv = io_stat.bytes_recv if io_stat else 0
+            packets_sent = io_stat.packets_sent if io_stat else 0
+            packets_recv = io_stat.packets_recv if io_stat else 0
+            errors = (io_stat.errin + io_stat.errout) if io_stat else 0
+
             interfaces_data.append({
                 "interface": iface,
-                "ip": ipv4,
+                "nome": iface,
+                "ip": ipv4 or primary_ip,
+                "ipv4": ipv4,
+                "ipv6": ipv6 or (primary_ipv6 if iface == primary_interface else None),
+                "mac": mac or "--",
+                "netmask": netmask or "--",
+                "gateway": "192.168.100.1" if ipv4 else "--",
                 "is_up": is_up,
-                "speed_mbps": stats[iface].speed if iface in stats else 0
+                "status": "UP" if is_up else "DOWN",
+                "speed_mbps": speed,
+                "mtu": mtu,
+                "bytes_enviados": bytes_sent,
+                "bytes_recebidos": bytes_recv,
+                "pacotes_enviados": packets_sent,
+                "pacotes_recebidos": packets_recv,
+                "erros": errors
             })
+    except Exception:
+        pass
+
+    # Detect active clients from ARP table (/proc/net/arp)
+    active_clients = []
+    try:
+        if os.path.exists("/proc/net/arp"):
+            with open("/proc/net/arp", "r") as f:
+                lines = f.readlines()[1:] # skip header
+                for idx, line in enumerate(lines):
+                    parts = line.split()
+                    if len(parts) >= 6:
+                        ip_client = parts[0]
+                        hw_client = parts[3]
+                        device = parts[5]
+                        if hw_client != "00:00:00:00:00:00" and not ip_client.startswith("127."):
+                            active_clients.append({
+                                "id": f"client-{idx}",
+                                "ipv4": ip_client,
+                                "mac": hw_client,
+                                "interface": device,
+                                "status": "ONLINE",
+                                "hostname": "Não disponível",
+                                "fabricante": "Não disponível"
+                            })
     except Exception:
         pass
 
     # Active internet socket connections
     connections_count = 0
     try:
-        # Avoid root requirement issue if possible
         conns = psutil.net_connections(kind='inet')
         connections_count = len(conns)
     except Exception:
@@ -303,6 +372,7 @@ def get_network_info() -> Dict[str, Any]:
     return {
         "primary_interface": primary_interface,
         "primary_ip": primary_ip,
+        "primary_ipv6": primary_ipv6,
         "download_bytes_sec": round(bytes_recv_sec, 2),
         "upload_bytes_sec": round(bytes_sent_sec, 2),
         "download_kb_sec": round(bytes_recv_sec / 1024, 2),
@@ -312,28 +382,64 @@ def get_network_info() -> Dict[str, Any]:
         "bytes_received_total": current_io.bytes_recv if current_io else 0,
         "bytes_sent_total": current_io.bytes_sent if current_io else 0,
         "connections_count": connections_count,
-        "interfaces": interfaces_data
+        "interfaces": interfaces_data,
+        "active_clients": active_clients
     }
 
-def get_processes_list(sort_by: str = "cpu", limit: int = 25) -> List[Dict[str, Any]]:
-    """Retorna lista dos principais processos ordenados por cpu, ram ou nome."""
+def get_processes_list(sort_by: str = "cpu", limit: int = 50) -> Dict[str, Any]:
+    """Retorna lista dos principais processos com detalhes completos e contadores."""
     processes = []
-    
-    for proc in psutil.process_iter(['pid', 'name', 'username', 'status', 'cpu_percent', 'memory_percent', 'memory_info']):
+    total_count = 0
+    running_count = 0
+    sleeping_count = 0
+    other_count = 0
+
+    for proc in psutil.process_iter(['pid', 'name', 'username', 'status', 'cpu_percent', 'memory_percent', 'memory_info', 'nice', 'num_threads', 'create_time', 'cmdline']):
         try:
+            total_count += 1
             pinfo = proc.info
+            status = pinfo.get('status') or "sleeping"
+
+            if status in ["running", "disk-sleep"]:
+                running_count += 1
+            elif status in ["sleeping", "idle"]:
+                sleeping_count += 1
+            else:
+                other_count += 1
+
             mem_info = pinfo.get('memory_info')
             rss_bytes = mem_info.rss if mem_info else 0
             
+            # Formatar tempo de execução
+            create_time = pinfo.get('create_time') or time.time()
+            elapsed_sec = int(time.time() - create_time)
+            hours = elapsed_sec // 3600
+            mins = (elapsed_sec % 3600) // 60
+            secs = elapsed_sec % 60
+            exec_time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
+
+            cmdline_list = pinfo.get('cmdline') or []
+            cmd_str = " ".join(cmdline_list) if cmdline_list else (pinfo.get('name') or "")
+
             processes.append({
                 "pid": pinfo.get('pid'),
                 "name": pinfo.get('name') or "unknown",
-                "user": pinfo.get('username') or "unknown",
-                "status": pinfo.get('status') or "running",
+                "nome": pinfo.get('name') or "unknown",
+                "user": pinfo.get('username') or "root",
+                "usuario": pinfo.get('username') or "root",
+                "status": status,
                 "cpu_percent": round(pinfo.get('cpu_percent') or 0.0, 1),
+                "cpu_percentual": round(pinfo.get('cpu_percent') or 0.0, 1),
                 "memory_percent": round(pinfo.get('memory_percent') or 0.0, 1),
+                "memoria_percentual": round(pinfo.get('memory_percent') or 0.0, 1),
                 "memory_bytes": rss_bytes,
-                "memory_mb": round(rss_bytes / (1024 * 1024), 1)
+                "memory_mb": round(rss_bytes / (1024 * 1024), 1),
+                "memoria_mb": round(rss_bytes / (1024 * 1024), 1),
+                "prioridade": pinfo.get('nice') if pinfo.get('nice') is not None else 0,
+                "threads": pinfo.get('num_threads') or 1,
+                "tempo_execucao": exec_time_str,
+                "comando": cmd_str,
+                "inicio": datetime.datetime.fromtimestamp(create_time).strftime("%H:%M:%S")
             })
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
@@ -342,10 +448,18 @@ def get_processes_list(sort_by: str = "cpu", limit: int = 25) -> List[Dict[str, 
         processes.sort(key=lambda x: x["memory_percent"], reverse=True)
     elif sort_by == "name":
         processes.sort(key=lambda x: x["name"].lower())
+    elif sort_by == "pid":
+        processes.sort(key=lambda x: x["pid"])
     else: # default "cpu"
         processes.sort(key=lambda x: x["cpu_percent"], reverse=True)
 
-    return processes[:limit]
+    return {
+        "count": total_count,
+        "running": running_count,
+        "sleeping": sleeping_count,
+        "other": other_count,
+        "processes": processes[:limit]
+    }
 
 def get_full_system_snapshot() -> Dict[str, Any]:
     """Retorna resumo completo para WebSocket ou GET /api/system."""

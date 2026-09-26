@@ -8,6 +8,7 @@ import {
   Terminal, 
   Server,
   Shield,
+  BookOpen,
   X
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
@@ -38,8 +39,9 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'services', label: 'Serviços', icon: ShieldCheck },
   { id: 'network', label: 'Rede', icon: Network },
   { id: 'adguard', label: 'AdGuard Home', icon: Shield },
-  { id: 'commands', label: 'Comandos', icon: Terminal, badge: 'Em breve' },
-  { id: 'system', label: 'Sistema', icon: Server }
+  { id: 'commands', label: 'Comandos', icon: Terminal },
+  { id: 'system', label: 'Sistema', icon: Server },
+  { id: 'documentation', label: 'Documentação', icon: BookOpen }
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({

@@ -10,7 +10,8 @@ export type NavigationTab =
   | 'adguard'
   | 'adguard_ai'
   | 'commands' 
-  | 'system';
+  | 'system'
+  | 'documentation';
 
 export type DomainRiskLevel = 'baixo' | 'médio' | 'alto' | 'crítico' | 'desconhecido';
 
@@ -143,6 +144,32 @@ export interface NetworkInterfaceItem {
   status: string; // 'UP', 'DOWN', etc.
   bytes_enviados: number;
   bytes_recebidos: number;
+  ipv4?: string;
+  ipv6?: string;
+  mac?: string;
+  gateway?: string;
+  mascara?: string;
+  speed_mbps?: number;
+  mtu?: number;
+  pacotes_recebidos?: number;
+  pacotes_enviados?: number;
+  erros?: number;
+}
+
+export interface ActiveNetworkClient {
+  id: string;
+  nome?: string;
+  hostname?: string;
+  ipv4?: string;
+  ipv6?: string;
+  mac?: string;
+  interface?: string;
+  fabricante?: string;
+  tempo_conectado?: string;
+  trafego?: string;
+  status: 'ONLINE' | 'OFFLINE';
+  consultas?: number;
+  bloqueadas?: number;
 }
 
 export interface ProcessItem {
@@ -151,18 +178,30 @@ export interface ProcessItem {
   usuario: string;
   cpu_percentual: number;
   memoria_percentual: number;
+  memoria_mb: number;
+  status: string;
+  prioridade?: number | string;
+  threads?: number;
+  tempo_execucao?: string;
+  comando?: string;
+  inicio?: string;
   // Campos legados opcionais para compatibilidade
   name?: string;
   user?: string;
   cpu_percent?: number;
   memory_percent?: number;
-  memory_mb?: number;
-  status?: string;
 }
 
 export interface ServiceItem {
   nome: string;
   status: 'ONLINE' | 'OFFLINE' | 'ERRO';
+  ativo?: boolean;
+  habilitado_boot?: boolean;
+  pid?: number | null;
+  tempo_ativo?: string;
+  ultima_inicializacao?: string;
+  descricao?: string;
+  porta?: number | string;
   cpu?: string;
   memory?: string;
   uptime?: string;

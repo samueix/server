@@ -87,6 +87,70 @@ async function startServer() {
     }
   });
 
+  // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/server, /api/status, etc.)
+  app.all('/api/*', async (req, res, next) => {
+    // Rotas tratadas internamente pelo server.ts
+    const internalPaths = [
+      '/api/health',
+      '/api/adguard/config',
+      '/api/adguard/status',
+      '/api/adguard/stats',
+      '/api/adguard/sync',
+      '/api/adguard/querylog',
+      '/api/adguard/domains',
+      '/api/adguard/analyze',
+      '/api/adguard/analyze-batch'
+    ];
+    if (internalPaths.includes(req.path)) {
+      return next();
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+
+    const subPath = (req.params as any)[0] || '';
+    const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    
+    // Tenta primeiro conectar no IP local do Ubuntu Server, ou localhost se rodando na mesma máquina
+    const targetUrls = [
+      `http://127.0.0.1:8000/api/${subPath}${queryStr}`,
+      `http://192.168.100.23:8000/api/${subPath}${queryStr}`
+    ];
+
+    for (const targetUrl of targetUrls) {
+      try {
+        const response = await fetch(targetUrl, {
+          method: req.method,
+          headers: {
+            'Accept': 'application/json',
+            'X-API-Key': 'troque-essa-chave-secreta-em-producao',
+            ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
+          },
+          body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+          signal: AbortSignal.timeout(2000)
+        });
+
+        const text = await response.text();
+        res.status(response.status);
+        res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+        return res.send(text);
+      } catch {
+        // Tenta próxima URL
+      }
+    }
+
+    // Se o backend estiver offline na rede, retorna 503 para o frontend detectar offline sem inventar dados
+    return res.status(503).json({
+      status: 'OFFLINE',
+      detail: 'Servidor Ubuntu offline ou inacessível na porta :8000'
+    });
+  });
+
   // Rota Nginx-compatible /adguard-api/* (Injeta autenticação automaticamente e libera CORS)
   app.all('/adguard-api/*', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');

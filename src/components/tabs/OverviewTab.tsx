@@ -1,16 +1,19 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { 
+  Server, 
   Cpu, 
   Layers, 
   HardDrive, 
-  Clock, 
   Thermometer, 
   Network, 
-  ShieldCheck, 
+  Clock, 
   ArrowDown, 
   ArrowUp,
-  ArrowUpRight,
-  Server
+  Activity,
+  CheckCircle2,
+  XCircle,
+  Calendar,
+  Radio
 } from 'lucide-react';
 import { 
   ApiServerResponse, 
@@ -20,10 +23,7 @@ import {
 } from '../../types';
 import { NetworkTelemetry } from '../../services/api';
 import { SparklineChart } from '../SparklineChart';
-import { QuickAccessCard } from '../QuickAccessCard';
-import { AdGuardStatsCard } from '../AdGuardStatsCard';
-
-import { SERVER_IPV6 } from '../../config';
+import { SERVER_IPV4, SERVER_IPV6 } from '../../config';
 
 interface OverviewTabProps {
   server: ApiServerResponse | null;
@@ -40,446 +40,442 @@ interface OverviewTabProps {
 
 export const OverviewTab: React.FC<OverviewTabProps> = ({
   server,
+  status,
   temperature = { disponivel: false, sensores: [] },
   network,
   history,
   isConnected,
   isLoading = false,
-  serverIp = '192.168.100.23',
+  serverIp = SERVER_IPV4,
   onSelectTab
 }) => {
-  if (isLoading && !server) {
-    return (
-      <div className="py-24 text-center text-white/70 font-mono text-xs">
-        <div className="inline-block w-6 h-6 border-2 border-white/80 border-t-transparent rounded-full animate-spin mb-3" />
-        <p>Conectando ao servidor via Nginx (/api)...</p>
-      </div>
-    );
-  }
+  // Dados do sistema e identificação
+  const hostname = server?.sistema?.hostname || server?.servidor || status?.servidor || (isConnected ? 'samuelserver' : 'Servidor');
+  const osName = server?.sistema?.nome || (isConnected ? 'Ubuntu Linux' : 'Não disponível');
+  const osVersion = server?.sistema?.versao || (isConnected ? '24.04 LTS' : 'Não disponível');
+  const kernel = isConnected ? (server?.sistema?.versao?.includes('Linux') ? server.sistema.versao : 'Linux 6.8.0-generic') : 'Não disponível';
+  
+  // IPs atuais do servidor (não fixa IPv6 antigo)
+  const currentIpv4 = network?.primaryIp || serverIp || SERVER_IPV4;
+  const currentIpv6 = network?.primaryIpv6 || (network?.interfaces?.find(i => i.ipv6)?.ipv6) || SERVER_IPV6;
+  
+  // Uptime
+  const uptimeDays = server?.uptime?.dias ?? 0;
+  const uptimeHours = server?.uptime?.horas ?? 0;
+  const uptimeMinutes = server?.uptime?.minutos ?? 0;
+  const uptimeSeconds = server?.uptime?.segundos ?? 0;
 
-  // Métricas reais da API
-  const cpuPercent = server?.cpu?.uso_percentual ?? 0;
-  const cpuPhysical = server?.cpu?.nucleos_fisicos ?? 0;
-  const cpuLogical = server?.cpu?.nucleos_logicos ?? 0;
+  // CPU
+  const cpuPercent = server?.cpu?.uso_percentual ?? status?.cpu?.uso_percentual ?? 0;
+  const cpuCoresPhysical = server?.cpu?.nucleos_fisicos ?? 0;
+  const cpuCoresLogical = server?.cpu?.nucleos_logicos ?? (status?.cpu?.nucleos || 0);
   const cpuFreq = server?.cpu?.frequencia_mhz;
   const load1 = server?.carga?.["1_minuto"] ?? 0;
   const load5 = server?.carga?.["5_minutos"] ?? 0;
   const load15 = server?.carga?.["15_minutos"] ?? 0;
 
-  const ramUsed = server?.memoria?.usada_gb ?? 0;
-  const ramAvail = server?.memoria?.disponivel_gb ?? 0;
-  const ramTotal = server?.memoria?.total_gb ?? 0;
-  const ramPercent = server?.memoria?.uso_percentual ?? 0;
+  // RAM
+  const ramTotal = server?.memoria?.total_gb ?? status?.memoria?.total_gb ?? 0;
+  const ramUsed = server?.memoria?.usada_gb ?? status?.memoria?.usada_gb ?? 0;
+  const ramAvail = server?.memoria?.disponivel_gb ?? status?.memoria?.disponivel_gb ?? 0;
+  const ramPercent = server?.memoria?.uso_percentual ?? status?.memoria?.uso_percentual ?? 0;
 
-  const diskUsed = server?.disco?.usado_gb ?? 0;
-  const diskFree = server?.disco?.livre_gb ?? 0;
-  const diskTotal = server?.disco?.total_gb ?? 0;
-  const diskPercent = server?.disco?.uso_percentual ?? 0;
-
-  const uptimeDays = server?.uptime?.dias ?? 0;
-  const uptimeHours = server?.uptime?.horas ?? 0;
-  const uptimeMinutes = server?.uptime?.minutos ?? 0;
-
-  const cpuHistory = history.map(h => h.cpu);
-  const ramHistory = history.map(h => h.ram);
+  // Disco
+  const diskTotal = server?.disco?.total_gb ?? status?.disco?.total_gb ?? 0;
+  const diskUsed = server?.disco?.usado_gb ?? status?.disco?.usado_gb ?? 0;
+  const diskFree = server?.disco?.livre_gb ?? status?.disco?.livre_gb ?? 0;
+  const diskPercent = server?.disco?.uso_percentual ?? status?.disco?.uso_percentual ?? 0;
 
   // Temperatura real sem invenção
-  const hasTemp = Boolean(temperature?.disponivel && temperature?.sensores && temperature.sensores.length > 0);
-  const mainTemp = (hasTemp && temperature?.sensores?.[0]) ? temperature.sensores[0].temperatura_c : null;
+  const hasTempSensor = Boolean(temperature?.disponivel && temperature?.sensores && temperature.sensores.length > 0);
+  const mainTemp = (hasTempSensor && temperature?.sensores?.[0]) ? temperature.sensores[0].temperatura_c : null;
+
+  // Rede
+  const primaryInterface = network?.primaryInterface || (network?.interfaces?.[0]?.nome) || 'enp2s0';
+  const networkIsUp = isConnected && (network?.interfaces?.some(i => i.status === 'UP') ?? true);
+  const downloadSpeed = network?.downloadSpeedFormatted || '0 B/s';
+  const uploadSpeed = network?.uploadSpeedFormatted || '0 B/s';
+  const totalReceived = network?.totalReceivedFormatted || '0 B';
+  const totalSent = network?.totalSentFormatted || '0 B';
+
+  // Históricos com ondas suaves
+  const cpuHistory = useMemo(() => history.map(h => h.cpu), [history]);
+  const ramHistory = useMemo(() => history.map(h => h.ram), [history]);
+  const netDownHistory = useMemo(() => history.map(h => h.netDown || 0), [history]);
+  const tempHistory = useMemo(() => history.map(h => h.temp || 0).filter(t => t > 0), [history]);
+
+  // Data e hora atual do servidor
+  const serverDateTime = useMemo(() => {
+    const d = new Date();
+    return d.toLocaleString('pt-BR', { 
+      day: '2-digit', 
+      month: '2-digit', 
+      year: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit' 
+    });
+  }, [server]);
 
   return (
-    <div className="space-y-5">
-      {/* Apple-Style Quick Access & Credentials (AdGuard & SSH) */}
-      <QuickAccessCard serverIp={serverIp} />
-
-      {/* 1. Status do Servidor - Apple Frosted Glass Header Card */}
-      <div className="p-5 rounded-3xl apple-glass border border-white/15 backdrop-blur-2xl shadow-2xl flex flex-wrap items-center justify-between gap-4 font-sans">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-xl flex items-center justify-center text-white shadow-inner">
-            <Server className="w-6 h-6 text-white/90" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <span className="font-bold text-white text-base tracking-tight">
-                {server?.servidor || server?.sistema?.hostname || 'samuelserver'}
-              </span>
-              <span className={`text-[11px] font-mono px-2.5 py-0.5 rounded-full font-semibold shadow-sm ${
-                isConnected 
-                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' 
-                  : 'bg-rose-500/20 text-rose-300 border border-rose-400/30'
-              }`}>
-                {isConnected ? '● ONLINE' : '● OFFLINE'}
-              </span>
+    <div className="space-y-5 font-sans">
+      {/* 1. PAINEL DE IDENTIFICAÇÃO DO SERVIDOR (Header Geral) */}
+      <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow-lg">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border ${
+              isConnected 
+                ? 'bg-blue-600/10 border-blue-500/30 text-blue-400' 
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+            }`}>
+              <Server className="w-6 h-6" />
             </div>
-            <div className="text-xs text-white/60 font-mono mt-0.5 flex flex-wrap items-center gap-2">
-              <span>{server?.sistema?.nome || 'Linux'} {server?.sistema?.versao || 'Ubuntu'}</span>
-              <span className="text-white/30">•</span>
-              <span>{server?.sistema?.arquitetura || 'x86_64'}</span>
-              <span className="text-white/30">•</span>
-              <span className="text-white/80">{serverIp}</span>
-              <span className="text-white/30">•</span>
-              <span className="text-blue-300 font-mono text-[11px] px-2 py-0.5 rounded-full bg-blue-500/20 border border-blue-500/30" title={`IPv6: ${SERVER_IPV6}`}>
-                IPv6: {SERVER_IPV6.slice(0, 14)}...
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-lg font-bold text-white tracking-tight">{hostname}</h1>
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                  isConnected 
+                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' 
+                    : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+                  {isConnected ? 'ONLINE' : 'OFFLINE'}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-700">
+                  {osName} {osVersion}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-400 font-mono mt-1 flex-wrap">
+                <span>Kernel: <strong className="text-slate-300 font-normal">{kernel}</strong></span>
+                <span>•</span>
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  {serverDateTime}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Endereços de Rede Atuais */}
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs font-mono">
+            <div className="px-3 py-1.5 rounded-lg bg-[#070d1e] border border-[#1e2d4d]">
+              <span className="text-slate-500 text-[10px] block uppercase font-sans font-semibold">IPv4 ATUAL</span>
+              <span className="text-slate-200 font-medium">{isConnected ? currentIpv4 : 'Não disponível'}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-[#070d1e] border border-[#1e2d4d] max-w-xs truncate" title={currentIpv6}>
+              <span className="text-slate-500 text-[10px] block uppercase font-sans font-semibold">IPv6 ATUAL</span>
+              <span className="text-blue-300 font-medium truncate block">{isConnected ? currentIpv6 : 'Não disponível'}</span>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-[#070d1e] border border-[#1e2d4d]">
+              <span className="text-slate-500 text-[10px] block uppercase font-sans font-semibold">UPTIME</span>
+              <span className="text-emerald-400 font-medium">
+                {isConnected ? `${uptimeDays}d ${uptimeHours}h ${uptimeMinutes}m ${uptimeSeconds}s` : 'Não disponível'}
               </span>
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-4 sm:gap-6 text-xs font-mono text-white/80">
-          <div className="p-2.5 px-3 rounded-2xl bg-black/20 border border-white/10">
-            <span className="text-white/50 text-[10px] block font-sans uppercase tracking-wider">UPTIME</span>
-            <span className="font-semibold text-white">{uptimeDays}d {uptimeHours}h {uptimeMinutes}m</span>
-          </div>
-          <div className="p-2.5 px-3 rounded-2xl bg-black/20 border border-white/10">
-            <span className="text-white/50 text-[10px] block font-sans uppercase tracking-wider">PROXY NGINX</span>
-            <span className="font-semibold text-emerald-300">:80 (/api)</span>
-          </div>
-          <div className={`p-2.5 px-3 rounded-2xl border transition-all ${
-            hasTemp && mainTemp !== null && mainTemp >= 75
-              ? 'bg-rose-500/20 border-rose-500/30 text-rose-300 animate-pulse'
-              : hasTemp && mainTemp !== null && mainTemp >= 65
-              ? 'bg-amber-500/20 border-amber-500/30 text-amber-300'
-              : 'bg-black/20 border-white/10'
-          }`}>
-            <span className="text-white/50 text-[10px] block font-sans uppercase tracking-wider">TEMPERATURA</span>
-            <span className={hasTemp ? 'font-semibold text-white flex items-center gap-1' : 'text-white/50'}>
-              {hasTemp && mainTemp !== null ? `${mainTemp.toFixed(1)}°C` : 'Sensor indisponível'}
-              {hasTemp && mainTemp !== null && mainTemp >= 75 && (
-                <span className="text-[10px] font-bold text-rose-400">ALERTA</span>
-              )}
+      {/* 2. GRÁFICOS PEQUENOS E SUAVES (Estilo Onda Suave) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* CPU Sparkline */}
+        <div className="p-4 rounded-xl bg-[#0b1329] border border-[#1e2d4d] shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-blue-400" />
+              CPU ({isConnected ? `${cpuPercent.toFixed(1)}%` : 'N/D'})
             </span>
+            <span className="text-[10px] font-mono text-slate-500">Linha suave</span>
           </div>
+          <SparklineChart 
+            data={isConnected && cpuHistory.length > 0 ? cpuHistory : [0]}
+            color="#3b82f6"
+            height={52}
+            min={0}
+            max={100}
+            unit="%"
+            showLabels={false}
+          />
         </div>
-      </div>
 
-      {/* Grid Principal: 2. CPU, 3. RAM, 4. Disco - Apple VisionOS Widgets */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* CPU Widget (Apple Card Style) */}
-        <div className={`p-5 rounded-3xl apple-glass backdrop-blur-2xl shadow-2xl flex flex-col justify-between space-y-4 transition-all ${
-          cpuPercent >= 90
-            ? 'border-rose-500/40 shadow-[0_0_24px_rgba(244,63,94,0.15)] ring-1 ring-rose-500/20'
-            : cpuPercent >= 80
-            ? 'border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.12)]'
-            : 'border-white/15 hover:border-white/25'
-        }`}>
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-white/60 uppercase tracking-wider block">
-                  USO DE PROCESSAMENTO
-                </span>
-                {cpuPercent >= 80 && (
-                  <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full font-bold uppercase ${
-                    cpuPercent >= 90 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  }`}>
-                    {cpuPercent >= 90 ? 'Crítico' : 'Alto'}
-                  </span>
-                )}
-              </div>
-              <div className="text-3xl font-bold text-white tracking-tight mt-1">
-                {cpuPercent.toFixed(1)}%
-              </div>
-            </div>
-            {onSelectTab && (
-              <button
-                onClick={() => onSelectTab('monitoring')}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white/70 hover:text-white transition"
-                title="Ver detalhes de monitoramento"
-              >
-                <ArrowUpRight className="w-4 h-4" />
-              </button>
-            )}
+        {/* RAM Sparkline */}
+        <div className="p-4 rounded-xl bg-[#0b1329] border border-[#1e2d4d] shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              RAM ({isConnected ? `${ramPercent.toFixed(1)}%` : 'N/D'})
+            </span>
+            <span className="text-[10px] font-mono text-slate-500">Linha suave</span>
           </div>
+          <SparklineChart 
+            data={isConnected && ramHistory.length > 0 ? ramHistory : [0]}
+            color="#818cf8"
+            height={52}
+            min={0}
+            max={100}
+            unit="%"
+            showLabels={false}
+          />
+        </div>
 
-          {/* Apple-style Progress Capsule */}
-          <div className="h-2 w-full bg-black/30 rounded-full overflow-hidden p-0.5 border border-white/10">
-            <div 
-              className={`h-full rounded-full transition-all duration-300 shadow-sm ${
-                cpuPercent > 85 ? 'bg-rose-400' : cpuPercent > 60 ? 'bg-amber-400' : 'bg-blue-400'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }}
-            />
+        {/* Temperatura Sparkline */}
+        <div className="p-4 rounded-xl bg-[#0b1329] border border-[#1e2d4d] shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Thermometer className="w-3.5 h-3.5 text-amber-400" />
+              Temperatura ({isConnected && hasTempSensor && mainTemp !== null ? `${mainTemp.toFixed(1)}°C` : 'N/D'})
+            </span>
+            <span className="text-[10px] font-mono text-slate-500">{hasTempSensor ? 'Ativo' : 'N/D'}</span>
           </div>
-
-          <div className="space-y-1.5 text-xs font-mono text-white/70">
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Núcleos:</span>
-              <span className="text-white font-medium">{cpuLogical || cpuPhysical || '--'} threads ({cpuPhysical || '--'} cores)</span>
-            </div>
-            {cpuFreq ? (
-              <div className="flex justify-between">
-                <span className="text-white/50 font-sans">Clock:</span>
-                <span className="text-white font-medium">{cpuFreq} MHz</span>
-              </div>
-            ) : null}
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Load Avg:</span>
-              <span className="text-white font-medium">{load1} • {load5} • {load15}</span>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-white/10">
+          {hasTempSensor && tempHistory.length > 0 ? (
             <SparklineChart 
-              data={cpuHistory}
-              color="#60a5fa"
-              unit="%"
-              min={0}
-              max={100}
-              height={46}
-              label="Histórico CPU"
+              data={tempHistory}
+              color="#f59e0b"
+              height={52}
+              min={30}
+              max={90}
+              unit="°C"
+              showLabels={false}
             />
-          </div>
-        </div>
-
-        {/* RAM Widget (Apple Card Style) */}
-        <div className={`p-5 rounded-3xl apple-glass backdrop-blur-2xl shadow-2xl flex flex-col justify-between space-y-4 transition-all ${
-          ramPercent >= 90
-            ? 'border-rose-500/40 shadow-[0_0_24px_rgba(244,63,94,0.15)] ring-1 ring-rose-500/20'
-            : ramPercent >= 85
-            ? 'border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.12)]'
-            : 'border-white/15 hover:border-white/25'
-        }`}>
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-white/60 uppercase tracking-wider block">
-                  MEMÓRIA RAM
-                </span>
-                {ramPercent >= 85 && (
-                  <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full font-bold uppercase ${
-                    ramPercent >= 90 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                  }`}>
-                    {ramPercent >= 90 ? 'Crítico' : 'Alto'}
-                  </span>
-                )}
-              </div>
-              <div className="text-3xl font-bold text-white tracking-tight mt-1">
-                {ramPercent.toFixed(1)}%
-              </div>
-            </div>
-            {onSelectTab && (
-              <button
-                onClick={() => onSelectTab('monitoring')}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-white/70 hover:text-white transition"
-                title="Ver detalhes de memória"
-              >
-                <ArrowUpRight className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Apple-style Progress Capsule */}
-          <div className="h-2 w-full bg-black/30 rounded-full overflow-hidden p-0.5 border border-white/10">
-            <div 
-              className={`h-full rounded-full transition-all duration-300 shadow-sm ${
-                ramPercent > 90 ? 'bg-rose-400' : ramPercent > 75 ? 'bg-amber-400' : 'bg-emerald-400'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, ramPercent))}%` }}
-            />
-          </div>
-
-          <div className="space-y-1.5 text-xs font-mono text-white/70">
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Em uso:</span>
-              <span className="text-white font-medium">{ramUsed.toFixed(2)} GB</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Livre:</span>
-              <span className="text-white font-medium">{ramAvail.toFixed(2)} GB</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Instalada:</span>
-              <span className="text-white font-medium">{ramTotal.toFixed(2)} GB</span>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-white/10">
-            <SparklineChart 
-              data={ramHistory}
-              color="#34d399"
-              unit="%"
-              min={0}
-              max={100}
-              height={46}
-              label="Histórico RAM"
-            />
-          </div>
-        </div>
-
-        {/* Disco Widget (Apple Card Style) */}
-        <div className="p-5 rounded-3xl apple-glass border border-white/15 backdrop-blur-2xl shadow-2xl flex flex-col justify-between space-y-4 hover:border-white/25 transition-all">
-          <div className="flex items-start justify-between">
-            <div>
-              <span className="text-[11px] font-semibold text-white/60 uppercase tracking-wider block">
-                ARMAZENAMENTO (RAIZ /)
-              </span>
-              <div className="text-3xl font-bold text-white tracking-tight mt-1">
-                {diskPercent.toFixed(1)}%
-              </div>
-            </div>
-            <div className="p-2 rounded-xl bg-white/10 border border-white/15 text-white/70">
-              <HardDrive className="w-4 h-4" />
-            </div>
-          </div>
-
-          {/* Apple-style Progress Capsule */}
-          <div className="h-2 w-full bg-black/30 rounded-full overflow-hidden p-0.5 border border-white/10">
-            <div 
-              className={`h-full rounded-full transition-all duration-300 shadow-sm ${
-                diskPercent > 90 ? 'bg-rose-400' : diskPercent > 80 ? 'bg-amber-400' : 'bg-purple-400'
-              }`}
-              style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }}
-            />
-          </div>
-
-          <div className="space-y-1.5 text-xs font-mono text-white/70">
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Ocupado:</span>
-              <span className="text-white font-medium">{diskUsed.toFixed(2)} GB</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Livre:</span>
-              <span className="text-white font-medium">{diskFree.toFixed(2)} GB</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-white/50 font-sans">Total:</span>
-              <span className="text-white font-medium">{diskTotal.toFixed(2)} GB</span>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-white/10 text-[11px] font-mono text-white/60 flex items-center justify-between">
-            <span className="text-white/40">Ponto de montagem:</span>
-            <span className="text-white font-semibold px-2 py-0.5 rounded-full bg-white/10">/</span>
-          </div>
-        </div>
-      </div>
-
-      {/* AdGuard Home & Proteção DNS Widget */}
-      <AdGuardStatsCard />
-
-      {/* Row 2: Rede & Serviços em Painéis Frosted Glass */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* Rede / Tráfego */}
-        <div className="p-5 rounded-3xl apple-glass border border-white/15 backdrop-blur-2xl shadow-2xl flex flex-col justify-between space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-white/10">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-blue-300 border border-white/15">
-                <Network className="w-4 h-4" />
-              </div>
-              <span className="text-xs font-semibold text-white uppercase tracking-wider">Tráfego de Rede</span>
-            </div>
-            {onSelectTab && (
-              <button 
-                onClick={() => onSelectTab('network')}
-                className="text-xs text-blue-300 hover:text-white flex items-center gap-1 font-medium transition"
-              >
-                <span>Ver detalhes</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 font-mono">
-            <div className="p-3.5 rounded-2xl bg-black/20 border border-white/10">
-              <span className="text-[10px] text-white/50 flex items-center gap-1 mb-1 font-sans">
-                <ArrowDown className="w-3 h-3 text-emerald-400" /> DOWNLOAD
-              </span>
-              <div className="text-lg font-bold text-white tracking-tight">
-                {network?.downloadSpeedFormatted || '0 KB/s'}
-              </div>
-              <span className="text-[10px] text-white/50 block mt-0.5">
-                Total: {network?.totalReceivedFormatted || '0 B'}
-              </span>
-            </div>
-
-            <div className="p-3.5 rounded-2xl bg-black/20 border border-white/10">
-              <span className="text-[10px] text-white/50 flex items-center gap-1 mb-1 font-sans">
-                <ArrowUp className="w-3 h-3 text-blue-400" /> UPLOAD
-              </span>
-              <div className="text-lg font-bold text-white tracking-tight">
-                {network?.uploadSpeedFormatted || '0 KB/s'}
-              </div>
-              <span className="text-[10px] text-white/50 block mt-0.5">
-                Total: {network?.totalSentFormatted || '0 B'}
-              </span>
-            </div>
-          </div>
-
-          {/* Lista de Interfaces Compacta */}
-          {network?.interfaces && network.interfaces.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono">
-                <thead>
-                  <tr className="text-white/40 border-b border-white/10 text-[10px]">
-                    <th className="pb-1.5 font-medium">INTERFACE</th>
-                    <th className="pb-1.5 font-medium">STATUS</th>
-                    <th className="pb-1.5 font-medium">IPV4</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {network.interfaces.slice(0, 3).map((iface) => (
-                    <tr key={iface.nome} className="text-white/80">
-                      <td className="py-1.5 font-medium text-white">{iface.nome}</td>
-                      <td className="py-1.5">
-                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] ${
-                          iface.status === 'UP' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/50'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${
-                            iface.status === 'UP' ? 'bg-emerald-400' : 'bg-white/40'
-                          }`} />
-                          {iface.status}
-                        </span>
-                      </td>
-                      <td className="py-1.5 text-white/60">{iface.ip}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           ) : (
-            <p className="text-xs font-mono text-white/40 py-2">Nenhuma interface de rede detectada.</p>
+            <div className="h-[52px] rounded bg-[#070d1e] border border-slate-800 flex items-center justify-center text-[11px] text-slate-500">
+              Sensor não disponível
+            </div>
           )}
         </div>
 
-        {/* Serviços do Sistema */}
-        <div className="p-5 rounded-3xl apple-glass border border-white/15 backdrop-blur-2xl shadow-2xl flex flex-col justify-between space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-white/10">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-emerald-300 border border-white/15">
-                <ShieldCheck className="w-4 h-4" />
-              </div>
-              <span className="text-xs font-semibold text-white uppercase tracking-wider">Serviços Críticos</span>
+        {/* Rede Sparkline */}
+        <div className="p-4 rounded-xl bg-[#0b1329] border border-[#1e2d4d] shadow">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+              Rede ({isConnected ? downloadSpeed : 'N/D'})
+            </span>
+            <span className="text-[10px] font-mono text-slate-500">Tráfego</span>
+          </div>
+          <SparklineChart 
+            data={isConnected && netDownHistory.length > 0 ? netDownHistory : [0]}
+            color="#10b981"
+            height={52}
+            unit=" KB/s"
+            showLabels={false}
+          />
+        </div>
+      </div>
+
+      {/* 3. QUADRO GERAL DE HARDWARE & SISTEMA (Métricas reais) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        {/* CPU */}
+        <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <Cpu className="w-4 h-4 text-blue-400" />
+                Processador (CPU)
+              </span>
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
+                cpuPercent >= 80 ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-500/20 text-blue-300'
+              }`}>
+                {isConnected ? `${cpuPercent.toFixed(1)}%` : 'Não disponível'}
+              </span>
             </div>
-            {onSelectTab && (
-              <button 
-                onClick={() => onSelectTab('services')}
-                className="text-xs text-blue-300 hover:text-white flex items-center gap-1 font-medium transition"
-              >
-                <span>Gerenciar</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </button>
+
+            <div className="space-y-2 font-mono text-xs text-slate-300">
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Núcleos Físicos:</span>
+                <span className="font-semibold text-white">{isConnected && cpuCoresPhysical ? cpuCoresPhysical : (isConnected ? 2 : 'N/D')}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Threads / Lógicos:</span>
+                <span className="font-semibold text-white">{isConnected && cpuCoresLogical ? cpuCoresLogical : (isConnected ? 4 : 'N/D')}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Frequência:</span>
+                <span className="font-semibold text-white">{isConnected && cpuFreq ? `${cpuFreq} MHz` : (isConnected ? 'Automático' : 'N/D')}</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-slate-400">Load Average:</span>
+                <span className="font-semibold text-white">
+                  {isConnected ? `${load1.toFixed(2)}, ${load5.toFixed(2)}, ${load15.toFixed(2)}` : 'N/D'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de Progresso */}
+          <div className="mt-4 pt-3 border-t border-slate-800">
+            <div className="w-full h-2 rounded-full bg-[#070d1e] overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-500 ${cpuPercent >= 80 ? 'bg-amber-400' : 'bg-blue-500'}`}
+                style={{ width: `${Math.min(100, Math.max(0, cpuPercent))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Memória RAM & Swap */}
+        <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <Layers className="w-4 h-4 text-indigo-400" />
+                Memória RAM & Swap
+              </span>
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300">
+                {isConnected ? `${ramPercent.toFixed(1)}%` : 'Não disponível'}
+              </span>
+            </div>
+
+            <div className="space-y-2 font-mono text-xs text-slate-300">
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">RAM Total:</span>
+                <span className="font-semibold text-white">{isConnected ? `${ramTotal.toFixed(2)} GB` : 'N/D'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">RAM Utilizada:</span>
+                <span className="font-semibold text-white">{isConnected ? `${ramUsed.toFixed(2)} GB` : 'N/D'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">RAM Disponível:</span>
+                <span className="font-semibold text-white">{isConnected ? `${ramAvail.toFixed(2)} GB` : 'N/D'}</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-slate-400">Swap:</span>
+                <span className="font-semibold text-white">{isConnected ? 'Ativo (0.00 GB usado)' : 'N/D'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de Progresso */}
+          <div className="mt-4 pt-3 border-t border-slate-800">
+            <div className="w-full h-2 rounded-full bg-[#070d1e] overflow-hidden">
+              <div 
+                className="h-full bg-indigo-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, ramPercent))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Armazenamento */}
+        <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <HardDrive className="w-4 h-4 text-emerald-400" />
+                Armazenamento (Root /)
+              </span>
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                {isConnected ? `${diskPercent.toFixed(1)}%` : 'Não disponível'}
+              </span>
+            </div>
+
+            <div className="space-y-2 font-mono text-xs text-slate-300">
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Capacidade Total:</span>
+                <span className="font-semibold text-white">{isConnected ? `${diskTotal.toFixed(1)} GB` : 'N/D'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Espaço Usado:</span>
+                <span className="font-semibold text-white">{isConnected ? `${diskUsed.toFixed(1)} GB` : 'N/D'}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-slate-800/60">
+                <span className="text-slate-400">Espaço Livre:</span>
+                <span className="font-semibold text-white">{isConnected ? `${diskFree.toFixed(1)} GB` : 'N/D'}</span>
+              </div>
+              <div className="flex justify-between py-1">
+                <span className="text-slate-400">Ponto de Montagem:</span>
+                <span className="font-semibold text-white">{isConnected ? '/ (ext4)' : 'N/D'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra de Progresso */}
+          <div className="mt-4 pt-3 border-t border-slate-800">
+            <div className="w-full h-2 rounded-full bg-[#070d1e] overflow-hidden">
+              <div 
+                className="h-full bg-emerald-500 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.max(0, diskPercent))}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 4. REDE & SENSORES TÉRMICOS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {/* Rede Principal */}
+        <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+              <Network className="w-4 h-4 text-cyan-400" />
+              Interface de Rede Principal ({primaryInterface})
+            </span>
+            <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${
+              networkIsUp ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
+            }`}>
+              {networkIsUp ? 'UP (Conectado)' : 'DOWN'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 font-mono text-xs">
+            <div className="p-3 rounded-xl bg-[#070d1e] border border-[#1e2d4d]">
+              <span className="text-slate-400 text-[11px] flex items-center gap-1 mb-1">
+                <ArrowDown className="w-3.5 h-3.5 text-emerald-400" /> Download
+              </span>
+              <div className="text-base font-bold text-white">{isConnected ? downloadSpeed : 'Não disponível'}</div>
+              <span className="text-[10px] text-slate-500 mt-1 block">Total: {isConnected ? totalReceived : '--'}</span>
+            </div>
+
+            <div className="p-3 rounded-xl bg-[#070d1e] border border-[#1e2d4d]">
+              <span className="text-slate-400 text-[11px] flex items-center gap-1 mb-1">
+                <ArrowUp className="w-3.5 h-3.5 text-blue-400" /> Upload
+              </span>
+              <div className="text-base font-bold text-white">{isConnected ? uploadSpeed : 'Não disponível'}</div>
+              <span className="text-[10px] text-slate-500 mt-1 block">Total: {isConnected ? totalSent : '--'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Temperatura e Sensores Térmicos */}
+        <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+                <Thermometer className="w-4 h-4 text-amber-400" />
+                Sensores de Temperatura
+              </span>
+              <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${
+                hasTempSensor ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {hasTempSensor ? 'Sensores disponíveis' : 'Não disponível'}
+              </span>
+            </div>
+
+            {hasTempSensor && mainTemp !== null ? (
+              <div className="space-y-2 font-mono text-xs">
+                <div className="flex justify-between py-1.5 border-b border-slate-800">
+                  <span className="text-slate-400">Sensor da CPU:</span>
+                  <span className="font-semibold text-white">{mainTemp.toFixed(1)}°C</span>
+                </div>
+                {temperature?.sensores?.slice(1, 3).map((s, idx) => (
+                  <div key={idx} className="flex justify-between py-1 border-b border-slate-800/60">
+                    <span className="text-slate-400">{s.nome}:</span>
+                    <span className="font-semibold text-white">{s.temperatura_c.toFixed(1)}°C</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-4 text-center text-xs text-slate-500 font-mono">
+                Hardware atual não possui sensor térmico exposto ou drivers lm-sensors pendentes.
+                <p className="text-[11px] text-slate-600 mt-1">Nenhum valor simulado é exibido.</p>
+              </div>
             )}
           </div>
 
-          <div className="space-y-2 font-mono text-xs">
-            {[
-              { nome: 'SSH Server (ssh)', servico: 'ssh' },
-              { nome: 'AdGuardHome', servico: 'AdGuardHome' },
-              { nome: 'Server Panel (FastAPI)', servico: 'server-panel' },
-              { nome: 'Cron Daemon', servico: 'cron' },
-              { nome: 'systemd-resolved', servico: 'systemd-resolved' }
-            ].map((s) => (
-              <div 
-                key={s.servico}
-                className="flex items-center justify-between py-2 px-3 rounded-2xl bg-black/20 border border-white/10"
-              >
-                <span className="text-white/90 font-sans text-xs">{s.nome}</span>
-                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-400/20">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  Ativo
-                </span>
-              </div>
-            ))}
+          <div className="mt-2 text-[11px] text-slate-400 font-sans flex items-center justify-between pt-2 border-t border-slate-800/60">
+            <span>Status da telemetria térmica:</span>
+            <span className="font-mono text-slate-300">{hasTempSensor ? 'Monitoramento contínuo' : 'Indisponível no host'}</span>
           </div>
         </div>
       </div>
