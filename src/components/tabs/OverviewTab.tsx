@@ -87,8 +87,16 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   const diskPercent = server?.disco?.uso_percentual ?? status?.disco?.uso_percentual ?? 0;
 
   // Temperatura real sem invenção
-  const hasTempSensor = Boolean(temperature?.disponivel && temperature?.sensores && temperature.sensores.length > 0);
-  const mainTemp = (hasTempSensor && temperature?.sensores?.[0]) ? temperature.sensores[0].temperatura_c : null;
+  const hasTempSensor = Boolean(
+    temperature?.disponivel || 
+    (temperature?.sensores && temperature.sensores.length > 0) || 
+    (temperature?.temperatura_c !== undefined && temperature?.temperatura_c !== null)
+  );
+  const mainTemp = (temperature?.temperatura_c !== undefined && temperature?.temperatura_c !== null)
+    ? temperature.temperatura_c
+    : (hasTempSensor && temperature?.sensores?.[0]) 
+    ? temperature.sensores[0].temperatura_c 
+    : null;
 
   // Rede
   const primaryInterface = network?.primaryInterface || (network?.interfaces?.[0]?.nome) || 'enp2s0';
@@ -453,17 +461,60 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
             </div>
 
             {hasTempSensor && mainTemp !== null ? (
-              <div className="space-y-2 font-mono text-xs">
-                <div className="flex justify-between py-1.5 border-b border-slate-800">
-                  <span className="text-slate-400">Sensor da CPU:</span>
-                  <span className="font-semibold text-white">{mainTemp.toFixed(1)}°C</span>
+              <div className="space-y-3 font-mono text-xs">
+                <div className="flex justify-between items-center py-2 px-3 rounded-lg bg-[#070d1e] border border-slate-800">
+                  <span className="text-slate-300 font-semibold flex items-center gap-1.5">
+                    <Thermometer className="w-3.5 h-3.5 text-amber-400" />
+                    Temperatura Geral da CPU:
+                  </span>
+                  <span className={`text-sm font-bold ${
+                    mainTemp >= 75 ? 'text-rose-400' : mainTemp >= 60 ? 'text-amber-400' : 'text-emerald-400'
+                  }`}>
+                    {mainTemp.toFixed(1)}°C
+                  </span>
                 </div>
-                {temperature?.sensores?.slice(1, 3).map((s, idx) => (
-                  <div key={idx} className="flex justify-between py-1 border-b border-slate-800/60">
-                    <span className="text-slate-400">{s.nome}:</span>
-                    <span className="font-semibold text-white">{s.temperatura_c.toFixed(1)}°C</span>
+
+                {/* Lista completa de núcleos individuais */}
+                {((temperature?.cores && temperature.cores.length > 0) 
+                  ? temperature.cores 
+                  : (temperature?.sensores?.filter(s => s.isCore || s.nome.toLowerCase().includes('core')) || [])
+                ).length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                      Sensores por Núcleo Individual (Cores):
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
+                      {((temperature?.cores && temperature.cores.length > 0) 
+                        ? temperature.cores 
+                        : (temperature?.sensores?.filter(s => s.isCore || s.nome.toLowerCase().includes('core')) || [])
+                      ).map((core, idx) => (
+                        <div key={idx} className="p-2 rounded-lg bg-[#070d1e] border border-slate-800/80 flex items-center justify-between">
+                          <span className="text-slate-300 text-xs truncate pr-1 font-medium">{core.nome}</span>
+                          <span className={`text-xs font-bold shrink-0 ${
+                            core.temperatura_c >= 75 ? 'text-rose-400' : core.temperatura_c >= 60 ? 'text-amber-400' : 'text-emerald-400'
+                          }`}>
+                            {core.temperatura_c.toFixed(1)}°C
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
+                )}
+
+                {/* Outros sensores (NVMe, Package, ACPI) se houver */}
+                {(temperature?.sensores?.filter(s => !s.isCore && !s.nome.toLowerCase().includes('core') && !s.nome.toLowerCase().includes('package')) || []).length > 0 && (
+                  <div className="space-y-1 pt-1 border-t border-slate-800/60">
+                    <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                      Outros Componentes:
+                    </span>
+                    {(temperature?.sensores?.filter(s => !s.isCore && !s.nome.toLowerCase().includes('core') && !s.nome.toLowerCase().includes('package')) || []).map((s, idx) => (
+                      <div key={idx} className="flex justify-between py-1 text-[11px] text-slate-400">
+                        <span className="truncate pr-2">{s.nome}:</span>
+                        <span className="font-semibold text-slate-200">{s.temperatura_c.toFixed(1)}°C</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="py-4 text-center text-xs text-slate-500 font-mono">

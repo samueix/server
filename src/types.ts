@@ -96,12 +96,15 @@ export interface ApiTemperatureSensor {
   temperatura_c: number;
   maxima_c?: number;
   critica_c?: number;
+  isCore?: boolean;
+  coreIndex?: number;
 }
 
 export interface ApiTemperatureResponse {
   disponivel: boolean;
   temperatura_c?: number;
   sensores: ApiTemperatureSensor[];
+  cores?: ApiTemperatureSensor[];
 }
 
 export interface ApiServerResponse {

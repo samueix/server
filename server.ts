@@ -87,6 +87,9 @@ async function startServer() {
     }
   });
 
+  // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
+  let cachedWorkingBackendBase: string | null = null;
+
   // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/system, /api/cpu, /api/network, etc.)
   app.all('/api/*', async (req, res, next) => {
     // Rotas tratadas internamente pelo server.ts
@@ -141,34 +144,51 @@ async function startServer() {
       }
     }
 
-    // Tenta conectar no backend FastAPI via loopback IPv4/IPv6, IP LAN ou IPv6 global
-    const targetUrls: string[] = [];
-    if (process.env.BACKEND_URL) {
-      targetUrls.push(`${process.env.BACKEND_URL.replace(/\/$/, '')}/api/${subPath}${queryStr}`);
+    // Lista de candidatos de backend FastAPI
+    const candidateBases: string[] = [];
+    if (cachedWorkingBackendBase) {
+      candidateBases.push(cachedWorkingBackendBase);
     }
-    targetUrls.push(
-      `http://127.0.0.1:8000/api/${subPath}${queryStr}`,
-      `http://localhost:8000/api/${subPath}${queryStr}`,
-      `http://[::1]:8000/api/${subPath}${queryStr}`,
-      `http://192.168.100.23:8000/api/${subPath}${queryStr}`,
-      `http://[2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445]:8000/api/${subPath}${queryStr}`
-    );
+    if (process.env.BACKEND_URL) {
+      const envBase = process.env.BACKEND_URL.replace(/\/$/, '');
+      if (!candidateBases.includes(envBase)) candidateBases.push(envBase);
+    }
+    const defaultBases = [
+      'http://127.0.0.1:8000',
+      'http://localhost:8000',
+      'http://[::1]:8000',
+      'http://192.168.100.23:8000',
+      'http://[2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445]:8000'
+    ];
+    for (const dBase of defaultBases) {
+      if (!candidateBases.includes(dBase)) candidateBases.push(dBase);
+    }
 
-    for (const targetUrl of targetUrls) {
+    for (let i = 0; i < candidateBases.length; i++) {
+      const base = candidateBases[i];
+      const targetUrl = `${base}/api/${subPath}${queryStr}`;
+      const timeoutMs = base === cachedWorkingBackendBase ? 4000 : 1200;
+
       try {
         const response = await fetch(targetUrl, {
           method: req.method,
           headers: forwardHeaders,
           body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
-          signal: AbortSignal.timeout(2500)
+          signal: AbortSignal.timeout(timeoutMs)
         });
+
+        // Sucesso de conexão! Salva base funcional no cache
+        cachedWorkingBackendBase = base;
 
         const text = await response.text();
         res.status(response.status);
         res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
         return res.send(text);
       } catch {
-        // Tenta próxima URL
+        // Se a base em cache falhou, invalida para tentar os outros candidatos
+        if (base === cachedWorkingBackendBase) {
+          cachedWorkingBackendBase = null;
+        }
       }
     }
 

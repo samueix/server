@@ -70,9 +70,39 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
   const swapPercent = 0.0;
 
   // Temperatura Stats
-  const hasTemp = Boolean(temperature?.disponivel && temperature?.sensores && temperature.sensores.length > 0);
-  const cpuSensor = hasTemp ? temperature?.sensores?.[0] : null;
-  const tempCurrent = cpuSensor?.temperatura_c ?? null;
+  const hasTemp = Boolean(
+    temperature?.disponivel || 
+    (temperature?.sensores && temperature.sensores.length > 0) || 
+    (temperature?.temperatura_c !== undefined && temperature?.temperatura_c !== null)
+  );
+  const cpuSensor = (temperature?.sensores && temperature.sensores.length > 0)
+    ? (temperature.sensores.find(s => 
+        s.nome.toLowerCase().includes('package') || 
+        s.nome.toLowerCase().includes('tctl') || 
+        s.nome.toLowerCase().includes('core 0') || 
+        s.nome.toLowerCase() === 'cpu'
+      ) || temperature.sensores[0])
+    : null;
+
+  const coresList = useMemo(() => {
+    if (temperature?.cores && temperature.cores.length > 0) {
+      return temperature.cores;
+    }
+    if (temperature?.sensores && temperature.sensores.length > 0) {
+      return temperature.sensores.filter(s => s.isCore || s.nome.toLowerCase().includes('core'));
+    }
+    return [];
+  }, [temperature]);
+
+  const otherSensorsList = useMemo(() => {
+    if (!temperature?.sensores) return [];
+    return temperature.sensores.filter(s => 
+      !coresList.some(c => c.nome === s.nome) && 
+      !s.nome.toLowerCase().includes('core')
+    );
+  }, [temperature, coresList]);
+
+  const tempCurrent = cpuSensor?.temperatura_c ?? temperature?.temperatura_c ?? (coresList.length > 0 ? coresList[0].temperatura_c : null);
   const tempMin = tempHistory.length > 0 ? Math.min(...tempHistory) : tempCurrent;
   const tempMax = tempHistory.length > 0 ? Math.max(...tempHistory) : tempCurrent;
   const tempAvg = tempHistory.length > 0 ? (tempHistory.reduce((a, b) => a + b, 0) / tempHistory.length) : tempCurrent;
@@ -393,18 +423,76 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
           </div>
         )}
 
-        {/* Sensores Individuais Detectados */}
-        {hasTemp && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs pt-2">
-            {temperature?.sensores?.map((sensor, idx) => (
-              <div key={idx} className="p-2.5 rounded-lg bg-[#070d1e] border border-[#1e2d4d] flex justify-between items-center">
-                <div>
-                  <span className="text-slate-400 text-xs block">{sensor.nome}</span>
-                  <span className="text-[10px] text-slate-500">Sensor {sensor.sensor}</span>
+        {/* Sensores Individuais por Núcleo da CPU */}
+        {hasTemp && coresList.length > 0 && (
+          <div className="space-y-2.5 pt-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-white font-mono flex items-center gap-1.5">
+                <Thermometer className="w-3.5 h-3.5 text-amber-400" />
+                Temperatura por Núcleo da CPU ({coresList.length} núcleos detectados):
+              </span>
+              <span className="text-[11px] font-mono text-slate-400">
+                Média: {(coresList.reduce((acc, c) => acc + c.temperatura_c, 0) / coresList.length).toFixed(1)}°C
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
+              {coresList.map((core, idx) => {
+                const tempVal = core.temperatura_c;
+                const barPercent = Math.min(100, Math.max(10, (tempVal / 100) * 100));
+                const colorClass = tempVal >= 75 
+                  ? 'text-rose-400 bg-rose-500' 
+                  : tempVal >= 60 
+                  ? 'text-amber-400 bg-amber-500' 
+                  : 'text-emerald-400 bg-emerald-500';
+
+                return (
+                  <div key={idx} className="p-3 rounded-xl bg-[#070d1e] border border-[#1e2d4d] hover:border-slate-700 transition space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-white font-bold text-xs">{core.nome}</span>
+                      <span className={`text-sm font-bold ${colorClass.split(' ')[0]}`}>
+                        {tempVal.toFixed(1)}°C
+                      </span>
+                    </div>
+
+                    {/* Barra de Temperatura Visual */}
+                    <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-500 ${colorClass.split(' ')[1]}`}
+                        style={{ width: `${barPercent}%` }}
+                      />
+                    </div>
+
+                    <div className="flex justify-between text-[10px] text-slate-500">
+                      <span>{core.sensor || 'coretemp'}</span>
+                      {core.maxima_c && <span>Max: {core.maxima_c}°C</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Outros Sensores de Hardware (SoC, Package, ACPI, NVMe) */}
+        {hasTemp && otherSensorsList.length > 0 && (
+          <div className="space-y-2 pt-2 border-t border-[#1e2d4d]/80">
+            <span className="text-[11px] font-semibold text-slate-400 font-mono block">
+              Outros Sensores de Hardware (SoC, ACPI, NVMe):
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 font-mono text-xs">
+              {otherSensorsList.map((sensor, idx) => (
+                <div key={idx} className="p-3 rounded-xl bg-[#070d1e] border border-[#1e2d4d] flex justify-between items-center hover:border-slate-700 transition">
+                  <div className="overflow-hidden pr-2">
+                    <span className="text-white font-medium text-xs block truncate">{sensor.nome}</span>
+                    <span className="text-[10px] text-slate-500 uppercase block">{sensor.sensor}</span>
+                  </div>
+                  <span className={`text-base font-bold shrink-0 ${sensor.temperatura_c >= 75 ? 'text-rose-400' : sensor.temperatura_c >= 60 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {sensor.temperatura_c.toFixed(1)}°C
+                  </span>
                 </div>
-                <span className="text-base font-bold text-white">{sensor.temperatura_c.toFixed(1)}°C</span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>

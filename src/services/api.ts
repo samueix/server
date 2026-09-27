@@ -1,7 +1,8 @@
 import { 
   ApiServerResponse, 
   ApiStatusResponse, 
-  ApiTemperatureResponse, 
+  ApiTemperatureResponse,
+  ApiTemperatureSensor,
   NetworkInterfaceItem, 
   ActiveNetworkClient,
   ProcessItem, 
@@ -61,7 +62,7 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
   };
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
 
   // Combina com o signal externo se fornecido
   const onExternalAbort = () => controller.abort();
@@ -91,6 +92,9 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
     }
     if (response.status === 404) {
       throw new ApiError(`Endpoint ${endpoint} não encontrado (404)`, 404);
+    }
+    if (response.status === 429) {
+      throw new ApiError('Limite de requisições temporário atingido (HTTP 429). Aguardando liberação do servidor...', 429);
     }
     if (response.status >= 500) {
       throw new ApiError(`Servidor offline ou erro no backend (${response.status})`, response.status);
@@ -123,6 +127,160 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
  */
 export async function getRootHealth(): Promise<{ status: string; service?: string; timestamp?: any }> {
   return apiFetch<{ status: string; service?: string; timestamp?: any }>('/api/health');
+}
+
+/**
+ * Normaliza dados térmicos de /api/temperature ou /api/system.
+ * Extrai todos os sensores por núcleo individual (Core 0, Core 1, Package id 0, NVMe, ACPI, etc.).
+ */
+export function parseTemperatureResponse(data: any): ApiTemperatureResponse {
+  if (!data) {
+    return { disponivel: false, sensores: [], cores: [] };
+  }
+
+  const tObj = data.temperature || data;
+  const sensores: ApiTemperatureSensor[] = [];
+  const cores: ApiTemperatureSensor[] = [];
+
+  // 1. Caso tObj.cores venha diretamente estruturado do backend monitor.py
+  if (Array.isArray(tObj.cores) && tObj.cores.length > 0) {
+    tObj.cores.forEach((c: any, idx: number) => {
+      const val = c.temp_c ?? c.temperatura_c ?? c.current ?? c.temp;
+      if (val !== undefined && val !== null && !isNaN(Number(val))) {
+        const coreNum = c.core !== undefined ? Number(c.core) : idx;
+        const coreSensor: ApiTemperatureSensor = {
+          sensor: 'coretemp',
+          nome: c.label || `Core ${coreNum}`,
+          temperatura_c: Number(val),
+          maxima_c: c.high ? Number(c.high) : undefined,
+          critica_c: c.critical ? Number(c.critical) : undefined,
+          isCore: true,
+          coreIndex: coreNum
+        };
+        cores.push(coreSensor);
+        sensores.push(coreSensor);
+      }
+    });
+  }
+
+  // 2. Caso tObj.sensors seja um dicionário: { "coretemp": [ {...}, ... ], "nvme": [ ... ] }
+  if (tObj.sensors && typeof tObj.sensors === 'object' && !Array.isArray(tObj.sensors)) {
+    for (const [sName, sEntries] of Object.entries(tObj.sensors)) {
+      if (Array.isArray(sEntries)) {
+        sEntries.forEach((entry: any, eIdx: number) => {
+          const val = entry.current ?? entry.temperatura_c ?? entry.temp;
+          if (val !== undefined && val !== null && !isNaN(Number(val))) {
+            const rawLabel = (entry.label || sName).trim();
+            const lowerLabel = rawLabel.toLowerCase();
+            const isCoreMatch = lowerLabel.match(/core\s*(\d+)/i);
+            const isCoreSensor = Boolean(
+              isCoreMatch || 
+              (sName.toLowerCase().includes('core') && !lowerLabel.includes('package'))
+            );
+            const coreIdx = isCoreMatch ? parseInt(isCoreMatch[1], 10) : (isCoreSensor ? eIdx : undefined);
+
+            const sensorObj: ApiTemperatureSensor = {
+              sensor: sName,
+              nome: rawLabel,
+              temperatura_c: Number(val),
+              maxima_c: entry.high ? Number(entry.high) : undefined,
+              critica_c: entry.critical ? Number(entry.critical) : undefined,
+              isCore: isCoreSensor,
+              coreIndex: coreIdx
+            };
+
+            // Evita duplicatas se já inserido via tObj.cores
+            if (!sensores.some(s => s.nome === sensorObj.nome && s.sensor === sensorObj.sensor)) {
+              sensores.push(sensorObj);
+              if (isCoreSensor && !cores.some(c => c.nome === sensorObj.nome)) {
+                cores.push(sensorObj);
+              }
+            }
+          }
+        });
+      }
+    }
+  } else if (Array.isArray(tObj.sensores)) {
+    tObj.sensores.forEach((s: any, idx: number) => {
+      const val = s.temperatura_c ?? s.current ?? s.temp;
+      if (val !== undefined && val !== null && !isNaN(Number(val))) {
+        const rawLabel = s.nome || s.sensor || s.label || `Sensor ${idx}`;
+        const isCoreMatch = rawLabel.toLowerCase().match(/core\s*(\d+)/i);
+        const sensorObj: ApiTemperatureSensor = {
+          sensor: s.sensor || 'cpu',
+          nome: rawLabel,
+          temperatura_c: Number(val),
+          maxima_c: s.maxima_c ? Number(s.maxima_c) : undefined,
+          critica_c: s.critica_c ? Number(s.critica_c) : undefined,
+          isCore: Boolean(isCoreMatch || s.isCore),
+          coreIndex: isCoreMatch ? parseInt(isCoreMatch[1], 10) : s.coreIndex
+        };
+        if (!sensores.some(item => item.nome === sensorObj.nome)) {
+          sensores.push(sensorObj);
+          if (sensorObj.isCore) cores.push(sensorObj);
+        }
+      }
+    });
+  } else if (Array.isArray(tObj.sensors)) {
+    tObj.sensors.forEach((s: any, idx: number) => {
+      const val = s.current ?? s.temperatura_c ?? s.temp;
+      if (val !== undefined && val !== null && !isNaN(Number(val))) {
+        const rawLabel = s.label || s.nome || s.sensor || `Sensor ${idx}`;
+        const isCoreMatch = rawLabel.toLowerCase().match(/core\s*(\d+)/i);
+        const sensorObj: ApiTemperatureSensor = {
+          sensor: s.sensor || s.name || 'cpu',
+          nome: rawLabel,
+          temperatura_c: Number(val),
+          maxima_c: s.high ? Number(s.high) : undefined,
+          critica_c: s.critical ? Number(s.critical) : undefined,
+          isCore: Boolean(isCoreMatch || s.isCore),
+          coreIndex: isCoreMatch ? parseInt(isCoreMatch[1], 10) : s.coreIndex
+        };
+        if (!sensores.some(item => item.nome === sensorObj.nome)) {
+          sensores.push(sensorObj);
+          if (sensorObj.isCore) cores.push(sensorObj);
+        }
+      }
+    });
+  }
+
+  // Ordena cores por índice de núcleo
+  cores.sort((a, b) => (a.coreIndex ?? 0) - (b.coreIndex ?? 0));
+
+  // 3. Determina a temperatura representativa do CPU
+  let cpuTemp: number | undefined = undefined;
+  if (tObj.cpu_temp !== undefined && tObj.cpu_temp !== null && !isNaN(Number(tObj.cpu_temp))) {
+    cpuTemp = Number(tObj.cpu_temp);
+  } else if (tObj.temperatura_c !== undefined && tObj.temperatura_c !== null && !isNaN(Number(tObj.temperatura_c))) {
+    cpuTemp = Number(tObj.temperatura_c);
+  } else if (sensores.length > 0) {
+    const pkgSensor = sensores.find(s => 
+      s.nome.toLowerCase().includes('package') || 
+      s.nome.toLowerCase().includes('tctl') || 
+      s.nome.toLowerCase() === 'cpu'
+    );
+    if (pkgSensor) {
+      cpuTemp = pkgSensor.temperatura_c;
+    } else if (cores.length > 0) {
+      const avg = cores.reduce((acc, c) => acc + c.temperatura_c, 0) / cores.length;
+      cpuTemp = Math.round(avg * 10) / 10;
+    } else {
+      cpuTemp = sensores[0].temperatura_c;
+    }
+  }
+
+  const isAvailable = Boolean(
+    tObj.available ?? 
+    tObj.disponivel ?? 
+    (sensores.length > 0 || (cpuTemp !== undefined && cpuTemp > 0))
+  );
+
+  return {
+    disponivel: isAvailable,
+    temperatura_c: cpuTemp,
+    sensores,
+    cores
+  };
 }
 
 /**
@@ -187,37 +345,10 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
   const disk_livre_gb = Number(diskRoot.free_gb ?? diskRoot.livre_gb ?? Math.max(0, disk_total_gb - disk_usado_gb));
   const disk_percent = Number(diskRoot.percent ?? diskRoot.uso_percentual ?? 0);
 
-  // Temperatura integrada (se presente no snapshot de /api/system)
-  let temperatura: ApiTemperatureResponse | undefined = undefined;
-  if (data.temperature) {
-    const tObj = data.temperature;
-    const disponivel = Boolean(tObj.available ?? tObj.disponivel);
-    const sensores: any[] = [];
-    if (tObj.sensors && typeof tObj.sensors === 'object') {
-      for (const [sName, sEntries] of Object.entries(tObj.sensors)) {
-        if (Array.isArray(sEntries)) {
-          sEntries.forEach((entry: any) => {
-            sensores.push({
-              sensor: sName,
-              nome: entry.label || sName,
-              temperatura_c: Number(entry.current || 0),
-              maxima_c: entry.high ? Number(entry.high) : undefined,
-              critica_c: entry.critical ? Number(entry.critical) : undefined
-            });
-          });
-        }
-      }
-    } else if (Array.isArray(tObj.sensores)) {
-      sensores.push(...tObj.sensores);
-    }
-    temperatura = {
-      disponivel,
-      temperatura_c: tObj.cpu_temp !== undefined && tObj.cpu_temp !== null 
-        ? Number(tObj.cpu_temp) 
-        : (sensores[0]?.temperatura_c),
-      sensores
-    };
-  }
+  // Temperatura integrada com todos os núcleos e sensores reais
+  const temperatura = data.temperature 
+    ? parseTemperatureResponse(data.temperature) 
+    : undefined;
 
   return {
     servidor: hostname,
@@ -306,25 +437,12 @@ export async function getStatusSummary(signal?: AbortSignal): Promise<ApiStatusR
 
 /**
  * GET /api/temperature
- * Leituras dos sensores térmicos do hardware
+ * Leituras dos sensores térmicos do hardware com suporte completo a múltiplos núcleos (Core 0, Core 1, etc.)
  */
 export async function getTemperature(signal?: AbortSignal): Promise<ApiTemperatureResponse> {
   try {
     const data = await apiFetch<any>('/api/temperature', signal);
-    const disponivel = Boolean(data.disponivel);
-    const sensores = Array.isArray(data.sensores) ? data.sensores : [];
-
-    return {
-      disponivel,
-      temperatura_c: sensores.length > 0 ? Number(sensores[0].temperatura_c || 0) : undefined,
-      sensores: sensores.map((s: any) => ({
-        sensor: s.sensor || 'cpu',
-        nome: s.nome || s.sensor || 'CPU',
-        temperatura_c: Number(s.temperatura_c || 0),
-        maxima_c: s.maxima_c ? Number(s.maxima_c) : undefined,
-        critica_c: s.critica_c ? Number(s.critica_c) : undefined
-      }))
-    };
+    return parseTemperatureResponse(data);
   } catch (err) {
     return {
       disponivel: false,
@@ -334,12 +452,9 @@ export async function getTemperature(signal?: AbortSignal): Promise<ApiTemperatu
 }
 
 /**
- * GET /api/network
- * Leituras das interfaces de rede com cálculo de velocidade (Download e Upload)
- * baseado na diferença real entre duas leituras consecutivas (delta bytes / delta tempo)
+ * Normaliza os dados brutos de rede da API
  */
-export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry> {
-  const raw = await apiFetch<any>('/api/network', signal);
+export function parseNetworkData(raw: any): NetworkTelemetry {
   const now = performance.now();
 
   let rawList: any[] = [];
@@ -349,7 +464,6 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
     if (Array.isArray(raw.interfaces)) {
       rawList = raw.interfaces;
     } else if (typeof raw.interfaces === 'object') {
-      // Dicionário { "eth0": { status, enderecos, bytes_enviados, bytes_recebidos } }
       rawList = Object.entries(raw.interfaces).map(([key, val]: [string, any]) => ({
         nome: key,
         ...val
@@ -441,11 +555,14 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
       }))
     : [];
 
-  // Cálculo real de velocidade por delta entre duas leituras consecutivas
+  // Velocidade de rede em tempo real
   let downloadSpeedBps = 0;
   let uploadSpeedBps = 0;
 
-  if (lastNetworkSnapshot && totalReceived >= lastNetworkSnapshot.totalReceivedBytes) {
+  if (typeof raw.download_bytes_sec === 'number' && typeof raw.upload_bytes_sec === 'number') {
+    downloadSpeedBps = raw.download_bytes_sec;
+    uploadSpeedBps = raw.upload_bytes_sec;
+  } else if (lastNetworkSnapshot && totalReceived >= lastNetworkSnapshot.totalReceivedBytes) {
     const dtSeconds = Math.max(0.2, (now - lastNetworkSnapshot.time) / 1000);
     const deltaRecv = totalReceived - lastNetworkSnapshot.totalReceivedBytes;
     const deltaSent = totalSent - lastNetworkSnapshot.totalSentBytes;
@@ -497,6 +614,16 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
     rawBytesRecv: totalReceived,
     rawBytesSent: totalSent
   };
+}
+
+/**
+ * GET /api/network
+ * Leituras das interfaces de rede com cálculo de velocidade (Download e Upload)
+ * baseado na diferença real entre duas leituras consecutivas (delta bytes / delta tempo)
+ */
+export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry> {
+  const raw = await apiFetch<any>('/api/network', signal);
+  return parseNetworkData(raw);
 }
 
 /**
@@ -582,9 +709,16 @@ export interface FullTelemetryResult {
   errorMessage?: string;
 }
 
+// Cache com TTL para não sobrecarregar endpoints pesados e prevenir HTTP 429
+let lastProcessesFetch = 0;
+let cachedProcesses: ProcessItem[] = [];
+let lastServicesFetch = 0;
+let cachedServices: ServiceItem[] = [];
+
 /**
  * Utilitário centralizado para buscar telemetria completa em uma única rodada de polling
- * Disparado aproximadamente a cada 2 a 5 segundos, evitando requisições concorrentes ou duplicadas.
+ * Reutiliza os dados já fornecidos pelo snapshot de /api/system (CPU, RAM, Disco, Temperatura com todos os núcleos, Rede),
+ * realizando apenas 1 requisição HTTP por ciclo e atualizando processos/serviços de forma suave.
  */
 export const apiService = {
   apiFetch,
@@ -598,8 +732,9 @@ export const apiService = {
 
   async fetchFullTelemetry(signal?: AbortSignal): Promise<FullTelemetryResult> {
     try {
-      // 1. Busca os dados principais do servidor (/api/system)
-      const serverDetails = await getServerInfo(signal);
+      // 1. Busca os dados completos do servidor em uma única chamada HTTP a /api/system
+      const rawSystem = await apiFetch<any>('/api/system', signal);
+      const serverDetails = parseSystemSnapshot(rawSystem);
 
       // 2. Constrói o resumo de status diretamente a partir do snapshot (sem requisição duplicada a /api/system)
       const statusRes: ApiStatusResponse = {
@@ -626,21 +761,35 @@ export const apiService = {
         status: 'ONLINE'
       };
 
-      // 3. Busca de processos, serviços, rede e temperatura em paralelo
-      const [procList, svcList, netData, tempData] = await Promise.allSettled([
-        getProcesses(signal),
-        getServices(signal),
-        getNetwork(signal),
-        getTemperature(signal)
-      ]);
+      // 3. Extrai sensores térmicos detalhados (todos os cores individuais) a partir do payload de /api/system
+      const temperature = parseTemperatureResponse(rawSystem.temperature || rawSystem);
+      serverDetails.temperatura = temperature;
 
-      const temperature: ApiTemperatureResponse = tempData.status === 'fulfilled' 
-        ? tempData.value 
-        : { disponivel: false, sensores: [] };
+      // 4. Extrai telemetria de rede diretamente do payload de /api/system
+      const network = rawSystem.network ? parseNetworkData(rawSystem.network) : null;
 
-      // Se serverDetails não tiver temperatura, anexa o resultado
-      if (serverDetails && !serverDetails.temperatura) {
-        serverDetails.temperatura = temperature;
+      // 5. Atualização suave de processos e serviços com cache TTL para evitar rate limiting (HTTP 429)
+      const now = Date.now();
+      let processes = cachedProcesses;
+      if (now - lastProcessesFetch > 10000 || cachedProcesses.length === 0) {
+        try {
+          processes = await getProcesses(signal);
+          cachedProcesses = processes;
+          lastProcessesFetch = now;
+        } catch {
+          // Mantém cache anterior
+        }
+      }
+
+      let services = cachedServices;
+      if (now - lastServicesFetch > 15000 || cachedServices.length === 0) {
+        try {
+          services = await getServices(signal);
+          cachedServices = services;
+          lastServicesFetch = now;
+        } catch {
+          // Mantém cache anterior
+        }
       }
 
       return {
@@ -648,9 +797,9 @@ export const apiService = {
         server: serverDetails,
         status: statusRes,
         temperature,
-        processes: procList.status === 'fulfilled' ? procList.value : [],
-        services: svcList.status === 'fulfilled' ? svcList.value : [],
-        network: netData.status === 'fulfilled' ? netData.value : null
+        processes,
+        services,
+        network
       };
     } catch (err: any) {
       return {
@@ -658,8 +807,8 @@ export const apiService = {
         server: null,
         status: null,
         temperature: { disponivel: false, sensores: [] },
-        processes: [],
-        services: [],
+        processes: cachedProcesses,
+        services: cachedServices,
         network: null,
         errorMessage: err?.message || 'Servidor offline'
       };

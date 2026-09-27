@@ -156,6 +156,13 @@ export const SystemTab: React.FC<SystemTabProps> = ({
               <span className="text-slate-200">{isConnected && cpuFreq ? `${cpuFreq} MHz` : (isConnected ? 'Dinâmica / ACPI' : 'N/D')}</span>
             </div>
 
+            {server?.temperatura?.temperatura_c !== undefined && server?.temperatura?.temperatura_c !== null && (
+              <div className="flex justify-between py-2.5">
+                <span className="text-slate-400">Temperatura da CPU</span>
+                <span className="text-amber-400 font-semibold">{server.temperatura.temperatura_c.toFixed(1)}°C</span>
+              </div>
+            )}
+
             <div className="flex justify-between py-2.5">
               <span className="text-slate-400">Memória RAM Instalada</span>
               <span className="text-white font-semibold">{isConnected ? `${ramTotal.toFixed(2)} GB DDR` : 'Não disponível'}</span>

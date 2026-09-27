@@ -50,26 +50,28 @@ app.add_middleware(
 # Proteção básica de Rate Limiting em memória (sem dependência de banco de dados)
 _request_counts = {}
 _RATE_LIMIT_WINDOW = 60 # 60 segundos
-_RATE_LIMIT_MAX = 300 # máx 300 requisições por minuto por IP
+_RATE_LIMIT_MAX = 1200 # máx 1200 requisições por minuto por IP
 
 @app.middleware("http")
 async def security_and_logging_middleware(request: Request, call_next):
     start_time = time.time()
     client_ip = request.client.host if request.client else "unknown"
 
-    # Rate Limiting Simples
-    current_time = time.time()
-    ip_records = _request_counts.get(client_ip, [])
-    # Filtra requisições da janela atual
-    ip_records = [t for t in ip_records if current_time - t < _RATE_LIMIT_WINDOW]
-    if len(ip_records) >= _RATE_LIMIT_MAX:
-        logger.warning(f"Rate limit excedido para o IP: {client_ip}")
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Muitas requisições. Limite temporário atingido."}
-        )
-    ip_records.append(current_time)
-    _request_counts[client_ip] = ip_records
+    # Rate Limiting Simples (Proxy local em 127.0.0.1/::1/localhost é isento)
+    is_local_proxy = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+    if not is_local_proxy:
+        current_time = time.time()
+        ip_records = _request_counts.get(client_ip, [])
+        # Filtra requisições da janela atual
+        ip_records = [t for t in ip_records if current_time - t < _RATE_LIMIT_WINDOW]
+        if len(ip_records) >= _RATE_LIMIT_MAX:
+            logger.warning(f"Rate limit excedido para o IP: {client_ip}")
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Muitas requisições. Limite temporário atingido."}
+            )
+        ip_records.append(current_time)
+        _request_counts[client_ip] = ip_records
 
     # Executa a requisição
     response: Response = await call_next(request)

@@ -64,6 +64,8 @@ export default function App() {
   // Polling control refs
   const isPollingBusyRef = useRef<boolean>(false);
   const pollTimerRef = useRef<any>(null);
+  const hasReceivedDataRef = useRef<boolean>(false);
+  const consecutiveFailuresRef = useRef<number>(0);
   const [currentConfig, setCurrentConfig] = useState(loadConfig());
   const [dismissedAlerts, setDismissedAlerts] = useState<Record<string, number>>({});
 
@@ -175,9 +177,9 @@ export default function App() {
     });
   }, []);
 
-  // Centralized polling execution
+  // Centralized polling execution com proteção anti-flapping (dampening)
   const executePoll = useCallback(async () => {
-    // Avoid concurrent requests if previous is still waiting
+    // Evita requisições concorrentes sobrepostas
     if (isPollingBusyRef.current) return;
 
     // Se não estiver autenticado, não faz polling
@@ -192,6 +194,9 @@ export default function App() {
       const result = await apiService.fetchFullTelemetry();
 
       if (result.success) {
+        hasReceivedDataRef.current = true;
+        consecutiveFailuresRef.current = 0;
+
         setServerData(result.server);
         setStatusData(result.status);
         setTemperatureData(result.temperature);
@@ -213,14 +218,28 @@ export default function App() {
           return;
         }
 
-        setConnectionStatus('disconnected');
-        setErrorMessage(result.errorMessage);
+        consecutiveFailuresRef.current += 1;
 
-        // If we already had data from earlier, mark as stale
-        if (serverData !== null) {
+        if (result.errorMessage?.includes('429')) {
+          if (hasReceivedDataRef.current) {
+            setIsStaleData(true);
+          }
+          return;
+        }
+
+        // Anti-flapping: se já tínhamos dados recebidos e falhou apenas 1 ou 2 ciclos,
+        // preservamos a interface no estado conectado com aviso de dados em cache (isStaleData),
+        // evitando que a tela fique caindo e voltando a cada oscilação de rede!
+        if (hasReceivedDataRef.current && consecutiveFailuresRef.current < 3) {
           setIsStaleData(true);
         } else {
-          setIsInitialLoad(true);
+          setConnectionStatus('disconnected');
+          setErrorMessage(result.errorMessage || 'Falha de comunicação com o servidor');
+          if (hasReceivedDataRef.current) {
+            setIsStaleData(true);
+          } else {
+            setIsInitialLoad(true);
+          }
         }
       }
     } catch (err: any) {
@@ -230,15 +249,30 @@ export default function App() {
         setLogoutNotice('Sessão expirada ou não autorizada. Faça login novamente.');
         return;
       }
-      setConnectionStatus('disconnected');
-      setErrorMessage(err.message || 'Falha de comunicação com o servidor');
-      if (serverData !== null) {
+
+      consecutiveFailuresRef.current += 1;
+
+      if (err.statusCode === 429 || err.message?.includes('429')) {
+        if (hasReceivedDataRef.current) {
+          setIsStaleData(true);
+        }
+        return;
+      }
+
+      // Anti-flapping: tolera até 2 falhas esporádicas mantendo dados na tela
+      if (hasReceivedDataRef.current && consecutiveFailuresRef.current < 3) {
         setIsStaleData(true);
+      } else {
+        setConnectionStatus('disconnected');
+        setErrorMessage(err.message || 'Falha de comunicação com o servidor');
+        if (hasReceivedDataRef.current) {
+          setIsStaleData(true);
+        }
       }
     } finally {
       isPollingBusyRef.current = false;
     }
-  }, [recordHistory, serverData]);
+  }, [recordHistory]);
 
   // Login handler
   const handleLoginSuccess = (user: string) => {
@@ -255,6 +289,8 @@ export default function App() {
   const handleConfirmLogout = () => {
     clearAuthSession();
     setAuthSession(null);
+    hasReceivedDataRef.current = false;
+    consecutiveFailuresRef.current = 0;
     setIsLogoutModalOpen(false);
     setServerData(null);
     setStatusData(null);
@@ -262,22 +298,22 @@ export default function App() {
     setLogoutNotice('Sessão encerrada com sucesso no servidor. Faça login para continuar.');
   };
 
-  // Periodic polling hook (approx every 2 seconds)
+  // Periodic polling hook (a cada 3s ou conforme configuração)
   useEffect(() => {
     // Initial fetch immediately
     executePoll();
 
-    // Set interval for central 2s polling
+    const intervalMs = Math.max(2500, (currentConfig.refreshIntervalSeconds || 3) * 1000);
     pollTimerRef.current = setInterval(() => {
       executePoll();
-    }, 2000);
+    }, intervalMs);
 
     return () => {
       if (pollTimerRef.current) {
         clearInterval(pollTimerRef.current);
       }
     };
-  }, [executePoll]);
+  }, [executePoll, currentConfig.refreshIntervalSeconds]);
 
   // Manual refresh handler
   const handleManualRefresh = async () => {

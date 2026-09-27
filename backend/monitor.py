@@ -3,6 +3,8 @@ import time
 import platform
 import socket
 import datetime
+import glob
+import re
 from typing import Dict, Any, List, Optional
 import psutil
 
@@ -134,40 +136,214 @@ def get_memory_info() -> Dict[str, Any]:
     }
 
 def get_temperature_info() -> Dict[str, Any]:
-    """Coleta temperatura dos sensores disponíveis. Não inventa valores se não houver."""
-    sensors_dict = {}
+    """Coleta temperatura dos sensores disponíveis (CPU, cores individuais, NVMe, ACPI).
+    Suporta psutil, sysfs (/sys/class/hwmon e /sys/class/thermal) com extração granular por núcleo."""
+    sensors_dict: Dict[str, List[Dict[str, Any]]] = {}
     cpu_temp = None
     min_temp = None
     max_temp = None
-    all_readings = []
+    all_readings: List[float] = []
+    cores_list: List[Dict[str, Any]] = []
 
+    # 1. Tenta psutil.sensors_temperatures()
     try:
         if hasattr(psutil, "sensors_temperatures"):
             raw_sensors = psutil.sensors_temperatures()
             if raw_sensors:
                 for name, entries in raw_sensors.items():
                     sensor_list = []
-                    for entry in entries:
+                    for idx, entry in enumerate(entries):
+                        raw_label = (entry.label or "").strip()
+                        if not raw_label:
+                            if "core" in name.lower():
+                                raw_label = f"Core {idx}"
+                            else:
+                                raw_label = f"{name} {idx}"
+
+                        curr_val = round(entry.current, 1) if entry.current is not None else None
                         reading = {
-                            "label": entry.label or name,
-                            "current": entry.current,
-                            "high": entry.high,
-                            "critical": entry.critical
+                            "label": raw_label,
+                            "current": curr_val,
+                            "high": round(entry.high, 1) if entry.high is not None else None,
+                            "critical": round(entry.critical, 1) if entry.critical is not None else None
                         }
                         sensor_list.append(reading)
-                        if entry.current is not None:
-                            all_readings.append(entry.current)
-                            # Prefer coretemp, k10temp or cpu-thermal for main CPU temp
-                            if cpu_temp is None or any(k in name.lower() for k in ["core", "cpu", "k10", "thermal"]):
-                                cpu_temp = entry.current
+
+                        if curr_val is not None and curr_val > 0:
+                            all_readings.append(curr_val)
+                            label_lower = raw_label.lower()
+                            # Se for sensor de núcleo de CPU
+                            if "core" in label_lower or "cpu" in label_lower or "tctl" in label_lower or "tccd" in label_lower:
+                                core_match = re.search(r"core\s*(\d+)", label_lower)
+                                core_num = int(core_match.group(1)) if core_match else idx
+                                if "package" not in label_lower:
+                                    cores_list.append({
+                                        "core": core_num,
+                                        "label": raw_label,
+                                        "temp_c": curr_val,
+                                        "high": reading["high"],
+                                        "critical": reading["critical"]
+                                    })
+
+                            # Prefer package id 0 ou tctl como temp agregada de CPU
+                            if ("package" in label_lower or "tctl" in label_lower or label_lower == "cpu") and cpu_temp is None:
+                                cpu_temp = curr_val
+
                     if sensor_list:
                         sensors_dict[name] = sensor_list
-
-        if all_readings:
-            min_temp = min(all_readings)
-            max_temp = max(all_readings)
     except Exception:
         pass
+
+    # 2. Se psutil não encontrou sensores ou não encontrou núcleos individuais, inspeciona /sys/class/hwmon
+    if not sensors_dict or len(cores_list) == 0:
+        try:
+            hwmon_paths = glob.glob("/sys/class/hwmon/hwmon*")
+            for hdir in sorted(hwmon_paths):
+                hname = "hwmon"
+                name_file = os.path.join(hdir, "name")
+                if os.path.exists(name_file):
+                    try:
+                        with open(name_file, "r") as f:
+                            hname = f.read().strip()
+                    except Exception:
+                        pass
+
+                temp_inputs = sorted(glob.glob(os.path.join(hdir, "temp*_input")))
+                if not temp_inputs:
+                    continue
+
+                if hname not in sensors_dict:
+                    sensors_dict[hname] = []
+
+                for t_inp in temp_inputs:
+                    base = t_inp[:-6] # strip '_input'
+                    label_file = f"{base}_label"
+                    crit_file = f"{base}_crit"
+                    max_file = f"{base}_max"
+
+                    try:
+                        with open(t_inp, "r") as f:
+                            raw_val = float(f.read().strip())
+                            curr_c = round(raw_val / 1000.0 if raw_val > 1000 else raw_val, 1)
+                    except Exception:
+                        continue
+
+                    if curr_c <= 0 or curr_c > 150:
+                        continue
+
+                    label = ""
+                    if os.path.exists(label_file):
+                        try:
+                            with open(label_file, "r") as f:
+                                label = f.read().strip()
+                        except Exception:
+                            pass
+
+                    t_idx_match = re.search(r"temp(\d+)", os.path.basename(base))
+                    t_idx = int(t_idx_match.group(1)) if t_idx_match else len(sensors_dict[hname])
+                    if not label:
+                        if "core" in hname.lower():
+                            label = f"Core {max(0, t_idx - 2)}" if t_idx >= 2 else "Package id 0"
+                        else:
+                            label = f"{hname} {t_idx}"
+
+                    high_val = None
+                    if os.path.exists(max_file):
+                        try:
+                            with open(max_file, "r") as f:
+                                hv = float(f.read().strip())
+                                high_val = round(hv / 1000.0 if hv > 1000 else hv, 1)
+                        except Exception:
+                            pass
+
+                    crit_val = None
+                    if os.path.exists(crit_file):
+                        try:
+                            with open(crit_file, "r") as f:
+                                cv = float(f.read().strip())
+                                crit_val = round(cv / 1000.0 if cv > 1000 else cv, 1)
+                        except Exception:
+                            pass
+
+                    reading = {
+                        "label": label,
+                        "current": curr_c,
+                        "high": high_val,
+                        "critical": crit_val
+                    }
+                    sensors_dict[hname].append(reading)
+                    all_readings.append(curr_c)
+
+                    label_lower = label.lower()
+                    if "core" in label_lower or "cpu" in label_lower or "tctl" in label_lower or "tccd" in label_lower:
+                        core_match = re.search(r"core\s*(\d+)", label_lower)
+                        core_num = int(core_match.group(1)) if core_match else len(cores_list)
+                        if "package" not in label_lower:
+                            cores_list.append({
+                                "core": core_num,
+                                "label": label,
+                                "temp_c": curr_c,
+                                "high": high_val,
+                                "critical": crit_val
+                            })
+
+                    if ("package" in label_lower or "tctl" in label_lower) and cpu_temp is None:
+                        cpu_temp = curr_c
+        except Exception:
+            pass
+
+    # 3. Fallback /sys/class/thermal/thermal_zone*
+    if not sensors_dict:
+        try:
+            tz_paths = glob.glob("/sys/class/thermal/thermal_zone*")
+            for tz in sorted(tz_paths):
+                type_file = os.path.join(tz, "type")
+                temp_file = os.path.join(tz, "temp")
+                if os.path.exists(temp_file):
+                    try:
+                        with open(temp_file, "r") as f:
+                            raw_val = float(f.read().strip())
+                            curr_c = round(raw_val / 1000.0 if raw_val > 1000 else raw_val, 1)
+                        z_type = "acpitz"
+                        if os.path.exists(type_file):
+                            with open(type_file, "r") as f:
+                                z_type = f.read().strip()
+                        if 0 < curr_c <= 150:
+                            if "thermal_zone" not in sensors_dict:
+                                sensors_dict["thermal_zone"] = []
+                            sensors_dict["thermal_zone"].append({
+                                "label": z_type,
+                                "current": curr_c,
+                                "high": 100.0,
+                                "critical": 105.0
+                            })
+                            all_readings.append(curr_c)
+                            if cpu_temp is None:
+                                cpu_temp = curr_c
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Ordena núcleos por índice e remove possíveis duplicatas
+    if cores_list:
+        seen_cores = set()
+        unique_cores = []
+        for c in sorted(cores_list, key=lambda x: x["core"]):
+            if c["core"] not in seen_cores:
+                seen_cores.add(c["core"])
+                unique_cores.append(c)
+        cores_list = unique_cores
+
+    # Se não temos cpu_temp direto de Package id 0 / Tctl, calcula média dos núcleos
+    if cpu_temp is None and cores_list:
+        cpu_temp = round(sum(c["temp_c"] for c in cores_list) / len(cores_list), 1)
+    elif cpu_temp is None and all_readings:
+        cpu_temp = round(all_readings[0], 1)
+
+    if all_readings:
+        min_temp = min(all_readings)
+        max_temp = max(all_readings)
 
     has_sensors = len(sensors_dict) > 0 and len(all_readings) > 0
 
@@ -177,7 +353,8 @@ def get_temperature_info() -> Dict[str, Any]:
         "cpu_temp": round(cpu_temp, 1) if cpu_temp is not None else None,
         "min_temp": round(min_temp, 1) if min_temp is not None else None,
         "max_temp": round(max_temp, 1) if max_temp is not None else None,
-        "sensors": sensors_dict
+        "sensors": sensors_dict,
+        "cores": cores_list
     }
 
 def get_disk_info() -> Dict[str, Any]:
