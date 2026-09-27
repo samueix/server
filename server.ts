@@ -87,7 +87,7 @@ async function startServer() {
     }
   });
 
-  // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/server, /api/status, etc.)
+  // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/system, /api/cpu, /api/network, etc.)
   app.all('/api/*', async (req, res, next) => {
     // Rotas tratadas internamente pelo server.ts
     const internalPaths = [
@@ -108,6 +108,7 @@ async function startServer() {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
 
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
@@ -116,23 +117,50 @@ async function startServer() {
     const subPath = (req.params as any)[0] || '';
     const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
     
-    // Tenta primeiro conectar no IP local do Ubuntu Server, ou localhost se rodando na mesma máquina
-    const targetUrls = [
+    // Constrói os cabeçalhos a encaminhar, preservando autenticação enviada pelo cliente
+    const forwardHeaders: Record<string, string> = {
+      'Accept': 'application/json',
+      ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
+    };
+
+    if (req.headers['authorization']) {
+      forwardHeaders['Authorization'] = req.headers['authorization'] as string;
+    }
+    if (req.headers['x-api-key']) {
+      forwardHeaders['X-API-Key'] = req.headers['x-api-key'] as string;
+    }
+
+    // Se nenhuma credencial veio do frontend, usa fallback configurado no ambiente
+    if (!forwardHeaders['Authorization'] && !forwardHeaders['X-API-Key']) {
+      if (process.env.API_KEY) {
+        forwardHeaders['X-API-Key'] = process.env.API_KEY;
+      } else {
+        const adminUser = process.env.ADMIN_USERNAME || 'admin';
+        const adminPass = process.env.ADMIN_PASSWORD || 'admin';
+        forwardHeaders['Authorization'] = `Basic ${Buffer.from(`${adminUser}:${adminPass}`).toString('base64')}`;
+      }
+    }
+
+    // Tenta conectar no backend FastAPI via loopback IPv4/IPv6, IP LAN ou IPv6 global
+    const targetUrls: string[] = [];
+    if (process.env.BACKEND_URL) {
+      targetUrls.push(`${process.env.BACKEND_URL.replace(/\/$/, '')}/api/${subPath}${queryStr}`);
+    }
+    targetUrls.push(
       `http://127.0.0.1:8000/api/${subPath}${queryStr}`,
-      `http://192.168.100.23:8000/api/${subPath}${queryStr}`
-    ];
+      `http://localhost:8000/api/${subPath}${queryStr}`,
+      `http://[::1]:8000/api/${subPath}${queryStr}`,
+      `http://192.168.100.23:8000/api/${subPath}${queryStr}`,
+      `http://[2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445]:8000/api/${subPath}${queryStr}`
+    );
 
     for (const targetUrl of targetUrls) {
       try {
         const response = await fetch(targetUrl, {
           method: req.method,
-          headers: {
-            'Accept': 'application/json',
-            'X-API-Key': 'troque-essa-chave-secreta-em-producao',
-            ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
-          },
+          headers: forwardHeaders,
           body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
-          signal: AbortSignal.timeout(2000)
+          signal: AbortSignal.timeout(2500)
         });
 
         const text = await response.text();
@@ -392,9 +420,23 @@ async function startServer() {
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
-  });
+  try {
+    const server = app.listen(PORT, '::', () => {
+      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (dual-stack IPv4/IPv6 [::]:${PORT})`);
+    });
+    server.on('error', (err: any) => {
+      if (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL') {
+        console.warn(`[AdGuard AI NOC] IPv6 não suportado, escutando em 0.0.0.0:${PORT}`);
+        app.listen(PORT, '0.0.0.0', () => {
+          console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+        });
+      }
+    });
+  } catch {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+    });
+  }
 }
 
 startServer();

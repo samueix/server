@@ -8,6 +8,7 @@ import {
   ServiceItem 
 } from '../types';
 import { API, SERVER_IPV4, SERVER_IPV6 } from '../config';
+import { getAuthHeaders } from './authService';
 
 // Armazena a leitura anterior de rede para cálculo de velocidade em tempo real (MB/s ou KB/s)
 let lastNetworkSnapshot: {
@@ -45,8 +46,7 @@ export class ApiError extends Error {
 
 /**
  * Função base para requisições HTTP relativas ao Nginx (/api/...)
- * O Nginx injeta automaticamente o header X-API-Key para o FastAPI na porta 8000.
- * O navegador nunca acessa a porta 8000 diretamente, evitando problemas de CORS e portas bloqueadas.
+ * Injeta automaticamente credenciais de autenticação salvas ou delegadas ao proxy Nginx.
  */
 export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal): Promise<T> {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
@@ -54,8 +54,10 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
     ? cleanEndpoint 
     : `${API.server}${cleanEndpoint}`;
 
+  const authHeaders = getAuthHeaders();
   const headers: Record<string, string> = {
-    'Accept': 'application/json'
+    'Accept': 'application/json',
+    ...authHeaders
   };
 
   const controller = new AbortController();
@@ -82,7 +84,7 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
     if (signal) signal.removeEventListener('abort', onExternalAbort);
 
     if (response.status === 401) {
-      throw new ApiError('Autenticação inválida no proxy (401)', 401);
+      throw new ApiError('Sessão expirada ou credenciais inválidas (401)', 401);
     }
     if (response.status === 403) {
       throw new ApiError('Acesso proibido (403)', 403);
@@ -116,89 +118,189 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
 }
 
 /**
- * GET /
+ * GET /api/health
  * Verificação pública de status e health check
  */
-export async function getRootHealth(): Promise<{ status: string; servidor: string; mensagem: string }> {
-  return apiFetch<{ status: string; servidor: string; mensagem: string }>('/');
+export async function getRootHealth(): Promise<{ status: string; service?: string; timestamp?: any }> {
+  return apiFetch<{ status: string; service?: string; timestamp?: any }>('/api/health');
 }
 
 /**
- * GET /api/server
- * Informações completas do sistema operacional e hardware
+ * Normaliza os dados retornados por GET /api/system para a interface ApiServerResponse
  */
-export async function getServerInfo(signal?: AbortSignal): Promise<ApiServerResponse> {
-  const data = await apiFetch<any>('/api/server', signal);
+function parseSystemSnapshot(data: any): ApiServerResponse {
+  const sysObj = data.system || data.sistema || {};
+  const hostname = sysObj.hostname || data.hostname || data.servidor || 'samuelserver';
+  const nome = sysObj.os || sysObj.nome || 'Ubuntu Linux';
+  const versao = sysObj.os_version || sysObj.versao || '24.04 LTS';
+  const arquitetura = sysObj.arch || sysObj.arquitetura || 'x86_64';
+  const kernel = sysObj.kernel || data.kernel || sysObj.kernel_version || undefined;
+
+  // Uptime
+  let dias = 0;
+  let horas = 0;
+  let minutos = 0;
+  let segundos = 0;
+
+  if (data.uptime && typeof data.uptime === 'object') {
+    if (typeof data.uptime.uptime_seconds === 'number') {
+      const sec = Math.floor(data.uptime.uptime_seconds);
+      dias = Math.floor(sec / 86400);
+      horas = Math.floor((sec % 86400) / 3600);
+      minutos = Math.floor((sec % 3600) / 60);
+      segundos = Math.floor(sec % 60);
+    } else {
+      dias = Number(data.uptime.dias || 0);
+      horas = Number(data.uptime.horas || 0);
+      minutos = Number(data.uptime.minutos || 0);
+      segundos = Number(data.uptime.segundos || 0);
+    }
+  }
+
+  // CPU
+  const cpuObj = data.cpu || {};
+  const uso_percentual = Number(cpuObj.usage_percent ?? cpuObj.uso_percentual ?? data.cpu_percentual ?? 0);
+  const nucleos_fisicos = Number(cpuObj.cores_physical ?? cpuObj.nucleos_fisicos ?? 2);
+  const nucleos_logicos = Number(cpuObj.cores_logical ?? cpuObj.nucleos_logicos ?? 4);
+  const frequencia_mhz = typeof cpuObj.frequency_mhz === 'object' && cpuObj.frequency_mhz !== null
+    ? Number(cpuObj.frequency_mhz.current || 0)
+    : Number(cpuObj.frequencia_mhz || 0);
+
+  // Carga
+  const loadObj = cpuObj.load_average || data.carga || {};
+  const carga1 = Number(loadObj["1m"] ?? loadObj["1_minuto"] ?? 0);
+  const carga5 = Number(loadObj["5m"] ?? loadObj["5_minutos"] ?? 0);
+  const carga15 = Number(loadObj["15m"] ?? loadObj["15_minutos"] ?? 0);
+
+  // Memória RAM
+  const ramObj = data.memory?.ram || data.memoria || {};
+  const total_gb = Number(ramObj.total_gb || 0);
+  const usada_gb = Number(ramObj.used_gb ?? ramObj.usada_gb ?? 0);
+  const disponivel_gb = Number(ramObj.available_gb ?? ramObj.disponivel_gb ?? Math.max(0, total_gb - usada_gb));
+  const livre_gb = Number(ramObj.free_gb ?? ramObj.livre_gb ?? 0);
+  const ram_percent = Number(ramObj.usage_percent ?? ramObj.uso_percentual ?? 0);
+
+  // Disco
+  const diskRoot = data.disk?.root || data.disco || {};
+  const disk_total_gb = Number(diskRoot.total_gb || 0);
+  const disk_usado_gb = Number(diskRoot.used_gb ?? diskRoot.usado_gb ?? 0);
+  const disk_livre_gb = Number(diskRoot.free_gb ?? diskRoot.livre_gb ?? Math.max(0, disk_total_gb - disk_usado_gb));
+  const disk_percent = Number(diskRoot.percent ?? diskRoot.uso_percentual ?? 0);
+
+  // Temperatura integrada (se presente no snapshot de /api/system)
+  let temperatura: ApiTemperatureResponse | undefined = undefined;
+  if (data.temperature) {
+    const tObj = data.temperature;
+    const disponivel = Boolean(tObj.available ?? tObj.disponivel);
+    const sensores: any[] = [];
+    if (tObj.sensors && typeof tObj.sensors === 'object') {
+      for (const [sName, sEntries] of Object.entries(tObj.sensors)) {
+        if (Array.isArray(sEntries)) {
+          sEntries.forEach((entry: any) => {
+            sensores.push({
+              sensor: sName,
+              nome: entry.label || sName,
+              temperatura_c: Number(entry.current || 0),
+              maxima_c: entry.high ? Number(entry.high) : undefined,
+              critica_c: entry.critical ? Number(entry.critical) : undefined
+            });
+          });
+        }
+      }
+    } else if (Array.isArray(tObj.sensores)) {
+      sensores.push(...tObj.sensores);
+    }
+    temperatura = {
+      disponivel,
+      temperatura_c: tObj.cpu_temp !== undefined && tObj.cpu_temp !== null 
+        ? Number(tObj.cpu_temp) 
+        : (sensores[0]?.temperatura_c),
+      sensores
+    };
+  }
 
   return {
-    servidor: data.servidor || data.sistema?.hostname || 'samuelserver',
+    servidor: hostname,
     sistema: {
-      nome: data.sistema?.nome || 'Linux',
-      versao: data.sistema?.versao || 'Ubuntu',
-      arquitetura: data.sistema?.arquitetura || 'x86_64',
-      hostname: data.sistema?.hostname || data.servidor || 'samuelserver'
+      nome,
+      versao,
+      arquitetura,
+      hostname,
+      kernel
     },
     uptime: {
-      dias: Number(data.uptime?.dias || 0),
-      horas: Number(data.uptime?.horas || 0),
-      minutos: Number(data.uptime?.minutos || 0),
-      segundos: Number(data.uptime?.segundos || 0)
+      dias,
+      horas,
+      minutos,
+      segundos
     },
     cpu: {
-      uso_percentual: Number(data.cpu?.uso_percentual || 0),
-      nucleos_fisicos: Number(data.cpu?.nucleos_fisicos || 0),
-      nucleos_logicos: Number(data.cpu?.nucleos_logicos || 0),
-      frequencia_mhz: Number(data.cpu?.frequencia_mhz || 0)
+      uso_percentual,
+      nucleos_fisicos,
+      nucleos_logicos,
+      frequencia_mhz
     },
     carga: {
-      "1_minuto": Number(data.carga?.["1_minuto"] || 0),
-      "5_minutos": Number(data.carga?.["5_minutos"] || 0),
-      "15_minutos": Number(data.carga?.["15_minutos"] || 0)
+      "1_minuto": carga1,
+      "5_minutos": carga5,
+      "15_minutos": carga15
     },
     memoria: {
-      total_gb: Number(data.memoria?.total_gb || 0),
-      usada_gb: Number(data.memoria?.usada_gb || 0),
-      disponivel_gb: Number(data.memoria?.disponivel_gb || 0),
-      livre_gb: Number(data.memoria?.livre_gb || 0),
-      uso_percentual: Number(data.memoria?.uso_percentual || 0)
+      total_gb,
+      usada_gb,
+      disponivel_gb,
+      livre_gb,
+      uso_percentual: ram_percent
     },
     disco: {
-      total_gb: Number(data.disco?.total_gb || 0),
-      usado_gb: Number(data.disco?.usado_gb || 0),
-      livre_gb: Number(data.disco?.livre_gb || 0),
-      uso_percentual: Number(data.disco?.uso_percentual || 0)
-    }
+      total_gb: disk_total_gb,
+      usado_gb: disk_usado_gb,
+      livre_gb: disk_livre_gb,
+      uso_percentual: disk_percent
+    },
+    temperatura
   };
 }
 
 /**
- * GET /api/status
- * Resumo rápido do servidor
+ * GET /api/system
+ * Informações completas do sistema operacional e hardware do Ubuntu Server
+ */
+export async function getServerInfo(signal?: AbortSignal): Promise<ApiServerResponse> {
+  const data = await apiFetch<any>('/api/system', signal);
+  return parseSystemSnapshot(data);
+}
+
+/**
+ * GET /api/system
+ * Resumo rápido do servidor e recursos operacionais
  */
 export async function getStatusSummary(signal?: AbortSignal): Promise<ApiStatusResponse> {
-  const data = await apiFetch<any>('/api/status', signal);
+  const data = await apiFetch<any>('/api/system', signal);
+  const server = parseSystemSnapshot(data);
+
   return {
-    servidor: data.servidor || 'samuelserver',
+    servidor: server.servidor,
     cpu: {
-      uso_percentual: Number(data.cpu?.uso_percentual || 0),
-      nucleos: Number(data.cpu?.nucleos || 0)
+      uso_percentual: server.cpu.uso_percentual,
+      nucleos: server.cpu.nucleos_logicos
     },
-    cpu_percentual: Number(data.cpu?.uso_percentual ?? data.cpu_percentual ?? 0),
+    cpu_percentual: server.cpu.uso_percentual,
     memoria: {
-      total_gb: Number(data.memoria?.total_gb || 0),
-      usada_gb: Number(data.memoria?.usada_gb || 0),
-      disponivel_gb: Number(data.memoria?.disponivel_gb || 0),
-      uso_percentual: Number(data.memoria?.uso_percentual || 0)
+      total_gb: server.memoria.total_gb,
+      usada_gb: server.memoria.usada_gb,
+      disponivel_gb: server.memoria.disponivel_gb,
+      uso_percentual: server.memoria.uso_percentual
     },
-    memoria_percentual: Number(data.memoria?.uso_percentual ?? data.memoria_percentual ?? 0),
+    memoria_percentual: server.memoria.uso_percentual,
     disco: {
-      total_gb: Number(data.disco?.total_gb || 0),
-      usado_gb: Number(data.disco?.usado_gb || 0),
-      livre_gb: Number(data.disco?.livre_gb || 0),
-      uso_percentual: Number(data.disco?.uso_percentual || 0)
+      total_gb: server.disco.total_gb,
+      usado_gb: server.disco.usado_gb,
+      livre_gb: server.disco.livre_gb,
+      uso_percentual: server.disco.uso_percentual
     },
-    uptime: data.uptime || {},
-    status: data.status || 'ONLINE'
+    uptime: server.uptime,
+    status: 'ONLINE'
   };
 }
 
@@ -496,27 +598,33 @@ export const apiService = {
 
   async fetchFullTelemetry(signal?: AbortSignal): Promise<FullTelemetryResult> {
     try {
-      // 1. Busca os dados principais do servidor
+      // 1. Busca os dados principais do servidor (/api/system)
       const serverDetails = await getServerInfo(signal);
 
-      // 2. Busca o resumo de status
-      let statusRes: ApiStatusResponse | null = null;
-      try {
-        statusRes = await getStatusSummary(signal);
-      } catch (e) {
-        if (serverDetails) {
-          statusRes = {
-            servidor: serverDetails.sistema?.hostname || serverDetails.servidor || 'samuelserver',
-            cpu_percentual: serverDetails.cpu?.uso_percentual ?? 0,
-            memoria_percentual: serverDetails.memoria?.uso_percentual ?? 0,
-            uptime: {
-              dias: serverDetails.uptime?.dias ?? 0,
-              horas: serverDetails.uptime?.horas ?? 0
-            },
-            status: 'ONLINE'
-          };
-        }
-      }
+      // 2. Constrói o resumo de status diretamente a partir do snapshot (sem requisição duplicada a /api/system)
+      const statusRes: ApiStatusResponse = {
+        servidor: serverDetails.sistema?.hostname || serverDetails.servidor || 'samuelserver',
+        cpu: {
+          uso_percentual: serverDetails.cpu?.uso_percentual ?? 0,
+          nucleos: serverDetails.cpu?.nucleos_logicos ?? 4
+        },
+        cpu_percentual: serverDetails.cpu?.uso_percentual ?? 0,
+        memoria: {
+          total_gb: serverDetails.memoria?.total_gb ?? 0,
+          usada_gb: serverDetails.memoria?.usada_gb ?? 0,
+          disponivel_gb: serverDetails.memoria?.disponivel_gb ?? 0,
+          uso_percentual: serverDetails.memoria?.uso_percentual ?? 0
+        },
+        memoria_percentual: serverDetails.memoria?.uso_percentual ?? 0,
+        disco: {
+          total_gb: serverDetails.disco?.total_gb ?? 0,
+          usado_gb: serverDetails.disco?.usado_gb ?? 0,
+          livre_gb: serverDetails.disco?.livre_gb ?? 0,
+          uso_percentual: serverDetails.disco?.uso_percentual ?? 0
+        },
+        uptime: serverDetails.uptime,
+        status: 'ONLINE'
+      };
 
       // 3. Busca de processos, serviços, rede e temperatura em paralelo
       const [procList, svcList, netData, tempData] = await Promise.allSettled([

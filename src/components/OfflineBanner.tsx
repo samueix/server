@@ -37,7 +37,7 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({
         </h2>
 
         <p className="text-xs text-slate-400 mt-1 font-mono">
-          Endpoint do Proxy Nginx: <span className="text-slate-200 font-semibold">/api/status</span> (Servidor {serverIp})
+          Endpoint do Proxy Nginx: <span className="text-slate-200 font-semibold">{apiUrl || '/api/system'}</span> (Servidor {serverIp})
         </p>
 
         {errorMessage && (

@@ -17,6 +17,9 @@ import { CommandsTab } from './components/tabs/CommandsTab';
 import { SystemTab } from './components/tabs/SystemTab';
 import { AdGuardHomeTab } from './components/tabs/AdGuardHomeTab';
 import { DocumentationTab } from './components/tabs/DocumentationTab';
+import { LoginScreen } from './components/LoginScreen';
+import { LogoutModal } from './components/LogoutModal';
+import { getStoredAuth, clearAuthSession, AuthSession } from './services/authService';
 
 import { 
   NavigationTab, 
@@ -36,6 +39,11 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isCodeViewerOpen, setIsCodeViewerOpen] = useState<boolean>(false);
+
+  // Authentication Session State (Sessão salva no localStorage / autenticada via /api/auth/verify)
+  const [authSession, setAuthSession] = useState<AuthSession | null>(() => getStoredAuth());
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState<boolean>(false);
+  const [logoutNotice, setLogoutNotice] = useState<string | null>(null);
 
   // Connection & Telemetry State
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
@@ -171,6 +179,13 @@ export default function App() {
   const executePoll = useCallback(async () => {
     // Avoid concurrent requests if previous is still waiting
     if (isPollingBusyRef.current) return;
+
+    // Se não estiver autenticado, não faz polling
+    const currentAuth = getStoredAuth();
+    if (!currentAuth || !currentAuth.authenticated) {
+      return;
+    }
+
     isPollingBusyRef.current = true;
 
     try {
@@ -191,6 +206,13 @@ export default function App() {
         setErrorMessage(undefined);
         setIsInitialLoad(false);
       } else {
+        if (result.errorMessage?.includes('401') || result.errorMessage?.includes('Sessão expirada')) {
+          clearAuthSession();
+          setAuthSession(null);
+          setLogoutNotice('Sua sessão expirou ou as credenciais foram alteradas no servidor. Por favor, autentique-se novamente.');
+          return;
+        }
+
         setConnectionStatus('disconnected');
         setErrorMessage(result.errorMessage);
 
@@ -202,6 +224,12 @@ export default function App() {
         }
       }
     } catch (err: any) {
+      if (err.statusCode === 401 || err.message?.includes('401')) {
+        clearAuthSession();
+        setAuthSession(null);
+        setLogoutNotice('Sessão expirada ou não autorizada. Faça login novamente.');
+        return;
+      }
       setConnectionStatus('disconnected');
       setErrorMessage(err.message || 'Falha de comunicação com o servidor');
       if (serverData !== null) {
@@ -211,6 +239,28 @@ export default function App() {
       isPollingBusyRef.current = false;
     }
   }, [recordHistory, serverData]);
+
+  // Login handler
+  const handleLoginSuccess = (user: string) => {
+    const session = getStoredAuth();
+    setAuthSession(session);
+    setLogoutNotice(null);
+    setIsInitialLoad(true);
+    setTimeout(() => {
+      executePoll();
+    }, 100);
+  };
+
+  // Logout handler
+  const handleConfirmLogout = () => {
+    clearAuthSession();
+    setAuthSession(null);
+    setIsLogoutModalOpen(false);
+    setServerData(null);
+    setStatusData(null);
+    setConnectionStatus('connecting');
+    setLogoutNotice('Sessão encerrada com sucesso no servidor. Faça login para continuar.');
+  };
 
   // Periodic polling hook (approx every 2 seconds)
   useEffect(() => {
@@ -247,6 +297,16 @@ export default function App() {
     ? `${statusData.uptime.dias}d ${statusData.uptime.horas}h` 
     : '';
 
+  // Se não houver sessão ativa autenticada, exibe a tela de login
+  if (!authSession || !authSession.authenticated) {
+    return (
+      <LoginScreen
+        onLoginSuccess={handleLoginSuccess}
+        logoutNotice={logoutNotice}
+      />
+    );
+  }
+
   return (
     <SecurityVaultProvider>
       <div className="min-h-screen bg-[#070c14] text-slate-100 flex flex-col font-sans select-text relative overflow-x-hidden">
@@ -269,6 +329,8 @@ export default function App() {
         currentTab={activeTab}
         errorMessage={errorMessage}
         activeAlertsCount={activeAlerts.length}
+        currentUser={authSession?.user}
+        onLogout={() => setIsLogoutModalOpen(true)}
       />
 
       {/* Main Layout Area: Sidebar (Left) + Content (Right) */}
@@ -285,6 +347,8 @@ export default function App() {
           hostname={hostname}
           serverIp={serverIp}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          currentUser={authSession?.user}
+          onLogout={() => setIsLogoutModalOpen(true)}
         />
 
         {/* Main Content Area */}
@@ -305,7 +369,7 @@ export default function App() {
              activeTab !== 'documentation' && (
               <OfflineBanner
                 serverIp={serverIp}
-                apiUrl="/api/status"
+                apiUrl="/api/system"
                 errorMessage={errorMessage}
                 onRetry={handleManualRefresh}
                 onOpenSettings={() => setIsSettingsOpen(true)}
@@ -433,6 +497,15 @@ export default function App() {
 
       {/* Security Unlock Modal for Vault Protected Passwords */}
       <SecurityUnlockModal />
+
+      {/* Logout Modal */}
+      <LogoutModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirmLogout={handleConfirmLogout}
+        session={authSession}
+        serverIp={serverIp}
+      />
     </div>
   </SecurityVaultProvider>
 );

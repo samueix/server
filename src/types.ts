@@ -52,6 +52,7 @@ export interface ApiSystemInfo {
   versao: string;
   arquitetura: string;
   hostname: string;
+  kernel?: string;
 }
 
 export interface ApiUptime {

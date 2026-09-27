@@ -9,7 +9,9 @@ import {
   Server,
   Shield,
   BookOpen,
-  X
+  X,
+  User,
+  LogOut
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 import { ServerPanelLogo } from './ServerPanelLogo';
@@ -23,6 +25,8 @@ interface SidebarProps {
   hostname: string;
   serverIp: string;
   onOpenSettings: () => void;
+  currentUser?: string | null;
+  onLogout?: () => void;
 }
 
 interface NavItemConfig {
@@ -50,7 +54,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onCloseMobile,
   connectionStatus,
-  serverIp
+  serverIp,
+  currentUser,
+  onLogout
 }) => {
   const isOnline = connectionStatus === 'connected';
 
@@ -124,6 +130,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {serverIp || '192.168.100.23'}
           </span>
         </div>
+
+        {currentUser && onLogout && (
+          <div className="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-1.5 overflow-hidden">
+              <User className="w-3 h-3 text-blue-400 shrink-0" />
+              <span className="truncate text-white/90 font-mono font-medium">{currentUser}</span>
+            </div>
+            <button
+              onClick={onLogout}
+              className="text-rose-400 hover:text-rose-300 font-sans transition flex items-center gap-1 px-1 py-0.5 rounded hover:bg-white/5"
+              title="Deslogar do servidor"
+            >
+              <LogOut className="w-3 h-3" />
+              <span>Sair</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

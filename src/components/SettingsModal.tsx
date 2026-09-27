@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Save, CheckCircle2, AlertCircle, RefreshCw, Shield, Server } from 'lucide-react';
 import { loadConfig, saveConfig, AppConfig, DEFAULT_CONFIG, API } from '../config';
+import { getAuthHeaders } from '../services/authService';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -26,18 +27,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleTestConnection = async () => {
     setTestStatus('testing');
-    setTestMessage('Testando endpoints relativos do Nginx (/api/status e /adguard-api/status)...');
+    setTestMessage('Testando endpoints relativos do Nginx (/api/system e /adguard-api/status)...');
 
     try {
-      // 1. Testa o proxy do FastAPI (/api/status)
-      const apiRes = await fetch(`${API.server}/status`, {
+      // 1. Testa o endpoint do FastAPI (/api/system)
+      const authHeaders = getAuthHeaders();
+      const apiRes = await fetch('/api/system', {
         method: 'GET',
-        headers: { 'Accept': 'application/json' },
+        headers: { 
+          'Accept': 'application/json',
+          ...authHeaders
+        },
         signal: AbortSignal.timeout(4000)
       });
 
       if (!apiRes.ok) {
-        throw new Error(`Proxy /api/status respondeu com status HTTP ${apiRes.status}`);
+        throw new Error(`Endpoint /api/system respondeu com status HTTP ${apiRes.status}`);
       }
 
       const apiData = await apiRes.json();
@@ -59,7 +64,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
 
       setTestStatus('success');
-      setTestMessage(`Conectado com sucesso via Nginx! Servidor: ${apiData.servidor || 'samuelserver'}${adguardMsg}`);
+      const hostname = apiData.system?.hostname || apiData.hostname || apiData.servidor || 'samuelserver';
+      setTestMessage(`Conectado com sucesso via Nginx! Servidor: ${hostname}${adguardMsg}`);
     } catch (err: any) {
       setTestStatus('error');
       if (err.name === 'AbortError') {
