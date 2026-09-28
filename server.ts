@@ -87,6 +87,79 @@ async function startServer() {
     }
   });
 
+  // Verificação de autenticação de dois usuários: admin (admin) e user (user)
+  app.get('/api/auth/verify', async (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+
+    const authHeader = req.headers['authorization'];
+    const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
+
+    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
+    const validAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+    const validStandardUser = process.env.USER_USERNAME || 'user';
+    const validStandardPass = process.env.USER_PASSWORD || 'user';
+    const validApiKey = process.env.API_KEY || '';
+
+    let authenticatedUser: string | null = null;
+    let userRole = 'user';
+
+    // 1. Check API Key Header
+    if (apiKeyHeader && validApiKey && apiKeyHeader === validApiKey) {
+      authenticatedUser = 'api-client';
+      userRole = 'admin';
+    }
+
+    // 2. Check Basic Auth (admin:admin ou user:user)
+    if (!authenticatedUser && authHeader && authHeader.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+        const [u, p] = decoded.split(':');
+        if (u === validAdminUser && p === validAdminPass) {
+          authenticatedUser = validAdminUser;
+          userRole = 'admin';
+        } else if (u === validStandardUser && p === validStandardPass) {
+          authenticatedUser = validStandardUser;
+          userRole = 'user';
+        }
+      } catch {}
+    }
+
+    // 3. Check Bearer Token
+    if (!authenticatedUser && authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      if (validApiKey && token === validApiKey) {
+        authenticatedUser = 'bearer-admin';
+        userRole = 'admin';
+      } else if (token === validAdminPass) {
+        authenticatedUser = validAdminUser;
+        userRole = 'admin';
+      } else if (token === validStandardPass) {
+        authenticatedUser = validStandardUser;
+        userRole = 'user';
+      }
+    }
+
+    if (authenticatedUser) {
+      return res.json({
+        authenticated: true,
+        user: authenticatedUser,
+        role: userRole,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    return res.status(401).json({
+      authenticated: false,
+      detail: 'Credenciais inválidas. Verifique o usuário e a senha digitados.'
+    });
+  });
+
   // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
   let cachedWorkingBackendBase: string | null = null;
 
@@ -95,6 +168,7 @@ async function startServer() {
     // Rotas tratadas internamente pelo server.ts
     const internalPaths = [
       '/api/health',
+      '/api/auth/verify',
       '/api/adguard/config',
       '/api/adguard/status',
       '/api/adguard/stats',
@@ -120,29 +194,55 @@ async function startServer() {
     const subPath = (req.params as any)[0] || '';
     const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
     
-    // Constrói os cabeçalhos a encaminhar, preservando autenticação enviada pelo cliente
+    // 1. Validação de segurança no proxy: verifica se o cliente possui credenciais válidas
+    const clientAuth = req.headers['authorization'];
+    const clientApiKey = req.headers['x-api-key'] as string | undefined;
+
+    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
+    const validAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+    const validStandardUser = process.env.USER_USERNAME || 'user';
+    const validStandardPass = process.env.USER_PASSWORD || 'user';
+    const validApiKey = process.env.API_KEY || '';
+
+    let isAuthorizedClient = false;
+
+    if (clientApiKey && validApiKey && clientApiKey === validApiKey) {
+      isAuthorizedClient = true;
+    } else if (clientAuth && clientAuth.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(clientAuth.slice(6), 'base64').toString('utf-8');
+        const [u, p] = decoded.split(':');
+        if ((u === validAdminUser && p === validAdminPass) || (u === validStandardUser && p === validStandardPass)) {
+          isAuthorizedClient = true;
+        }
+      } catch {}
+    } else if (clientAuth && clientAuth.startsWith('Bearer ')) {
+      const token = clientAuth.slice(7);
+      if ((validApiKey && token === validApiKey) || token === validAdminPass || token === validStandardPass) {
+        isAuthorizedClient = true;
+      }
+    }
+
+    // Se o cliente não estiver autenticado nem como admin nem como user
+    if (!isAuthorizedClient) {
+      return res.status(401).json({
+        detail: 'Não autorizado. Faça login com usuário e senha para acessar o painel.'
+      });
+    }
+
+    // 2. Constrói os cabeçalhos para o backend FastAPI no Ubuntu Server
+    // Usamos a credencial mestre do daemon local para garantir que tanto o usuário
+    // 'admin' quanto 'user' recebam a telemetria normalmente sem erro 401 do daemon
     const forwardHeaders: Record<string, string> = {
       'Accept': 'application/json',
       ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
     };
 
-    if (req.headers['authorization']) {
-      forwardHeaders['Authorization'] = req.headers['authorization'] as string;
+    if (validApiKey) {
+      forwardHeaders['X-API-Key'] = validApiKey;
     }
-    if (req.headers['x-api-key']) {
-      forwardHeaders['X-API-Key'] = req.headers['x-api-key'] as string;
-    }
-
-    // Se nenhuma credencial veio do frontend, usa fallback configurado no ambiente
-    if (!forwardHeaders['Authorization'] && !forwardHeaders['X-API-Key']) {
-      if (process.env.API_KEY) {
-        forwardHeaders['X-API-Key'] = process.env.API_KEY;
-      } else {
-        const adminUser = process.env.ADMIN_USERNAME || 'admin';
-        const adminPass = process.env.ADMIN_PASSWORD || 'admin';
-        forwardHeaders['Authorization'] = `Basic ${Buffer.from(`${adminUser}:${adminPass}`).toString('base64')}`;
-      }
-    }
+    const adminBasic = `Basic ${Buffer.from(`${validAdminUser}:${validAdminPass}`).toString('base64')}`;
+    forwardHeaders['Authorization'] = adminBasic;
 
     // Lista de candidatos de backend FastAPI
     const candidateBases: string[] = [];

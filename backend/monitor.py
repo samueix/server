@@ -5,6 +5,9 @@ import socket
 import datetime
 import glob
 import re
+import subprocess
+import json
+import ipaddress
 from typing import Dict, Any, List, Optional
 import psutil
 
@@ -420,6 +423,90 @@ def get_disk_info() -> Dict[str, Any]:
         "partitions": partitions_data
     }
 
+def detect_system_global_ipv6() -> Optional[str]:
+    """Detecta o IPv6 público/global real da máquina Ubuntu/Linux via kernel e comandos de rede."""
+    # 1. Comando ip -6 route get (descobre o endereço exato com rota à internet pública)
+    try:
+        res = subprocess.run(
+            ["ip", "-6", "route", "get", "2001:4860:4860::8888"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if res.returncode == 0 and res.stdout:
+            match = re.search(r'src\s+([0-9a-fA-F:]+)', res.stdout)
+            if match:
+                src_ip = match.group(1).strip()
+                if not src_ip.startswith("fe80:") and src_ip != "::1":
+                    return src_ip
+    except Exception:
+        pass
+
+    # 2. Comando ip -6 -j addr show scope global (JSON estruturado nativo do iproute2)
+    try:
+        res = subprocess.run(
+            ["ip", "-6", "-j", "addr", "show", "scope", "global"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            data = json.loads(res.stdout)
+            for iface_entry in data:
+                if iface_entry.get("ifname", "").startswith(("lo", "docker", "veth", "br-")):
+                    continue
+                for ainfo in iface_entry.get("addr_info", []):
+                    ip = ainfo.get("local")
+                    if ip and not ip.startswith("fe80:") and ip != "::1":
+                        if not ainfo.get("deprecated"):
+                            return ip
+                        return ip
+    except Exception:
+        pass
+
+    # 3. Comando ip -6 addr show scope global (Modo texto)
+    try:
+        res = subprocess.run(
+            ["ip", "-6", "addr", "show", "scope", "global"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        if res.returncode == 0 and res.stdout:
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("inet6 "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ip = parts[1].split("/")[0]
+                        if not ip.startswith("fe80:") and ip != "::1":
+                            return ip
+    except Exception:
+        pass
+
+    # 4. Tabela de interfaces do kernel em /proc/net/if_inet6
+    try:
+        if os.path.exists("/proc/net/if_inet6"):
+            with open("/proc/net/if_inet6", "r") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 6:
+                        raw_ip, _, _, scope, _, ifname = parts[:6]
+                        if ifname.startswith(("lo", "docker", "veth", "br-")):
+                            continue
+                        # Scope 00 é global na ABI do Linux
+                        if scope == "00":
+                            groups = [raw_ip[i:i+4] for i in range(0, 32, 4)]
+                            formatted = ":".join(groups)
+                            try:
+                                return ipaddress.IPv6Address(formatted).compressed
+                            except Exception:
+                                return formatted
+    except Exception:
+        pass
+
+    return None
+
 def get_network_info() -> Dict[str, Any]:
     global _last_net_time, _last_net_io
 
@@ -439,11 +526,11 @@ def get_network_info() -> Dict[str, Any]:
     _last_net_time = now
     _last_net_io = current_io
 
-    # Network interfaces details
+    # Network interfaces details com resolução dinâmica de IPv6
     interfaces_data = []
     primary_interface = "eth0"
     primary_ip = "192.168.100.23"
-    primary_ipv6 = "2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445"
+    primary_ipv6 = detect_system_global_ipv6()
 
     try:
         addrs = psutil.net_if_addrs()
@@ -640,6 +727,7 @@ def get_processes_list(sort_by: str = "cpu", limit: int = 50) -> Dict[str, Any]:
 
 def get_full_system_snapshot() -> Dict[str, Any]:
     """Retorna resumo completo para WebSocket ou GET /api/system."""
+    proc_info = get_processes_list(sort_by="cpu", limit=30)
     return {
         "system": get_os_info(),
         "uptime": get_uptime(),
@@ -648,5 +736,12 @@ def get_full_system_snapshot() -> Dict[str, Any]:
         "temperature": get_temperature_info(),
         "disk": get_disk_info(),
         "network": get_network_info(),
+        "processes": proc_info.get("processes", []),
+        "processes_summary": {
+            "count": proc_info.get("count", 0),
+            "running": proc_info.get("running", 0),
+            "sleeping": proc_info.get("sleeping", 0),
+            "other": proc_info.get("other", 0)
+        },
         "timestamp": time.time()
     }

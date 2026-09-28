@@ -2,33 +2,88 @@ import subprocess
 import re
 from typing import List, Dict, Any
 
-# Lista de serviços systemd importantes monitorados por padrão
-DEFAULT_IMPORTANT_SERVICES = [
-    "ssh",
-    "AdGuardHome",
-    "adguard-home",
-    "server-panel",
-    "server-monitor",
-    "cron",
-    "systemd-resolved",
-    "nginx",
-    "ufw",
-    "docker",
-    "fail2ban",
-    "tailscaled",
-    "n8n"
+# Lista canônica de serviços de interesse do Ubuntu Server com seus aliases
+CANONICAL_SERVICES = [
+    {
+        "canonical": "ssh",
+        "aliases": ["ssh", "sshd"],
+        "name": "OpenSSH Server",
+        "porta": 22,
+        "descricao": "Serviço de acesso remoto seguro SSH"
+    },
+    {
+        "canonical": "AdGuardHome",
+        "aliases": ["AdGuardHome", "adguard-home"],
+        "name": "AdGuard Home",
+        "porta": "53, 8081",
+        "descricao": "Servidor DNS com bloqueio de anúncios e rastreadores"
+    },
+    {
+        "canonical": "server-panel",
+        "aliases": ["server-panel", "server-monitor"],
+        "name": "Server Panel",
+        "porta": 8000,
+        "descricao": "Daemon de monitoramento em tempo real"
+    },
+    {
+        "canonical": "nginx",
+        "aliases": ["nginx"],
+        "name": "Nginx Web Server",
+        "porta": "80, 443",
+        "descricao": "Servidor proxy reverso HTTP"
+    },
+    {
+        "canonical": "cron",
+        "aliases": ["cron", "crond"],
+        "name": "Cron Daemon",
+        "porta": None,
+        "descricao": "Agendador de tarefas periódicas"
+    },
+    {
+        "canonical": "systemd-resolved",
+        "aliases": ["systemd-resolved"],
+        "name": "systemd-resolved",
+        "porta": 53,
+        "descricao": "Resolvedor DNS local do Ubuntu"
+    },
+    {
+        "canonical": "ufw",
+        "aliases": ["ufw"],
+        "name": "UFW Firewall",
+        "porta": None,
+        "descricao": "Firewall do Ubuntu Server"
+    },
+    {
+        "canonical": "docker",
+        "aliases": ["docker"],
+        "name": "Docker Engine",
+        "porta": None,
+        "descricao": "Mecanismo de contêineres Docker"
+    },
+    {
+        "canonical": "fail2ban",
+        "aliases": ["fail2ban"],
+        "name": "Fail2Ban Security",
+        "porta": None,
+        "descricao": "Proteção contra ataques de força bruta"
+    },
+    {
+        "canonical": "tailscaled",
+        "aliases": ["tailscaled"],
+        "name": "Tailscale VPN",
+        "porta": None,
+        "descricao": "Rede privada mesh VPN"
+    },
+    {
+        "canonical": "n8n",
+        "aliases": ["n8n"],
+        "name": "n8n Workflow Automation",
+        "porta": 5678,
+        "descricao": "Automação de fluxos e integrações"
+    }
 ]
 
-SERVICE_PORTS = {
-    "ssh": 22,
-    "AdGuardHome": "53, 8081",
-    "adguard-home": "53, 8081",
-    "nginx": "80, 443",
-    "server-panel": 8000,
-    "server-monitor": 8000,
-    "n8n": 5678,
-    "systemd-resolved": 53
-}
+SERVICE_PORTS = {svc["canonical"]: svc["porta"] for svc in CANONICAL_SERVICES if svc["porta"] is not None}
 
 def format_systemd_uptime(active_enter_timestamp: str) -> str:
     """Extrai ou formata tempo ativo a partir do ActiveEnterTimestamp do systemd."""
@@ -161,18 +216,50 @@ def get_systemd_service_status(service_name: str) -> Dict[str, Any]:
         }
 
 def get_all_monitored_services(extra_services: List[str] = None) -> List[Dict[str, Any]]:
-    """Consulta lista de serviços de interesse e retorna apenas aqueles instalados ou críticos."""
-    service_list = list(DEFAULT_IMPORTANT_SERVICES)
+    """Consulta lista canônica de serviços sem duplicatas e retorna status consolidado."""
+    results = []
+    seen_canonical = set()
+
+    for item in CANONICAL_SERVICES:
+        canonical = item["canonical"]
+        aliases = item.get("aliases", [canonical])
+        selected_info = None
+
+        # Testa os aliases para encontrar o que está instalado/ativo no host
+        for alias in aliases:
+            info = get_systemd_service_status(alias)
+            if info.get("installed") and info.get("status") == "ONLINE":
+                selected_info = info
+                break
+            elif info.get("installed") and not selected_info:
+                selected_info = info
+
+        # Se nenhum alias estiver instalado, usa o primeiro alias como representação
+        if not selected_info:
+            selected_info = get_systemd_service_status(aliases[0])
+
+        # Aplica metadados amigáveis
+        selected_info["name"] = item.get("name", canonical)
+        selected_info["nome"] = item.get("name", canonical)
+        selected_info["canonical"] = canonical
+        if item.get("descricao") and (selected_info.get("descricao") == "Serviço não instalado" or not selected_info.get("descricao")):
+            selected_info["descricao"] = item["descricao"]
+        if item.get("porta") is not None and not selected_info.get("porta"):
+            selected_info["porta"] = item["porta"]
+
+        results.append(selected_info)
+        seen_canonical.add(canonical.lower())
+        for a in aliases:
+            seen_canonical.add(a.lower())
+
+    # Adiciona serviços extras solicitados caso não existam
     if extra_services:
         for s in extra_services:
-            if s not in service_list:
-                service_list.append(s)
-
-    results = []
-    for svc in service_list:
-        info = get_systemd_service_status(svc)
-        # Se for um serviço relevante instalado ou que o usuário gostaria de saber que está offline
-        results.append(info)
+            clean_s = s.lower().replace(".service", "").strip()
+            if clean_s not in seen_canonical:
+                info = get_systemd_service_status(s)
+                results.append(info)
+                seen_canonical.add(clean_s)
 
     # Ordena: ONLINE primeiro, depois ERRO, depois OFFLINE
     order_map = {"ONLINE": 0, "ERRO": 1, "OFFLINE": 2}

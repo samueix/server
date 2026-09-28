@@ -66,6 +66,7 @@ export default function App() {
   const pollTimerRef = useRef<any>(null);
   const hasReceivedDataRef = useRef<boolean>(false);
   const consecutiveFailuresRef = useRef<number>(0);
+  const consecutiveAuthFailuresRef = useRef<number>(0);
   const [currentConfig, setCurrentConfig] = useState(loadConfig());
   const [dismissedAlerts, setDismissedAlerts] = useState<Record<string, number>>({});
 
@@ -196,6 +197,7 @@ export default function App() {
       if (result.success) {
         hasReceivedDataRef.current = true;
         consecutiveFailuresRef.current = 0;
+        consecutiveAuthFailuresRef.current = 0;
 
         setServerData(result.server);
         setStatusData(result.status);
@@ -211,11 +213,15 @@ export default function App() {
         setErrorMessage(undefined);
         setIsInitialLoad(false);
       } else {
-        if (result.errorMessage?.includes('401') || result.errorMessage?.includes('Sessão expirada')) {
-          clearAuthSession();
-          setAuthSession(null);
-          setLogoutNotice('Sua sessão expirou ou as credenciais foram alteradas no servidor. Por favor, autentique-se novamente.');
-          return;
+        const isAuthError = result.errorMessage?.includes('401') || result.errorMessage?.includes('Sessão expirada');
+        if (isAuthError) {
+          consecutiveAuthFailuresRef.current += 1;
+          if (consecutiveAuthFailuresRef.current >= 4) {
+            clearAuthSession();
+            setAuthSession(null);
+            setLogoutNotice('Sua sessão expirou ou as credenciais foram alteradas no servidor. Por favor, autentique-se novamente.');
+            return;
+          }
         }
 
         consecutiveFailuresRef.current += 1;
@@ -243,11 +249,15 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      if (err.statusCode === 401 || err.message?.includes('401')) {
-        clearAuthSession();
-        setAuthSession(null);
-        setLogoutNotice('Sessão expirada ou não autorizada. Faça login novamente.');
-        return;
+      const isAuthError = err.statusCode === 401 || err.message?.includes('401');
+      if (isAuthError) {
+        consecutiveAuthFailuresRef.current += 1;
+        if (consecutiveAuthFailuresRef.current >= 4) {
+          clearAuthSession();
+          setAuthSession(null);
+          setLogoutNotice('Sessão expirada ou não autorizada. Faça login novamente.');
+          return;
+        }
       }
 
       consecutiveFailuresRef.current += 1;

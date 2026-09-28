@@ -151,10 +151,14 @@ async def get_processes(
     user: str = Depends(verify_credentials)
 ):
     """Lista dos principais processos do sistema."""
+    proc_info = monitor.get_processes_list(sort_by=sort_by, limit=limit)
     return {
-        "count": limit,
+        "count": proc_info.get("count", 0),
+        "running": proc_info.get("running", 0),
+        "sleeping": proc_info.get("sleeping", 0),
+        "other": proc_info.get("other", 0),
         "sort_by": sort_by,
-        "processes": monitor.get_processes_list(sort_by=sort_by, limit=limit)
+        "processes": proc_info.get("processes", [])
     }
 
 @app.get("/api/services", tags=["Services"])

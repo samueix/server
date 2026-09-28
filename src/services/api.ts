@@ -632,9 +632,23 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
  */
 export async function getProcesses(signal?: AbortSignal): Promise<ProcessItem[]> {
   const raw = await apiFetch<any>('/api/processes', signal);
-  const list = Array.isArray(raw) 
-    ? raw 
-    : (Array.isArray(raw.processes) ? raw.processes : (Array.isArray(raw.processos) ? raw.processos : []));
+  let list: any[] = [];
+
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (Array.isArray(raw?.processes)) {
+    list = raw.processes;
+  } else if (raw?.processes && Array.isArray(raw.processes.processes)) {
+    list = raw.processes.processes;
+  } else if (Array.isArray(raw?.processos)) {
+    list = raw.processos;
+  } else if (raw?.processos && Array.isArray(raw.processos.processos)) {
+    list = raw.processos.processos;
+  } else if (Array.isArray(raw?.data)) {
+    list = raw.data;
+  } else if (Array.isArray(raw?.items)) {
+    list = raw.items;
+  }
 
   return list.map((p: any) => {
     const memBytes = Number(p.memory_bytes || 0);
@@ -768,10 +782,35 @@ export const apiService = {
       // 4. Extrai telemetria de rede diretamente do payload de /api/system
       const network = rawSystem.network ? parseNetworkData(rawSystem.network) : null;
 
-      // 5. Atualização suave de processos e serviços com cache TTL para evitar rate limiting (HTTP 429)
+      // 5. Processos do sistema (prioriza payload de /api/system ou consulta /api/processes)
       const now = Date.now();
       let processes = cachedProcesses;
-      if (now - lastProcessesFetch > 10000 || cachedProcesses.length === 0) {
+      if (Array.isArray(rawSystem.processes) && rawSystem.processes.length > 0) {
+        processes = rawSystem.processes.map((p: any) => {
+          const memBytes = Number(p.memory_bytes || 0);
+          const memMb = Number(p.memoria_mb ?? p.memory_mb ?? (memBytes > 0 ? memBytes / (1024 * 1024) : 0));
+          return {
+            pid: Number(p.pid || 0),
+            nome: p.nome || p.name || p.processo || 'unknown',
+            usuario: p.usuario || p.user || p.username || 'root',
+            cpu_percentual: Number(p.cpu_percentual ?? p.cpu_percent ?? p.cpu ?? 0),
+            memoria_percentual: Number(p.memoria_percentual ?? p.memory_percent ?? p.memoria ?? 0),
+            memoria_mb: Math.round(memMb * 10) / 10,
+            status: (p.status || 'running').toString(),
+            prioridade: p.prioridade ?? p.nice ?? 0,
+            threads: Number(p.threads ?? p.num_threads ?? 1),
+            tempo_execucao: p.tempo_execucao || p.execution_time || '--',
+            comando: p.comando || p.cmdline || p.nome || p.name,
+            inicio: p.inicio || p.create_time_formatted || '--',
+            name: p.nome || p.name,
+            user: p.usuario || p.user,
+            cpu_percent: Number(p.cpu_percentual ?? p.cpu_percent ?? 0),
+            memory_percent: Number(p.memoria_percentual ?? p.memory_percent ?? 0)
+          };
+        });
+        cachedProcesses = processes;
+        lastProcessesFetch = now;
+      } else if (now - lastProcessesFetch > 10000 || cachedProcesses.length === 0) {
         try {
           processes = await getProcesses(signal);
           cachedProcesses = processes;

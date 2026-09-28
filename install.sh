@@ -66,7 +66,9 @@ if [ ! -f "${INSTALL_DIR}/.env" ]; then
   cat > "${INSTALL_DIR}/.env" <<EOF
 # Server Monitor - Configurações de Ambiente
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=${GENERATED_PASS}
+ADMIN_PASSWORD=admin
+USER_USERNAME=user
+USER_PASSWORD=user
 API_KEY=${GENERATED_KEY}
 HOST=0.0.0.0
 PORT=8000

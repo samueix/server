@@ -25,8 +25,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   logoutNotice
 }) => {
   const [authMode, setAuthMode] = useState<'basic' | 'apikey'>('basic');
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -155,7 +155,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           )}
 
           {/* Seletor de Modo: Basic Auth vs API Key */}
-          <div className="grid grid-cols-2 gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg mb-5 text-xs">
+          <div className="grid grid-cols-2 gap-1 p-1 bg-slate-900 border border-slate-800 rounded-lg mb-4 text-xs">
             <button
               type="button"
               onClick={() => {
@@ -199,7 +199,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="admin"
+                      placeholder="Usuário"
                       required
                       autoComplete="username"
                       className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-blue-500 transition"

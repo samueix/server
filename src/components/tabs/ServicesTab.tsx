@@ -28,6 +28,7 @@ type FilterType = 'all' | 'active' | 'stopped' | 'enabled' | 'disabled';
 
 interface KnownServiceMeta {
   key: string;
+  aliases: string[];
   name: string;
   desc: string;
   port?: string | number;
@@ -35,17 +36,84 @@ interface KnownServiceMeta {
 }
 
 const KNOWN_SERVICES_META: KnownServiceMeta[] = [
-  { key: 'ssh', name: 'OpenSSH Server', desc: 'Serviço de acesso remoto seguro e criptografado SSH', port: 22 },
-  { key: 'adguardhome', name: 'AdGuard Home', desc: 'Servidor DNS com bloqueio de anúncios e rastreadores', port: '53, 8081' },
-  { key: 'adguard-home', name: 'AdGuard Home', desc: 'Servidor DNS com bloqueio de anúncios e rastreadores', port: '53, 8081' },
-  { key: 'server-panel', name: 'Server Panel', desc: 'Daemon FastAPI de monitoramento e telemetria remota', port: 8000 },
-  { key: 'server-monitor', name: 'Server Monitor', desc: 'Serviço systemd do Server Panel', port: 8000 },
-  { key: 'cron', name: 'Cron Daemon', desc: 'Agendador de tarefas periódicas automatizadas do sistema', port: undefined },
-  { key: 'systemd-resolved', name: 'systemd-resolved', desc: 'Resolvedor DNS local e gerenciador de rede do Ubuntu', port: 53 },
-  { key: 'nginx', name: 'Nginx Web Server', desc: 'Servidor web reverso HTTP e roteador de rotas /api e /adguard-api', port: '80, 443' },
-  { key: 'ufw', name: 'UFW Firewall', desc: 'Firewall descomplicado do Ubuntu Server', port: undefined },
-  { key: 'docker', name: 'Docker Engine', desc: 'Mecanismo de contêineres e microsserviços', port: undefined },
-  { key: 'n8n', name: 'n8n Workflow Automation', desc: 'Automação de fluxos e integrações (Instalação futura planejada)', port: 5678, isFuture: true }
+  { 
+    key: 'ssh', 
+    aliases: ['ssh', 'sshd', 'openssh-server'], 
+    name: 'OpenSSH Server', 
+    desc: 'Serviço de acesso remoto seguro e criptografado SSH', 
+    port: 22 
+  },
+  { 
+    key: 'adguard', 
+    aliases: ['adguardhome', 'adguard-home', 'adguard_home'], 
+    name: 'AdGuard Home', 
+    desc: 'Servidor DNS com bloqueio de anúncios e rastreadores', 
+    port: '53, 8081' 
+  },
+  { 
+    key: 'server-panel', 
+    aliases: ['server-panel', 'server-monitor', 'serverpanel', 'servermonitor'], 
+    name: 'Server Panel', 
+    desc: 'Daemon FastAPI de monitoramento e telemetria remota', 
+    port: 8000 
+  },
+  { 
+    key: 'nginx', 
+    aliases: ['nginx'], 
+    name: 'Nginx Web Server', 
+    desc: 'Servidor web reverso HTTP e roteador de rotas /api e /adguard-api', 
+    port: '80, 443' 
+  },
+  { 
+    key: 'cron', 
+    aliases: ['cron', 'crond'], 
+    name: 'Cron Daemon', 
+    desc: 'Agendador de tarefas periódicas automatizadas do sistema', 
+    port: undefined 
+  },
+  { 
+    key: 'systemd-resolved', 
+    aliases: ['systemd-resolved', 'resolved'], 
+    name: 'systemd-resolved', 
+    desc: 'Resolvedor DNS local e gerenciador de rede do Ubuntu', 
+    port: 53 
+  },
+  { 
+    key: 'ufw', 
+    aliases: ['ufw'], 
+    name: 'UFW Firewall', 
+    desc: 'Firewall descomplicado do Ubuntu Server', 
+    port: undefined 
+  },
+  { 
+    key: 'docker', 
+    aliases: ['docker', 'dockerd'], 
+    name: 'Docker Engine', 
+    desc: 'Mecanismo de contêineres e microsserviços', 
+    port: undefined 
+  },
+  { 
+    key: 'fail2ban', 
+    aliases: ['fail2ban'], 
+    name: 'Fail2Ban Security', 
+    desc: 'Proteção contra tentativas de ataque de força bruta', 
+    port: undefined 
+  },
+  { 
+    key: 'tailscaled', 
+    aliases: ['tailscaled', 'tailscale'], 
+    name: 'Tailscale VPN', 
+    desc: 'Rede privada mesh VPN segura', 
+    port: undefined 
+  },
+  { 
+    key: 'n8n', 
+    aliases: ['n8n'], 
+    name: 'n8n Workflow Automation', 
+    desc: 'Automação de fluxos e integrações (Instalação futura planejada)', 
+    port: 5678, 
+    isFuture: true 
+  }
 ];
 
 export const ServicesTab: React.FC<ServicesTabProps> = ({
@@ -57,7 +125,7 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState<string>('');
 
-  // Mescla dados reais do sistema com os metadados
+  // Mescla dados reais do sistema com os metadados sem duplicatas
   const enrichedServices = useMemo(() => {
     const map = new Map<string, ServiceItem>();
 
@@ -68,25 +136,37 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
     });
 
     const result: Array<ServiceItem & { desc: string; port?: string | number; isFuture?: boolean; installed: boolean }> = [];
+    const seenNames = new Set<string>();
 
-    // Prioriza os serviços importantes conhecidos
+    // Prioriza os serviços canônicos
     KNOWN_SERVICES_META.forEach(meta => {
-      // Ignora duplicatas de nome alternativo
-      if (meta.key === 'adguard-home' && map.has('adguardhome')) return;
-      if (meta.key === 'server-monitor' && map.has('server-panel')) return;
+      // Procura o serviço pelo key ou por qualquer alias
+      let found: ServiceItem | undefined = map.get(meta.key);
+      if (!found) {
+        for (const alias of meta.aliases) {
+          if (map.has(alias)) {
+            found = map.get(alias);
+            break;
+          }
+        }
+      }
 
-      const found = map.get(meta.key) || map.get(meta.key.replace('-', '')) || map.get(meta.key.replace('_', ''));
+      // Remove todos os aliases do mapa para não duplicar no loop restante
+      meta.aliases.forEach(alias => map.delete(alias));
+      map.delete(meta.key);
+
+      seenNames.add(meta.name.toLowerCase());
 
       if (found) {
+        const isOnline = found.status === 'ONLINE' || found.ativo === true;
         result.push({
           ...found,
           nome: meta.name,
           desc: meta.desc,
           port: found.porta || meta.port,
           isFuture: meta.isFuture,
-          installed: true
+          installed: isOnline || (found as any).installed !== false
         });
-        map.delete(meta.key);
       } else {
         // Serviço planejado (ex: n8n) ou não instalado no host
         result.push({
@@ -110,14 +190,19 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
       }
     });
 
-    // Adiciona outros serviços retornados pelo backend
+    // Adiciona outros serviços retornados pelo backend, sem duplicatas
     map.forEach((s) => {
-      result.push({
-        ...s,
-        desc: s.descricao || `Serviço do sistema ${s.nome}`,
-        port: s.porta,
-        installed: true
-      });
+      const cleanName = s.nome.replace('.service', '').trim();
+      if (!seenNames.has(cleanName.toLowerCase())) {
+        seenNames.add(cleanName.toLowerCase());
+        result.push({
+          ...s,
+          nome: cleanName,
+          desc: s.descricao || `Serviço do sistema ${cleanName}`,
+          port: s.porta,
+          installed: s.status === 'ONLINE' || (s as any).installed !== false
+        });
+      }
     });
 
     return result;

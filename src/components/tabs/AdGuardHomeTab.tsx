@@ -23,6 +23,7 @@ import {
   AdGuardQueryLogItem 
 } from '../../services/adguardService';
 import { SparklineChart } from '../SparklineChart';
+import { DualQueryChart } from '../DualQueryChart';
 
 export const AdGuardHomeTab: React.FC = () => {
   const [status, setStatus] = useState<AdGuardStatus | null>(null);
@@ -118,6 +119,25 @@ export const AdGuardHomeTab: React.FC = () => {
       l.reason.toLowerCase().includes(term)
     );
   }, [queryLogs, searchTerm]);
+
+  // Séries temporais de 24 horas: Linha Verde (Permitidas) e Linha Vermelha (Bloqueadas) no mesmo gráfico
+  const chartQueriesData = useMemo(() => {
+    if (!stats) return { allowed: [], blocked: [], total: [] };
+
+    const total = stats.dns_queries || [];
+    const blocked = stats.blocked_filtering || [];
+    const length = Math.max(total.length, blocked.length, 1);
+
+    const safeTotal = Array.from({ length }, (_, i) => total[i] ?? 0);
+    const safeBlocked = Array.from({ length }, (_, i) => blocked[i] ?? 0);
+    const safeAllowed = safeTotal.map((tot, i) => Math.max(0, tot - (safeBlocked[i] ?? 0)));
+
+    return {
+      allowed: safeAllowed,
+      blocked: safeBlocked,
+      total: safeTotal
+    };
+  }, [stats]);
 
   return (
     <div className="space-y-6">
@@ -262,33 +282,36 @@ export const AdGuardHomeTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Histórico Temporal de Consultas & Bloqueios */}
+      {/* Histórico Temporal de Consultas & Bloqueios com Linha Verde (Permitidas) e Linha Vermelha (Bloqueadas) */}
       {isOnline && stats && (stats.dns_queries.length > 0 || stats.blocked_filtering.length > 0) && (
-        <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Activity className="w-4 h-4 text-blue-400" />
+              <Activity className="w-4 h-4 text-emerald-400" />
               <h3 className="text-sm font-semibold text-white">Histórico de Consultas (Últimas 24 horas)</h3>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50">
+                Sobreposição em tempo real
+              </span>
             </div>
             <div className="flex items-center gap-4 text-xs font-mono">
-              <span className="flex items-center gap-1.5 text-blue-400">
-                <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
-                Consultas Totais
+              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block shadow-sm shadow-emerald-500/50" />
+                Linha Verde: Permitidas
               </span>
-              <span className="flex items-center gap-1.5 text-rose-400">
-                <span className="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block" />
-                Bloqueadas
+              <span className="flex items-center gap-1.5 text-rose-400 font-medium">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shadow-sm shadow-rose-500/50" />
+                Linha Vermelha: Bloqueadas
               </span>
             </div>
           </div>
-          <div className="h-28 w-full">
-            <SparklineChart 
-              data={stats.dns_queries} 
-              color="#3b82f6" 
-              height={100}
-              label="Consultas" 
-            />
-          </div>
+
+          <DualQueryChart 
+            allowedData={chartQueriesData.allowed} 
+            blockedData={chartQueriesData.blocked}
+            totalData={chartQueriesData.total}
+            height={130}
+            timeUnits="Últimas 24 horas"
+          />
         </div>
       )}
 

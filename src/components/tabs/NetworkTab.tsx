@@ -274,11 +274,69 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
           </div>
         </div>
 
-        {/* Nota explicativa IPv6 */}
-        <p className="text-[11px] text-slate-400 mt-3 font-mono flex items-center gap-1.5">
-          <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-          O endereço IPv6 é dinâmico e delegado pela operadora de rede. O Server Panel lê automaticamente o endereço atual da interface.
-        </p>
+        {/* Nota explicativa IPv6 e Comandos do Ubuntu */}
+        <div className="mt-3 pt-3 border-t border-slate-800 text-[11px] font-mono text-slate-400 space-y-2">
+          <p className="flex items-center gap-1.5 text-slate-300">
+            <Info className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+            <span>O endereço IPv6 é dinâmico e delegado pelo roteador/provedor (SLAAC). O backend lê o IPv6 real via <code>ip -6 addr show scope global</code>.</span>
+          </p>
+
+          <div className="bg-slate-900/90 border border-slate-800/90 rounded-lg p-2.5 space-y-2">
+            <div className="text-xs font-semibold text-slate-200 flex items-center justify-between">
+              <span>Comandos do Ubuntu Server para verificar e aplicar o IPv6 real:</span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px]">
+              <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                <span className="text-cyan-300 font-mono">ip -6 addr show scope global</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard('ip -6 addr show scope global', 'cmd-ipv6-scope')}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 text-[10px]"
+                >
+                  {copiedKey === 'cmd-ipv6-scope' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'cmd-ipv6-scope' ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                <span className="text-cyan-300 font-mono">ip a</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard('ip a', 'cmd-ip-a')}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 text-[10px]"
+                >
+                  {copiedKey === 'cmd-ip-a' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'cmd-ip-a' ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                <span className="text-cyan-300 font-mono">curl -6 https://ifconfig.co</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard('curl -6 https://ifconfig.co', 'cmd-curl-v6')}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 text-[10px]"
+                >
+                  {copiedKey === 'cmd-curl-v6' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'cmd-curl-v6' ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                <span className="text-cyan-300 font-mono">sudo netplan apply</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard('sudo netplan apply', 'cmd-netplan')}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center gap-1 text-[10px]"
+                >
+                  {copiedKey === 'cmd-netplan' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedKey === 'cmd-netplan' ? 'Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* 2. GRÁFICOS DE VELOCIDADE (Ondas Suaves) */}
