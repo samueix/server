@@ -176,9 +176,10 @@ async function startServer() {
       '/api/adguard/querylog',
       '/api/adguard/domains',
       '/api/adguard/analyze',
-      '/api/adguard/analyze-batch'
+      '/api/adguard/analyze-batch',
+      '/api/mac-vendor'
     ];
-    if (internalPaths.includes(req.path)) {
+    if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();
     }
 
@@ -506,6 +507,180 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // API DE FORNECEDORES DE MAC (api.macvendors.com)
+  // Serviço externo independente para identificação de fabricante OUI
+  // -------------------------------------------------------------
+  const macCache = new Map<string, { vendor: string | null; isRandomized: boolean; timestamp: number }>();
+  let lastMacVendorRequestTime = 0;
+
+  // Dicionário offline para respostas ultra rápidas e alta disponibilidade
+  const KNOWN_OUI_FALLBACK: Record<string, string> = {
+    'FCA13E': 'Samsung Electronics Co., Ltd.',
+    'FCFBFB': 'Cisco Systems, Inc',
+    'B827EB': 'Raspberry Pi Foundation',
+    'DCA632': 'Raspberry Pi Trading Ltd',
+    'E45F01': 'Raspberry Pi Trading Ltd',
+    '001A79': 'Apple, Inc.',
+    '3C0630': 'Apple, Inc.',
+    'ACDE48': 'Apple, Inc.',
+    'F01898': 'Apple, Inc.',
+    '641666': 'Intel Corporate',
+    '00155D': 'Microsoft Corporation',
+    '50EB71': 'TP-Link Corporation Limited',
+    '58D9D5': 'TP-Link Corporation Limited',
+    '18FE34': 'Espressif Inc.',
+    '246F28': 'Espressif Inc.',
+    '30AEA4': 'Espressif Inc.',
+    '7C87CE': 'Xiaomi Communications Co Ltd',
+    '68764F': 'Xiaomi Communications Co Ltd',
+    '00E04C': 'Realtek Semiconductor Corp.'
+  };
+
+  app.get('/api/mac-vendor/:mac?', async (req, res) => {
+    try {
+      const rawMac = (req.params.mac || (req.query.mac as string) || '').trim();
+      if (!rawMac) {
+        return res.status(400).json({
+          success: false,
+          error: 'Endereço MAC não informado. Forneça o MAC na URL (ex: /api/mac-vendor/FC-A1-3E-2A-1C-33).'
+        });
+      }
+
+      // Normaliza removendo pontuações: extrai caracteres hexadecimais
+      const hexOnly = rawMac.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+      if (hexOnly.length < 6) {
+        return res.status(400).json({
+          success: false,
+          error: 'Formato de MAC inválido. Forneça ao menos 6 dígitos hexadecimais do prefixo OUI (ex: FC-A1-3E).'
+        });
+      }
+
+      const oui = hexOnly.slice(0, 6);
+      const formattedOui = `${oui.slice(0, 2)}:${oui.slice(2, 4)}:${oui.slice(4, 6)}`;
+      const formattedFullMac = hexOnly.length >= 12
+        ? `${oui.slice(0, 2)}:${oui.slice(2, 4)}:${oui.slice(4, 6)}:${hexOnly.slice(6, 8)}:${hexOnly.slice(8, 10)}:${hexOnly.slice(10, 12)}`
+        : formattedOui;
+
+      // Detecta se é MAC Privado/Aleatório (Locally Administered)
+      const firstByte = parseInt(hexOnly.slice(0, 2), 16);
+      const isRandomized = Boolean(firstByte & 0x02);
+
+      // Verifica Cache em memória (TTL 24 horas)
+      const cached = macCache.get(oui);
+      if (cached && Date.now() - cached.timestamp < 24 * 3600 * 1000) {
+        if (cached.vendor) {
+          return res.json({
+            success: true,
+            found: true,
+            mac: formattedFullMac,
+            oui: formattedOui,
+            vendor: cached.vendor,
+            is_randomized: cached.isRandomized,
+            cached: true,
+            provider: 'api.macvendors.com (Cache Local)',
+            service_notice: 'Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu.'
+          });
+        } else {
+          return res.status(404).json({
+            success: false,
+            found: false,
+            mac: formattedFullMac,
+            oui: formattedOui,
+            error: 'Fabricante não encontrado na base OUI/IEEE',
+            is_randomized: cached.isRandomized,
+            cached: true,
+            provider: 'api.macvendors.com (Cache Local)',
+            service_notice: 'Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu.'
+          });
+        }
+      }
+
+      // Verifica Fallback OUI
+      if (KNOWN_OUI_FALLBACK[oui]) {
+        const vendor = KNOWN_OUI_FALLBACK[oui];
+        macCache.set(oui, { vendor, isRandomized, timestamp: Date.now() });
+        return res.json({
+          success: true,
+          found: true,
+          mac: formattedFullMac,
+          oui: formattedOui,
+          vendor,
+          is_randomized: isRandomized,
+          cached: false,
+          provider: 'api.macvendors.com (Base OUI Local)',
+          service_notice: 'Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu.'
+        });
+      }
+
+      // Rate limit para api.macvendors.com: máximo 1 requisição por segundo
+      const timeSinceLast = Date.now() - lastMacVendorRequestTime;
+      if (timeSinceLast < 1050) {
+        await new Promise(r => setTimeout(r, 1050 - timeSinceLast));
+      }
+      lastMacVendorRequestTime = Date.now();
+
+      // Consulta a API pública de Fornecedores de MAC (api.macvendors.com)
+      const targetApiUrl = `https://api.macvendors.com/${encodeURIComponent(formattedFullMac)}`;
+      const response = await fetch(targetApiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': '*/*',
+          'User-Agent': 'UbuntuServerMonitor/1.0'
+        },
+        signal: AbortSignal.timeout(5000)
+      });
+
+      if (response.status === 200) {
+        const vendorName = (await response.text()).trim();
+        macCache.set(oui, { vendor: vendorName, isRandomized, timestamp: Date.now() });
+        return res.json({
+          success: true,
+          found: true,
+          mac: formattedFullMac,
+          oui: formattedOui,
+          vendor: vendorName,
+          is_randomized: isRandomized,
+          cached: false,
+          provider: 'api.macvendors.com',
+          service_notice: 'Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu.'
+        });
+      }
+
+      if (response.status === 404) {
+        macCache.set(oui, { vendor: null, isRandomized, timestamp: Date.now() });
+        return res.status(404).json({
+          success: false,
+          found: false,
+          mac: formattedFullMac,
+          oui: formattedOui,
+          error: isRandomized 
+            ? 'Fabricante não encontrado: Este é um endereço MAC Privado/Aleatório (MAC Randomization do dispositivo)' 
+            : 'Fabricante não encontrado na base OUI/IEEE',
+          is_randomized: isRandomized,
+          cached: false,
+          provider: 'api.macvendors.com',
+          service_notice: 'Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu.'
+        });
+      }
+
+      if (response.status === 429) {
+        return res.status(429).json({
+          success: false,
+          error: 'Limite de requisições por segundo atingido na API macvendors.com (1 req/s). Aguarde um instante.',
+          provider: 'api.macvendors.com'
+        });
+      }
+
+      throw new Error(`Resposta da API externa: HTTP ${response.status}`);
+    } catch (err: any) {
+      return res.status(500).json({
+        success: false,
+        error: `Falha ao consultar API externa de MAC: ${err.message || 'Servidor inacessível'}`
+      });
     }
   });
 

@@ -613,6 +613,32 @@ def get_network_info() -> Dict[str, Any]:
                         hw_client = parts[3]
                         device = parts[5]
                         if hw_client != "00:00:00:00:00:00" and not ip_client.startswith("127."):
+                            # Tenta identificar fabricante conhecido via OUI
+                            clean_hw = hw_client.replace(":", "").replace("-", "").upper()
+                            oui_client = clean_hw[:6] if len(clean_hw) >= 6 else ""
+                            KNOWN_OUI_MAP = {
+                                "FCA13E": "Samsung Electronics",
+                                "FCFBFB": "Cisco Systems",
+                                "B827EB": "Raspberry Pi",
+                                "DCA632": "Raspberry Pi",
+                                "E45F01": "Raspberry Pi",
+                                "001A79": "Apple, Inc.",
+                                "3C0630": "Apple, Inc.",
+                                "ACDE48": "Apple, Inc.",
+                                "F01898": "Apple, Inc.",
+                                "641666": "Intel Corp",
+                                "00155D": "Microsoft",
+                                "50EB71": "TP-Link",
+                                "58D9D5": "TP-Link",
+                                "18FE34": "Espressif (ESP)",
+                                "246F28": "Espressif (ESP)",
+                                "30AEA4": "Espressif (ESP)",
+                                "7C87CE": "Xiaomi",
+                                "68764F": "Xiaomi",
+                                "00E04C": "Realtek"
+                            }
+                            fab = KNOWN_OUI_MAP.get(oui_client, "Não disponível")
+                            
                             active_clients.append({
                                 "id": f"client-{idx}",
                                 "ipv4": ip_client,
@@ -620,7 +646,7 @@ def get_network_info() -> Dict[str, Any]:
                                 "interface": device,
                                 "status": "ONLINE",
                                 "hostname": "Não disponível",
-                                "fabricante": "Não disponível"
+                                "fabricante": fab
                             })
     except Exception:
         pass

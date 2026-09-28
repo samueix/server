@@ -174,6 +174,152 @@ async def get_adguard_metrics(user: str = Depends(verify_credentials)):
     return await adguard.fetch_adguard_stats()
 
 # -------------------------------------------------------------
+# API DE FORNECEDORES DE MAC (api.macvendors.com)
+# Serviço externo independente para identificação de fabricante OUI
+# -------------------------------------------------------------
+
+_mac_cache: Dict[str, Dict[str, Any]] = {}
+_last_mac_call: float = 0.0
+
+KNOWN_OUI_FALLBACK = {
+    'FCA13E': 'Samsung Electronics Co., Ltd.',
+    'FCFBFB': 'Cisco Systems, Inc',
+    'B827EB': 'Raspberry Pi Foundation',
+    'DCA632': 'Raspberry Pi Trading Ltd',
+    'E45F01': 'Raspberry Pi Trading Ltd',
+    '001A79': 'Apple, Inc.',
+    '3C0630': 'Apple, Inc.',
+    'ACDE48': 'Apple, Inc.',
+    'F01898': 'Apple, Inc.',
+    '641666': 'Intel Corporate',
+    '00155D': 'Microsoft Corporation',
+    '50EB71': 'TP-Link Corporation Limited',
+    '58D9D5': 'TP-Link Corporation Limited',
+    '18FE34': 'Espressif Inc.',
+    '246F28': 'Espressif Inc.',
+    '30AEA4': 'Espressif Inc.',
+    '7C87CE': 'Xiaomi Communications Co Ltd',
+    '68764F': 'Xiaomi Communications Co Ltd',
+    '00E04C': 'Realtek Semiconductor Corp.'
+}
+
+@app.get("/api/mac-vendor/{mac_address:path}", tags=["Network Tools"])
+async def get_mac_vendor(mac_address: str, user: str = Depends(verify_credentials)):
+    """Consulta fabricante de endereço MAC usando api.macvendors.com com cache e fallback."""
+    import re
+    import urllib.request
+    import urllib.error
+
+    global _last_mac_call
+
+    raw = (mac_address or "").strip()
+    hex_only = re.sub(r'[^0-9A-Fa-f]', '', raw).upper()
+    if len(hex_only) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato de MAC inválido. Forneça ao menos 6 caracteres hexadecimais (ex: FC-A1-3E)."
+        )
+
+    oui = hex_only[:6]
+    formatted_oui = f"{oui[0:2]}:{oui[2:4]}:{oui[4:6]}"
+    formatted_full = f"{oui[0:2]}:{oui[2:4]}:{oui[4:6]}:{hex_only[6:8]}:{hex_only[8:10]}:{hex_only[10:12]}" if len(hex_only) >= 12 else formatted_oui
+
+    first_byte = int(hex_only[:2], 16)
+    is_randomized = bool(first_byte & 0x02)
+
+    # Verifica cache
+    now = time.time()
+    if oui in _mac_cache and now - _mac_cache[oui]["timestamp"] < 86400:
+        c = _mac_cache[oui]
+        if c.get("vendor"):
+            return {
+                "success": True,
+                "found": True,
+                "mac": formatted_full,
+                "oui": formatted_oui,
+                "vendor": c["vendor"],
+                "is_randomized": is_randomized,
+                "cached": True,
+                "provider": "api.macvendors.com (Cache Local)",
+                "service_notice": "Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu."
+            }
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Fabricante não encontrado na base OUI/IEEE"
+            )
+
+    # Verifica Fallback OUI
+    if oui in KNOWN_OUI_FALLBACK:
+        v = KNOWN_OUI_FALLBACK[oui]
+        _mac_cache[oui] = {"vendor": v, "timestamp": now}
+        return {
+            "success": True,
+            "found": True,
+            "mac": formatted_full,
+            "oui": formatted_oui,
+            "vendor": v,
+            "is_randomized": is_randomized,
+            "cached": False,
+            "provider": "api.macvendors.com (Base OUI Local)",
+            "service_notice": "Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu."
+        }
+
+    # Respeita o limite de 1 req/segundo
+    time_diff = now - _last_mac_call
+    if time_diff < 1.05:
+        await asyncio.sleep(1.05 - time_diff)
+    _last_mac_call = time.time()
+
+    url = f"https://api.macvendors.com/{urllib.parse.quote(formatted_full)}"
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "UbuntuServerMonitor/1.0", "Accept": "*/*"}
+    )
+
+    try:
+        loop = asyncio.get_event_loop()
+        def _fetch():
+            with urllib.request.urlopen(req, timeout=5) as response:
+                return response.read().decode("utf-8").strip()
+
+        vendor = await loop.run_in_executor(None, _fetch)
+        _mac_cache[oui] = {"vendor": vendor, "timestamp": time.time()}
+        return {
+            "success": True,
+            "found": True,
+            "mac": formatted_full,
+            "oui": formatted_oui,
+            "vendor": vendor,
+            "is_randomized": is_randomized,
+            "cached": False,
+            "provider": "api.macvendors.com",
+            "service_notice": "Este serviço é externo (API de Terceiros / Web Cloud) e não faz parte dos daemons nativos do Ubuntu."
+        }
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            _mac_cache[oui] = {"vendor": None, "timestamp": time.time()}
+            raise HTTPException(
+                status_code=404,
+                detail="Fabricante não encontrado: Este é um endereço MAC Privado/Aleatório ou não registrado no IEEE" if is_randomized else "Fabricante não encontrado na base OUI/IEEE"
+            )
+        elif e.code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Limite de 1 requisição por segundo atingido na API macvendors.com. Aguarde um instante."
+            )
+        else:
+            raise HTTPException(
+                status_code=e.code,
+                detail=f"Erro retornado pela API externa: HTTP {e.code}"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Falha de conexão com api.macvendors.com: {str(e)}"
+        )
+
+# -------------------------------------------------------------
 # WEBSOCKET EM TEMPO REAL
 # -------------------------------------------------------------
 

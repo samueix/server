@@ -288,20 +288,13 @@ export const AdGuardHomeTab: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-semibold text-white">Histórico de Consultas (Últimas 24 horas)</h3>
+              <h3 className="text-sm font-semibold text-white">Histórico de Consultas DNS (Últimas 24 horas)</h3>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/50">
                 Sobreposição em tempo real
               </span>
             </div>
-            <div className="flex items-center gap-4 text-xs font-mono">
-              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block shadow-sm shadow-emerald-500/50" />
-                Linha Verde: Permitidas
-              </span>
-              <span className="flex items-center gap-1.5 text-rose-400 font-medium">
-                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block shadow-sm shadow-rose-500/50" />
-                Linha Vermelha: Bloqueadas
-              </span>
+            <div className="text-xs font-mono text-slate-400">
+              Passe o mouse no gráfico para ver a hora exata e a taxa de bloqueio
             </div>
           </div>
 
@@ -309,7 +302,7 @@ export const AdGuardHomeTab: React.FC = () => {
             allowedData={chartQueriesData.allowed} 
             blockedData={chartQueriesData.blocked}
             totalData={chartQueriesData.total}
-            height={130}
+            height={140}
             timeUnits="Últimas 24 horas"
           />
         </div>

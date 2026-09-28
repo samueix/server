@@ -854,3 +854,27 @@ export const apiService = {
     }
   }
 };
+
+export interface MacVendorResponse {
+  success: boolean;
+  found?: boolean;
+  mac?: string;
+  oui?: string;
+  vendor?: string;
+  error?: string;
+  is_randomized?: boolean;
+  cached?: boolean;
+  provider?: string;
+  service_notice?: string;
+}
+
+/**
+ * Consulta fabricante de endereço MAC na API pública api.macvendors.com
+ * (Serviço em nuvem externo, independente do Ubuntu Server)
+ */
+export async function lookupMacVendor(mac: string, signal?: AbortSignal): Promise<MacVendorResponse> {
+  const cleanMac = encodeURIComponent(mac.trim());
+  const url = `/api/mac-vendor/${cleanMac}`;
+  return await apiFetch<MacVendorResponse>(url, signal);
+}
+
