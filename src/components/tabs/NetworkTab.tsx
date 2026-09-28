@@ -16,9 +16,13 @@ import {
   Clock,
   Radio,
   ExternalLink,
-  Info
+  Info,
+  Sparkles,
+  RefreshCw,
+  ShieldCheck,
+  Cpu
 } from 'lucide-react';
-import { NetworkTelemetry } from '../../services/api';
+import { NetworkTelemetry, lookupMacVendor } from '../../services/api';
 import { HistoryPoint, ActiveNetworkClient } from '../../types';
 import { SparklineChart } from '../SparklineChart';
 import { SERVER_IPV4, SERVER_IPV6, SSH_USER, getDynamicSshCommand } from '../../config';
@@ -46,7 +50,20 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
   // AdGuard clients extras
   const [adguardClients, setAdguardClients] = useState<ActiveNetworkClient[]>([]);
 
-  // Tenta sincronizar clientes conhecidos do AdGuard Home
+  // Cache de fabricantes de MAC resolvidos automaticamente via API pública (api.macvendors.com)
+  const [vendorMap, setVendorMap] = useState<Record<string, { vendor: string; isRandomized: boolean; status: 'loading' | 'found' | 'not_found' }>>({
+    '1CEF03': { vendor: 'Guangzhou V-SOLUTION (Roteador/ONU)', isRandomized: false, status: 'found' },
+    'D03957': { vendor: 'Liteon Technology Corp.', isRandomized: false, status: 'found' },
+    'FCA13E': { vendor: 'Samsung Electronics Co., Ltd.', isRandomized: false, status: 'found' },
+    'FCFBFB': { vendor: 'Cisco Systems, Inc', isRandomized: false, status: 'found' },
+    'B827EB': { vendor: 'Raspberry Pi Foundation', isRandomized: false, status: 'found' },
+    '001A79': { vendor: 'Apple, Inc.', isRandomized: false, status: 'found' },
+    '50EB71': { vendor: 'TP-Link Corporation Limited', isRandomized: false, status: 'found' },
+    '58D9D5': { vendor: 'TP-Link Corporation Limited', isRandomized: false, status: 'found' },
+    '641666': { vendor: 'Intel Corporate', isRandomized: false, status: 'found' }
+  });
+
+  // Tenta sincronizar clientes conhecidos do AdGuard Home de forma limpa (sem criar chaves como 'count', 'ip', etc.)
   useEffect(() => {
     let isMounted = true;
     const fetchAdguardClients = async () => {
@@ -58,21 +75,44 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
         if (Array.isArray(stats.top_clients)) {
           stats.top_clients.forEach((c: any, idx: number) => {
             if (typeof c === 'object' && c !== null) {
-              for (const [key, count] of Object.entries(c)) {
-                // key pode ser "192.168.100.x" ou "hostname (192.168.100.x)"
-                const ipMatch = key.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
-                const ip = ipMatch ? ipMatch[1] : key;
-                const nameMatch = key.includes('(') ? key.split('(')[0].trim() : undefined;
+              // Caso 1: objeto estruturado { ip: "192.168.100.x", count: 17 }
+              if (c.ip && typeof c.ip === 'string') {
+                const ipStr = c.ip.trim();
+                const ipMatch = ipStr.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+                const validIp = ipMatch ? ipMatch[1] : ipStr;
+                const nameMatch = c.name || (ipStr.includes('(') ? ipStr.split('(')[0].trim() : undefined);
 
                 clients.push({
                   id: `adg-cli-${idx}`,
                   nome: nameMatch,
                   hostname: nameMatch,
-                  ipv4: ip,
+                  ipv4: validIp,
                   status: 'ONLINE',
-                  consultas: Number(count),
+                  consultas: Number(c.count || 0),
                   interface: 'enp2s0'
                 });
+              } else {
+                // Caso 2: dicionário chave-valor { "192.168.100.x": 17 }
+                for (const [key, count] of Object.entries(c)) {
+                  // Descarta propriedades reservadas de metadados
+                  if (['count', 'ip', 'percentage', 'name'].includes(key.toLowerCase())) continue;
+
+                  const ipMatch = key.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/);
+                  const ip = ipMatch ? ipMatch[1] : key;
+                  if (!ip || ip.length < 7) continue;
+
+                  const nameMatch = key.includes('(') ? key.split('(')[0].trim() : undefined;
+
+                  clients.push({
+                    id: `adg-cli-${idx}-${ip}`,
+                    nome: nameMatch,
+                    hostname: nameMatch,
+                    ipv4: ip,
+                    status: 'ONLINE',
+                    consultas: Number(count),
+                    interface: 'enp2s0'
+                  });
+                }
               }
             }
           });
@@ -125,29 +165,173 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
     if (Array.isArray(network?.activeClients)) {
       network.activeClients.forEach(c => {
         const ip = c.ipv4 || c.id;
-        map.set(ip, c);
+        // Filtra chaves espúrias
+        if (['count', 'ip', 'percentage'].includes(ip.toLowerCase())) return;
+        map.set(ip, { ...c });
       });
     }
 
     // 2. Clientes do AdGuard Home (agrega dados de tráfego/consultas e nome se descoberto)
     adguardClients.forEach(ac => {
       const ip = ac.ipv4 || ac.id;
+      if (['count', 'ip', 'percentage'].includes(ip.toLowerCase())) return;
       const existing = map.get(ip);
       if (existing) {
         if (!existing.nome && ac.nome) existing.nome = ac.nome;
         if (!existing.hostname && ac.hostname) existing.hostname = ac.hostname;
         existing.consultas = ac.consultas;
       } else {
-        map.set(ip, ac);
+        map.set(ip, { ...ac });
       }
     });
 
     return Array.from(map.values());
   }, [network?.activeClients, adguardClients]);
 
-  // Filtragem e ordenação da tabela de clientes
+  // Consulta automática via API externa (api.macvendors.com) para descobrir fabricante de qualquer MAC na rede
+  useEffect(() => {
+    const macsToResolve: string[] = [];
+
+    combinedClients.forEach(c => {
+      const mac = c.mac;
+      if (!mac || mac === 'Não disponível' || mac === '00:00:00:00:00:00' || mac === '--') return;
+
+      const cleanMac = mac.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+      if (cleanMac.length < 6) return;
+      const oui = cleanMac.slice(0, 6);
+
+      // Se já está no mapa, pula
+      if (vendorMap[oui]) return;
+
+      // Detecta se é MAC Privado/Aleatório (Locally Administered Bit 1 = 1)
+      const firstByte = parseInt(cleanMac.slice(0, 2), 16);
+      if (firstByte & 0x02) {
+        setVendorMap(prev => ({
+          ...prev,
+          [oui]: {
+            vendor: 'Dispositivo Privado (MAC Aleatório)',
+            isRandomized: true,
+            status: 'found'
+          }
+        }));
+        return;
+      }
+
+      macsToResolve.push(mac);
+    });
+
+    if (macsToResolve.length === 0) return;
+
+    let isCancelled = false;
+    const processQueue = async () => {
+      for (const mac of macsToResolve) {
+        if (isCancelled) break;
+        const cleanMac = mac.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+        const oui = cleanMac.slice(0, 6);
+        if (vendorMap[oui]) continue;
+
+        try {
+          const res = await lookupMacVendor(mac);
+          if (isCancelled) break;
+          if (res.success && res.vendor) {
+            setVendorMap(prev => ({
+              ...prev,
+              [oui]: {
+                vendor: res.vendor!,
+                isRandomized: false,
+                status: 'found'
+              }
+            }));
+          } else if (res.is_randomized) {
+            setVendorMap(prev => ({
+              ...prev,
+              [oui]: {
+                vendor: 'Dispositivo Privado (MAC Aleatório)',
+                isRandomized: true,
+                status: 'found'
+              }
+            }));
+          } else {
+            setVendorMap(prev => ({
+              ...prev,
+              [oui]: {
+                vendor: 'Fabricante Não Registrado (IEEE)',
+                isRandomized: false,
+                status: 'not_found'
+              }
+            }));
+          }
+        } catch {
+          // Erro ou offline
+          setVendorMap(prev => ({
+            ...prev,
+            [oui]: {
+              vendor: 'Erro ao consultar fabricante',
+              isRandomized: false,
+              status: 'not_found'
+            }
+          }));
+        }
+
+        // Aguarda 1.1s entre chamadas para respeitar o limite de 1 req/s da API externa
+        await new Promise(r => setTimeout(r, 1100));
+      }
+    };
+
+    processQueue();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [combinedClients]);
+
+  // Filtragem e ordenação da tabela de clientes, enriquecida com fabricante automático
   const filteredClients = useMemo(() => {
-    let list = [...combinedClients];
+    let list = combinedClients.map(c => {
+      const cleanMac = (c.mac || '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+      const oui = cleanMac.slice(0, 6);
+      const firstByte = cleanMac.length >= 2 ? parseInt(cleanMac.slice(0, 2), 16) : 0;
+      const isRandom = Boolean(firstByte & 0x02);
+
+      const resolved = vendorMap[oui];
+
+      // Determina Fabricante real
+      let resolvedFab = c.fabricante;
+      if (!resolvedFab || resolvedFab === 'Não disponível') {
+        if (resolved) {
+          resolvedFab = resolved.vendor;
+        } else if (isRandom) {
+          resolvedFab = 'Dispositivo Privado (MAC Aleatório)';
+        } else if (cleanMac.length >= 6) {
+          resolvedFab = 'Consultando fabricante...';
+        } else {
+          resolvedFab = 'Não disponível';
+        }
+      }
+
+      // Determina Nome amigável do dispositivo
+      let resolvedNome = c.nome || c.hostname;
+      if (!resolvedNome || resolvedNome === 'Não disponível') {
+        if (resolved?.vendor && !resolved.isRandomized) {
+          // Ex: "Guangzhou V-SOLUTION" -> "Dispositivo Guangzhou"
+          const shortName = resolved.vendor.split(' ')[0].replace(/[,.]/g, '');
+          resolvedNome = `Dispositivo ${shortName}`;
+        } else if (isRandom || resolved?.isRandomized) {
+          resolvedNome = 'Dispositivo Wi-Fi Privado';
+        } else if (c.ipv4) {
+          resolvedNome = `Dispositivo (${c.ipv4})`;
+        } else {
+          resolvedNome = 'Dispositivo Conectado';
+        }
+      }
+
+      return {
+        ...c,
+        nome: resolvedNome,
+        fabricante: resolvedFab,
+        isRandomized: isRandom || resolved?.isRandomized
+      };
+    });
 
     if (clientFilter !== 'all') {
       list = list.filter(c => clientFilter === 'online' ? c.status === 'ONLINE' : c.status === 'OFFLINE');
@@ -190,7 +374,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
     });
 
     return list;
-  }, [combinedClients, clientFilter, clientSearch, clientSort, clientSortAsc]);
+  }, [combinedClients, vendorMap, clientFilter, clientSearch, clientSort, clientSortAsc]);
 
   return (
     <div className="space-y-6 font-sans">
@@ -481,13 +665,19 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
       {/* 4. CLIENTES ATIVOS NA REDE (Área detalhada de clientes) */}
       <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-[#1e2d4d] gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <Users className="w-5 h-5 text-indigo-400" />
             <div>
-              <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                Clientes Ativos na Rede Local ({filteredClients.length})
-              </h3>
-              <p className="text-xs text-slate-400 font-mono">Dispositivos conectados detectados via ARP e AdGuard Home</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Clientes Ativos na Rede Local ({filteredClients.length})
+                </h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 font-semibold">
+                  <Sparkles className="w-3 h-3 text-cyan-400" />
+                  Identificação Automática de Fabricantes (OUI)
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 font-mono mt-0.5">Dispositivos conectados detectados via ARP e AdGuard Home com resolução de fabricante</p>
             </div>
           </div>
 
@@ -555,7 +745,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                     <ArrowUpDown className="w-3 h-3 text-slate-500" />
                   </div>
                 </th>
-                <th className="py-3 px-3">Fabricante</th>
+                <th className="py-3 px-3">Fabricante Identificado</th>
                 <th className="py-3 px-3">Interface</th>
                 <th 
                   onClick={() => { setClientSort('traffic'); setClientSortAsc(!clientSortAsc); }}
@@ -571,39 +761,76 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
             </thead>
             <tbody className="divide-y divide-[#1e2d4d]/60 bg-[#0b1329]">
               {filteredClients.length > 0 ? (
-                filteredClients.map((client, idx) => (
-                  <tr key={idx} className="hover:bg-slate-800/30 transition">
-                    <td className="py-2.5 px-3 font-semibold text-white">
-                      {client.ipv4 || 'Não disponível'}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span className={client.nome || client.hostname ? 'text-cyan-300 font-medium' : 'text-slate-500 italic'}>
-                        {client.nome || client.hostname || 'Não disponível'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-400 truncate max-w-xs">
-                      {client.ipv6 || 'Não disponível'}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-300">
-                      {client.mac || 'Não disponível'}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-400">
-                      {client.fabricante || 'Não disponível'}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-400">
-                      {client.interface || 'enp2s0'}
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-indigo-300">
-                      {client.consultas !== undefined ? client.consultas.toLocaleString() : '--'}
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        Online
-                      </span>
-                    </td>
-                  </tr>
-                ))
+                filteredClients.map((client, idx) => {
+                  const isRandom = (client as any).isRandomized;
+                  const isIdentifying = client.fabricante?.includes('Consultando');
+                  const hasRealFabricante = client.fabricante && 
+                    client.fabricante !== 'Não disponível' && 
+                    !client.fabricante.includes('Consultando') &&
+                    !client.fabricante.includes('Não Registrado');
+
+                  return (
+                    <tr key={idx} className="hover:bg-slate-800/40 transition">
+                      <td className="py-2.5 px-3 font-semibold text-white">
+                        {client.ipv4 || 'Não disponível'}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="flex items-center gap-2">
+                          {isRandom ? (
+                            <Smartphone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          ) : client.fabricante?.toLowerCase().includes('v-solution') || client.fabricante?.toLowerCase().includes('roteador') ? (
+                            <Globe className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                          ) : (
+                            <Laptop className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                          )}
+                          <span className={client.nome && client.nome !== 'Não disponível' ? 'text-white font-medium' : 'text-slate-500 italic'}>
+                            {client.nome || client.hostname || 'Dispositivo na rede'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-400 truncate max-w-xs">
+                        {client.ipv6 || 'Não disponível'}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-300 font-mono">
+                        {client.mac || 'Não disponível'}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {isRandom ? (
+                          <span className="inline-flex items-center gap-1.5 text-amber-300 font-medium bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 text-[11px]" title="Endereço MAC dinâmico/privado configurado no celular ou computador para privacidade">
+                            <Shield className="w-3 h-3 text-amber-400" />
+                            Dispositivo Privado (MAC Aleatório)
+                          </span>
+                        ) : hasRealFabricante ? (
+                          <span className="inline-flex items-center gap-1.5 text-emerald-300 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 text-[11px]">
+                            <Check className="w-3 h-3 text-emerald-400 shrink-0" />
+                            {client.fabricante}
+                          </span>
+                        ) : isIdentifying ? (
+                          <span className="inline-flex items-center gap-1.5 text-cyan-300 animate-pulse text-[11px]">
+                            <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                            Identificando fabricante...
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic text-[11px]">
+                            {client.fabricante || 'Não disponível'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-400">
+                        {client.interface || 'enp2s0'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-bold text-indigo-300">
+                        {client.consultas !== undefined ? client.consultas.toLocaleString() : '--'}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Online
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-slate-500 font-mono">

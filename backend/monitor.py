@@ -613,10 +613,15 @@ def get_network_info() -> Dict[str, Any]:
                         hw_client = parts[3]
                         device = parts[5]
                         if hw_client != "00:00:00:00:00:00" and not ip_client.startswith("127."):
-                            # Tenta identificar fabricante conhecido via OUI
+                            # Tenta identificar fabricante conhecido via OUI ou MAC Privado/Aleatório
                             clean_hw = hw_client.replace(":", "").replace("-", "").upper()
                             oui_client = clean_hw[:6] if len(clean_hw) >= 6 else ""
+                            first_byte = int(clean_hw[:2], 16) if len(clean_hw) >= 2 else 0
+                            is_random = bool(first_byte & 0x02)
+
                             KNOWN_OUI_MAP = {
+                                "1CEF03": "Guangzhou V-SOLUTION (Roteador)",
+                                "D03957": "Liteon Technology Corp.",
                                 "FCA13E": "Samsung Electronics",
                                 "FCFBFB": "Cisco Systems",
                                 "B827EB": "Raspberry Pi",
@@ -627,7 +632,7 @@ def get_network_info() -> Dict[str, Any]:
                                 "ACDE48": "Apple, Inc.",
                                 "F01898": "Apple, Inc.",
                                 "641666": "Intel Corp",
-                                "00155D": "Microsoft",
+                                "00155D": "Microsoft Corp",
                                 "50EB71": "TP-Link",
                                 "58D9D5": "TP-Link",
                                 "18FE34": "Espressif (ESP)",
@@ -635,9 +640,18 @@ def get_network_info() -> Dict[str, Any]:
                                 "30AEA4": "Espressif (ESP)",
                                 "7C87CE": "Xiaomi",
                                 "68764F": "Xiaomi",
-                                "00E04C": "Realtek"
+                                "00E04C": "Realtek Semiconductor"
                             }
-                            fab = KNOWN_OUI_MAP.get(oui_client, "Não disponível")
+
+                            if is_random:
+                                fab = "Dispositivo Privado (MAC Aleatório)"
+                                host_disp = "Dispositivo Wi-Fi Privado"
+                            elif oui_client in KNOWN_OUI_MAP:
+                                fab = KNOWN_OUI_MAP[oui_client]
+                                host_disp = f"Dispositivo {fab.split()[0]}"
+                            else:
+                                fab = "Não disponível"
+                                host_disp = "Não disponível"
                             
                             active_clients.append({
                                 "id": f"client-{idx}",
@@ -645,7 +659,8 @@ def get_network_info() -> Dict[str, Any]:
                                 "mac": hw_client,
                                 "interface": device,
                                 "status": "ONLINE",
-                                "hostname": "Não disponível",
+                                "nome": host_disp,
+                                "hostname": host_disp,
                                 "fabricante": fab
                             })
     except Exception:
