@@ -18,6 +18,15 @@ const SecurityVaultContext = createContext<SecurityVaultContextType | undefined>
 export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     try {
+      // Se já estiver logado como administrador, libera o cofre automaticamente
+      const auth = localStorage.getItem('server_panel_auth_v1');
+      if (auth) {
+        const parsedAuth = JSON.parse(auth);
+        if (parsedAuth?.authenticated && (parsedAuth?.role === 'admin' || parsedAuth?.user === 'admin')) {
+          return true;
+        }
+      }
+
       const saved = sessionStorage.getItem(VAULT_STORAGE_KEY);
       if (saved) {
         const data = JSON.parse(saved);

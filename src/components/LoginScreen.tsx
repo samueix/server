@@ -121,9 +121,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
         {/* Card Principal */}
         <div className="rounded-2xl bg-[#0b1324] border border-slate-800 shadow-2xl p-6 sm:p-7 relative overflow-hidden">
-          {/* Status da API */}
+          {/* Status de Conexão com o Servidor */}
           <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-800/80 text-[11px] font-mono">
-            <span className="text-slate-400">Endpoint /api/health:</span>
+            <span className="text-slate-400">Servidor Ubuntu:</span>
             <div className="flex items-center gap-2">
               {apiHealth === 'checking' && (
                 <span className="text-slate-400 flex items-center gap-1.5">
@@ -134,7 +134,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               {apiHealth === 'online' && (
                 <span className="text-emerald-400 flex items-center gap-1.5 font-semibold">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]" />
-                  API Online
+                  Online (Pronto)
                 </span>
               )}
               {apiHealth === 'offline' && (
@@ -199,7 +199,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               <>
                 <div className="space-y-1.5">
                   <label className="block text-xs font-medium text-slate-300">
-                    Usuário do Servidor
+                    Usuário
                   </label>
                   <div className="relative">
                     <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -207,8 +207,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="admin ou user (opcional se digitar a senha admin)"
+                      placeholder="admin ou seu usuário"
                       autoComplete="username"
+                      required
                       className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-blue-500 transition"
                     />
                   </div>
@@ -226,7 +227,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="075561@Sam (Admin) ou user"
+                      placeholder="Digite sua senha"
                       required
                       autoComplete="current-password"
                       className="w-full pl-9 pr-10 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-blue-500 transition"
@@ -240,32 +241,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                </div>
-
-                {/* Atalhos Rápidos de Acesso para Admin e User */}
-                <div className="pt-1 flex items-center justify-between gap-2 text-[11px] font-mono">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUsername('admin');
-                      setPassword('075561@Sam');
-                    }}
-                    className="flex-1 py-1.5 px-2 rounded-lg bg-blue-950/40 hover:bg-blue-900/40 border border-blue-800/50 text-blue-300 transition text-left"
-                  >
-                    <div className="font-semibold">Admin (Total)</div>
-                    <div className="text-[10px] text-blue-400/80">075561@Sam</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUsername('user');
-                      setPassword('user');
-                    }}
-                    className="flex-1 py-1.5 px-2 rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700/60 text-slate-300 transition text-left"
-                  >
-                    <div className="font-semibold">User (Gráficos)</div>
-                    <div className="text-[10px] text-slate-400">user / user</div>
-                  </button>
                 </div>
               </>
             ) : (

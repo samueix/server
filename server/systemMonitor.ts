@@ -493,16 +493,24 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
 }
 
 export function getFullSystemSnapshot() {
+  const osInfo = getOsInfo();
   const procInfo = getProcessesList('cpu', 30);
   return {
-    system: getOsInfo(),
+    servidor: osInfo.hostname,
+    sistema: osInfo,
+    system: osInfo,
     uptime: getUptime(),
     cpu: getCpuInfo(),
     memory: getMemoryInfo(),
+    memoria: getMemoryInfo(),
     temperature: getTemperatureInfo(),
+    temperatura: getTemperatureInfo(),
     disk: getDiskInfo(),
+    disco: getDiskInfo(),
     network: getNetworkInfo(),
+    rede: getNetworkInfo(),
     processes: procInfo.processes,
+    processos: procInfo.processes,
     processes_summary: {
       count: procInfo.count,
       running: procInfo.running,

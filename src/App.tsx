@@ -292,10 +292,11 @@ export default function App() {
     const session = getStoredAuth();
     setAuthSession(session);
     setLogoutNotice(null);
-    setIsInitialLoad(true);
-    setTimeout(() => {
-      executePoll();
-    }, 100);
+    setIsInitialLoad(false);
+    setConnectionStatus('connecting');
+    setActiveTab('overview');
+    // Executa polling imediatamente
+    executePoll();
   };
 
   // Logout handler
@@ -423,8 +424,8 @@ export default function App() {
               onSelectTab={setActiveTab}
             />
 
-            {/* Offline Banner when telemetry server is unreachable (only on server tabs) */}
-            {connectionStatus !== 'connected' && 
+            {/* Offline Banner when telemetry server is unreachable (only when strictly disconnected) */}
+            {connectionStatus === 'disconnected' && 
              activeTab !== 'adguard' && 
              activeTab !== 'adguard_ai' && 
              activeTab !== 'ping' &&
@@ -441,6 +442,15 @@ export default function App() {
                 onOpenCodeViewer={() => setIsCodeViewerOpen(true)}
                 isInitialLoad={false}
               />
+            )}
+
+            {/* Tela de Carregamento inicial de métricas */}
+            {connectionStatus === 'connecting' && !serverData && activeTab !== 'adguard' && activeTab !== 'logs' && activeTab !== 'n8n' && activeTab !== 'ping' && activeTab !== 'commands' && activeTab !== 'documentation' && (
+              <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3 bg-[#0b1329]/60 border border-slate-800 rounded-2xl p-8 backdrop-blur-xl">
+                <div className="w-10 h-10 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                <span className="text-sm font-medium text-slate-200">Conectando e carregando telemetria do Ubuntu Server...</span>
+                <span className="text-xs text-slate-500 font-mono">Host: {serverIp} • /api/system</span>
+              </div>
             )}
 
             {/* AdGuard Home Tab (Liberado para Administrador) */}
