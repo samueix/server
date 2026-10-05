@@ -75,6 +75,8 @@ export interface N8nStatusResponse {
   online: boolean;
   url: string;
   apiConnected: boolean;
+  apiAuthError?: string | null;
+  hasApiKey?: boolean;
   version?: string;
   activeWorkflowsCount: number;
   totalWorkflowsCount: number;

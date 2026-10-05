@@ -28,7 +28,7 @@ import {
 } from './server/systemMonitor.js';
 import { getAllMonitoredServices } from './server/servicesMonitor.js';
 import { measureExternalPing } from './server/pingMonitor.js';
-import { fetchN8nStatus } from './server/n8nClient.js';
+import { fetchN8nStatus, setN8nConfig, getN8nConfig } from './server/n8nClient.js';
 import { getSystemLogs } from './server/logsMonitor.js';
 import fs from 'fs';
 
@@ -473,6 +473,28 @@ async function startServer() {
     try {
       const n8nData = await fetchN8nStatus();
       return res.json({ workflows: n8nData.workflows });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/n8n/config', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const role = getClientRole(req);
+    if (role !== 'admin') {
+      return res.status(403).json({ detail: 'Apenas Administradores podem configurar a integração n8n.' });
+    }
+    try {
+      const { url, apiKey } = req.body;
+      setN8nConfig(url, apiKey);
+      const updatedStatus = await fetchN8nStatus();
+      return res.json({
+        success: true,
+        message: 'Configurações do n8n atualizadas com sucesso.',
+        status: updatedStatus
+      });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
