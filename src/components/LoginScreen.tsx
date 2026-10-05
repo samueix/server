@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { verifyCredentialsWithServer } from '../services/authService';
 import { SERVER_IPV4, SERVER_IPV6 } from '../config';
+import { UbuntuRoundelLogo } from './UbuntuRoundelLogo';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: string) => void;
@@ -105,8 +106,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       <div className="w-full max-w-md">
         {/* Header / Logo */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#0b1324] border border-slate-800 text-blue-400 mb-3 shadow-lg">
-            <Server className="w-6 h-6" />
+          <div className="inline-flex items-center justify-center mb-3">
+            <UbuntuRoundelLogo size="lg" />
           </div>
           <h1 className="text-xl font-bold tracking-tight text-white flex items-center justify-center gap-2">
             <span>Server Panel</span>

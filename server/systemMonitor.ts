@@ -355,7 +355,7 @@ export function getNetworkInfo() {
       nome: 'eth0',
       ip: '192.168.100.23',
       ipv4: '192.168.100.23',
-      ipv6: '2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445',
+      ipv6: '2804:2d5c:a2:852:5ecd:5bff:fe5a:7445',
       mac: '5c:cd:5b:5a:74:45',
       netmask: '255.255.255.0',
       gateway: '192.168.100.1',
@@ -370,7 +370,7 @@ export function getNetworkInfo() {
       erros: 0
     });
     primaryIp = '192.168.100.23';
-    primaryIpv6 = '2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445';
+    primaryIpv6 = '2804:2d5c:a2:852:5ecd:5bff:fe5a:7445';
   }
 
   return {

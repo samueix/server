@@ -347,6 +347,23 @@ export default function App() {
     ? `${statusData.uptime.dias}d ${statusData.uptime.horas}h` 
     : '';
 
+  // Determina o papel do usuário logado (admin vs user)
+  const currentUserRole: 'admin' | 'user' = 
+    authSession?.role === 'admin' || 
+    authSession?.user === 'admin' || 
+    authSession?.user === 'samuel' || 
+    (authSession?.user && authSession.user.toLowerCase() !== 'user' && authSession.user.toLowerCase() !== 'dfaz')
+      ? 'admin'
+      : 'user';
+
+  // Garante que o usuário comum 'user' tenha acesso APENAS aos gráficos (overview, monitoring, ping)
+  // Hook deve ser chamado SEMPRE antes de qualquer return condicional (Regras dos Hooks do React)
+  useEffect(() => {
+    if (authSession?.authenticated && currentUserRole === 'user' && !['overview', 'monitoring', 'ping'].includes(activeTab)) {
+      setActiveTab('overview');
+    }
+  }, [authSession?.authenticated, currentUserRole, activeTab]);
+
   // Se não houver sessão ativa autenticada, exibe a tela de login
   if (!authSession || !authSession.authenticated) {
     return (
@@ -356,15 +373,6 @@ export default function App() {
       />
     );
   }
-
-  const currentUserRole: 'admin' | 'user' = authSession?.role || (authSession?.user === 'admin' ? 'admin' : 'user');
-
-  // Garante que o usuário comum 'user' tenha acesso APENAS aos gráficos (overview, monitoring, ping)
-  useEffect(() => {
-    if (currentUserRole === 'user' && !['overview', 'monitoring', 'ping'].includes(activeTab)) {
-      setActiveTab('overview');
-    }
-  }, [currentUserRole, activeTab]);
 
   return (
     <SecurityVaultProvider>

@@ -24,6 +24,7 @@ import {
 import { NetworkTelemetry } from '../../services/api';
 import { SparklineChart } from '../SparklineChart';
 import { SERVER_IPV4, SERVER_IPV6 } from '../../config';
+import { UbuntuRoundelLogo } from '../UbuntuRoundelLogo';
 
 interface OverviewTabProps {
   server: ApiServerResponse | null;
@@ -131,13 +132,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
       <div className="p-5 rounded-2xl bg-[#0b1329] border border-[#1e2d4d] shadow-lg">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-start sm:items-center gap-3.5">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border ${
-              isConnected 
-                ? 'bg-blue-600/10 border-blue-500/30 text-blue-400' 
-                : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
-            }`}>
-              <Server className="w-6 h-6" />
-            </div>
+            <UbuntuRoundelLogo size="lg" />
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h1 className="text-lg font-bold text-white tracking-tight">{hostname}</h1>
