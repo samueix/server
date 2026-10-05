@@ -4,14 +4,82 @@ export type TransportType = 'websocket' | 'polling';
 export type NavigationTab = 
   | 'overview' 
   | 'monitoring' 
+  | 'ping'
+  | 'logs'
   | 'processes' 
   | 'services' 
   | 'network' 
   | 'adguard'
   | 'adguard_ai'
+  | 'n8n'
   | 'commands' 
   | 'system'
   | 'documentation';
+
+export interface SystemLogEntry {
+  id: string;
+  timestamp: string;
+  raw: string;
+  host?: string;
+  process?: string;
+  pid?: string;
+  message: string;
+  level: 'info' | 'warn' | 'error' | 'debug';
+}
+
+export interface SystemLogsResponse {
+  source: 'syslog' | 'agent' | 'panel' | 'adguard' | 'auth' | 'dmesg';
+  source_path?: string;
+  file_exists: boolean;
+  total_lines: number;
+  returned_lines: number;
+  last_updated: string;
+  logs: SystemLogEntry[];
+  raw_lines: string[];
+}
+
+export interface PingTargetResult {
+  name: string;
+  host: string;
+  port: number;
+  latency_ms: number;
+  status: 'excelente' | 'bom' | 'regular' | 'lento' | 'offline';
+  timestamp: string;
+}
+
+export interface PingTelemetryResponse {
+  online: boolean;
+  average_ms: number;
+  jitter_ms: number;
+  min_ms: number;
+  max_ms: number;
+  loss_percent: number;
+  targets: PingTargetResult[];
+  last_tested: string;
+}
+
+export interface N8nWorkflow {
+  id: string;
+  name: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  tags?: string[];
+  nodesCount?: number;
+  triggers?: string[];
+  executionsCount?: number;
+}
+
+export interface N8nStatusResponse {
+  status: 'ok' | 'offline';
+  online: boolean;
+  url: string;
+  apiConnected: boolean;
+  version?: string;
+  activeWorkflowsCount: number;
+  totalWorkflowsCount: number;
+  workflows: N8nWorkflow[];
+}
 
 export type DomainRiskLevel = 'baixo' | 'médio' | 'alto' | 'crítico' | 'desconhecido';
 

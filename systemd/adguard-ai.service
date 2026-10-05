@@ -5,6 +5,7 @@ After=network.target adguard-home.service
 [Service]
 Type=simple
 User=samuel
+SupplementaryGroups=adm systemd-journal
 WorkingDirectory=/home/samuel/adguard-home-ai
 Environment=NODE_ENV=production
 Environment=PORT=3000

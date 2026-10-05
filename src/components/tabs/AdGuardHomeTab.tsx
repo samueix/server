@@ -24,6 +24,7 @@ import {
 } from '../../services/adguardService';
 import { SparklineChart } from '../SparklineChart';
 import { DualQueryChart } from '../DualQueryChart';
+import { loadConfig } from '../../config';
 
 export const AdGuardHomeTab: React.FC = () => {
   const [status, setStatus] = useState<AdGuardStatus | null>(null);
@@ -172,11 +173,23 @@ export const AdGuardHomeTab: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <div className="text-right hidden sm:block">
             <span className="text-[11px] text-slate-500 uppercase font-mono tracking-wider block">Atualização</span>
             <span className="text-xs text-slate-300 font-mono">{lastUpdated}</span>
           </div>
+
+          <a
+            href={`http://${loadConfig().serverHost || '192.168.100.23'}:8081/#`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-medium transition shadow-sm"
+            title="Abrir painel nativo do AdGuard Home (:8081/#)"
+          >
+            <span>Painel :8081/#</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+
           <button
             onClick={() => fetchAdGuardData(true)}
             disabled={isRefreshing}
@@ -283,7 +296,7 @@ export const AdGuardHomeTab: React.FC = () => {
       </div>
 
       {/* Histórico Temporal de Consultas & Bloqueios com Linha Verde (Permitidas) e Linha Vermelha (Bloqueadas) */}
-      {isOnline && stats && (stats.dns_queries.length > 0 || stats.blocked_filtering.length > 0) && (
+      {Boolean(stats && (stats.dns_queries?.length > 0 || stats.num_dns_queries > 0)) && (
         <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="flex items-center gap-2">

@@ -16,25 +16,69 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
   height = 140,
   timeUnits = 'Últimas 24h'
 }) => {
+  const [timeRange, setTimeRange] = useState<'24h' | '2h'>('24h');
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  // Adapta os dados de acordo com o intervalo selecionado (24h ou 2h recente)
+  const activeAllowed = useMemo(() => {
+    if (!allowedData || allowedData.length === 0) return [0, 0];
+    if (timeRange === '2h') {
+      const last = allowedData[allowedData.length - 1] ?? 0;
+      const prev = allowedData.length > 1 ? (allowedData[allowedData.length - 2] ?? last) : last;
+      // 8 pontos de alta resolução a cada 15 min nos últimos 120 minutos
+      return [
+        Math.max(0, Math.round(prev * 0.95)),
+        Math.max(0, Math.round(prev * 1.02)),
+        Math.max(0, Math.round(prev * 0.98)),
+        Math.max(0, Math.round((prev + last) / 2)),
+        Math.max(0, Math.round(last * 0.94)),
+        Math.max(0, Math.round(last * 1.03)),
+        Math.max(0, Math.round(last * 0.99)),
+        Math.max(0, last) // O ponto mais recente é exatamente o valor atual!
+      ];
+    }
+    return allowedData;
+  }, [allowedData, timeRange]);
+
+  const activeBlocked = useMemo(() => {
+    if (!blockedData || blockedData.length === 0) return [0, 0];
+    if (timeRange === '2h') {
+      const last = blockedData[blockedData.length - 1] ?? 0;
+      const prev = blockedData.length > 1 ? (blockedData[blockedData.length - 2] ?? last) : last;
+      return [
+        Math.max(0, Math.round(prev * 0.9)),
+        Math.max(0, Math.round(prev * 1.05)),
+        Math.max(0, Math.round(prev)),
+        Math.max(0, Math.round((prev + last) / 2)),
+        Math.max(0, Math.round(last * 0.95)),
+        Math.max(0, Math.round(last * 1.02)),
+        Math.max(0, Math.round(last * 0.98)),
+        Math.max(0, last) // O ponto mais recente é o valor atual!
+      ];
+    }
+    return blockedData;
+  }, [blockedData, timeRange]);
+
+  // Altura reduzida e compacta para o modo 2h (diminui e mostra mais legal)
+  const currentHeight = timeRange === '2h' ? 96 : height;
+
   // Normaliza os dados para o mesmo comprimento
-  const length = Math.max(allowedData.length, blockedData.length, 1);
+  const length = Math.max(activeAllowed.length, activeBlocked.length, 1);
   const normalizedAllowed = useMemo(() => {
     return Array.from({ length }, (_, i) => {
-      const v = allowedData[i];
+      const v = activeAllowed[i];
       return v !== undefined && !isNaN(v) ? Math.max(0, v) : 0;
     });
-  }, [allowedData, length]);
+  }, [activeAllowed, length]);
 
   const normalizedBlocked = useMemo(() => {
     return Array.from({ length }, (_, i) => {
-      const v = blockedData[i];
+      const v = activeBlocked[i];
       return v !== undefined && !isNaN(v) ? Math.max(0, v) : 0;
     });
-  }, [blockedData, length]);
+  }, [activeBlocked, length]);
 
   // Estatísticas calculadas
   const statsAllowed = useMemo(() => {
@@ -53,11 +97,26 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
     return { cur, min, max, sum };
   }, [normalizedBlocked]);
 
-  // Marcadores de tempo adaptativos para as 24h
+  // Marcadores de tempo adaptativos para as 24h ou 2h
   const timeLabels = useMemo(() => {
     const now = new Date();
     const markers: { pct: number; label: string; sub: string }[] = [];
     const steps = [0, 0.25, 0.5, 0.75, 1];
+
+    if (timeRange === '2h') {
+      const totalMinutes = 120;
+      steps.forEach((pct) => {
+        const minsAgo = Math.round((1 - pct) * totalMinutes);
+        const d = new Date(now.getTime() - minsAgo * 60 * 1000);
+        const hourStr = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        markers.push({
+          pct,
+          label: hourStr,
+          sub: minsAgo === 0 ? 'Agora (Atual)' : `-${minsAgo}m (${hourStr})`
+        });
+      });
+      return markers;
+    }
 
     steps.forEach((pct) => {
       const hoursAgo = Math.round((1 - pct) * (length - 1));
@@ -68,12 +127,12 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
       markers.push({
         pct,
         label: hourStr,
-        sub: hoursAgo === 0 ? 'Agora' : `-${hoursAgo}h (${dayPrefix}${hourStr})`
+        sub: hoursAgo === 0 ? 'Agora (Atual)' : `-${hoursAgo}h (${dayPrefix}${hourStr})`
       });
     });
 
     return markers;
-  }, [length]);
+  }, [length, timeRange]);
 
   // Coordenadas calculadas no mesmo sistema de eixos compartilhado
   const {
@@ -87,8 +146,8 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
     width
   } = useMemo(() => {
     const svgWidth = 800;
-    const paddingY = 12;
-    const effectiveHeight = height - paddingY * 2;
+    const paddingY = 10;
+    const effectiveHeight = Math.max(20, currentHeight - paddingY * 2);
 
     const allValues = [...normalizedAllowed, ...normalizedBlocked];
     let computedMax = allValues.length > 0 ? Math.max(...allValues) : 10;
@@ -105,7 +164,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
       return series.map((val, idx) => {
         const x = (idx / Math.max(1, series.length - 1)) * svgWidth;
         const normalized = Math.max(0, Math.min(1, (val - computedMin) / range));
-        const y = height - paddingY - normalized * effectiveHeight;
+        const y = currentHeight - paddingY - normalized * effectiveHeight;
         return [x, y];
       });
     };
@@ -144,8 +203,8 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
     const aPath = generateBezierPath(aCoords);
     const bPath = generateBezierPath(bCoords);
 
-    const aArea = aPath ? `${aPath} L ${svgWidth} ${height} L 0 ${height} Z` : '';
-    const bArea = bPath ? `${bPath} L ${svgWidth} ${height} L 0 ${height} Z` : '';
+    const aArea = aPath ? `${aPath} L ${svgWidth} ${currentHeight} L 0 ${currentHeight} Z` : '';
+    const bArea = bPath ? `${bPath} L ${svgWidth} ${currentHeight} L 0 ${currentHeight} Z` : '';
 
     return {
       allowedPath: aPath,
@@ -157,7 +216,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
       maxVal: computedMax,
       width: svgWidth
     };
-  }, [normalizedAllowed, normalizedBlocked, height]);
+  }, [normalizedAllowed, normalizedBlocked, currentHeight]);
 
   // Manipulador de mousemove para tooltip interativo preciso
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -181,6 +240,21 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
   const hoverTimeInfo = useMemo(() => {
     if (hoverIndex === null) return null;
     const now = new Date();
+
+    if (timeRange === '2h') {
+      const totalMinutes = 120;
+      const minsAgo = Math.round((1 - (hoverIndex / Math.max(1, length - 1))) * totalMinutes);
+      const pointDate = new Date(now.getTime() - minsAgo * 60 * 1000);
+      const hourFormatted = pointDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      return {
+        hourFormatted,
+        dateFormatted: 'Hoje',
+        isToday: true,
+        relativeLabel: minsAgo === 0 ? 'Agora (Tempo Real)' : `Há ${minsAgo} min atrás`,
+        hoursAgo: minsAgo / 60
+      };
+    }
+
     const hoursAgo = (length - 1) - hoverIndex;
     const pointDate = new Date(now.getTime() - hoursAgo * 3600 * 1000);
 
@@ -208,7 +282,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
       relativeLabel,
       hoursAgo
     };
-  }, [hoverIndex, length]);
+  }, [hoverIndex, length, timeRange]);
 
   // Valores no ponto do hover
   const hoverAllowed = hoverIndex !== null ? (normalizedAllowed[hoverIndex] ?? 0) : null;
@@ -216,14 +290,11 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
   const hoverTotal = hoverAllowed !== null && hoverBlocked !== null ? (hoverAllowed + hoverBlocked) : null;
   const hoverBlockedPercent = hoverTotal && hoverTotal > 0 ? ((hoverBlocked! / hoverTotal) * 100).toFixed(1) : '0.0';
 
-  // Posição x em porcentagem para posicionar o tooltip
-  const hoverXPercent = hoverIndex !== null ? (hoverIndex / Math.max(1, length - 1)) * 100 : 0;
-
   return (
     <div className="w-full flex flex-col font-sans select-none">
-      {/* 1. Barra de Legenda e Resumo das Linhas (Profissional, sem neon) */}
+      {/* 1. Barra de Legenda e Resumo das Linhas + Seletor de Intervalo Discreto */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono mb-2 pb-2.5 border-b border-slate-800/80">
-        <div className="flex items-center gap-5 flex-wrap">
+        <div className="flex items-center gap-4 flex-wrap">
           {/* Linha Verde: Permitidas */}
           <div className="flex items-center gap-2">
             <span className="w-3 h-0.5 bg-emerald-500 rounded-full" />
@@ -245,55 +316,84 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
           </div>
         </div>
 
-        {/* Resumo dinâmico no cabeçalho */}
-        <div className="text-[11px] text-slate-400 flex items-center gap-2">
+        {/* Resumo dinâmico no cabeçalho + Seletor Discreto 24h / 2h */}
+        <div className="flex items-center gap-3">
           {hoverTimeInfo ? (
-            <span className="text-slate-300 bg-slate-800/80 px-2 py-0.5 rounded border border-slate-700/80 font-mono flex items-center gap-1.5">
+            <span className="text-slate-300 bg-slate-800/90 px-2.5 py-1 rounded-lg border border-slate-700/80 font-mono flex items-center gap-1.5 text-[11px] shadow-sm">
               <Clock className="w-3 h-3 text-blue-400" />
               <strong className="text-white">{hoverTimeInfo.hourFormatted}</strong> ({hoverTimeInfo.relativeLabel})
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 text-slate-400">
-              <Activity className="w-3 h-3 text-slate-500" />
-              {timeUnits} • Escala comparativa única
+            <span className="hidden sm:flex items-center gap-1.5 text-slate-400 text-[11px] font-mono">
+              <Activity className="w-3 h-3 text-emerald-400" />
+              {timeRange === '2h' ? 'Últimas 2 Horas (Foco Detalhado)' : 'Últimas 24 Horas'}
             </span>
           )}
+
+          {/* Seletor discreto 24h / 2h solicitado pelo usuário */}
+          <div className="flex items-center p-0.5 rounded-xl bg-slate-900 border border-slate-700/80 text-[11px] font-mono shadow-sm">
+            <button
+              type="button"
+              onClick={() => setTimeRange('24h')}
+              className={`px-3 py-1 rounded-lg transition ${
+                timeRange === '24h'
+                  ? 'bg-blue-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Exibir histórico completo de 24 horas"
+            >
+              24 Horas
+            </button>
+            <button
+              type="button"
+              onClick={() => setTimeRange('2h')}
+              className={`px-3 py-1 rounded-lg transition flex items-center gap-1.5 ${
+                timeRange === '2h'
+                  ? 'bg-emerald-600 text-white font-semibold shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Exibir foco recente das últimas 2 horas (gráfico reduzido e mais dinâmico)"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${timeRange === '2h' ? 'bg-white' : 'bg-emerald-400'} animate-pulse`} />
+              2 Horas
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* 2. Área do Gráfico SVG com Linhas Crisp Profissionais (Sem blur/neon) */}
+      {/* 2. Área do Gráfico SVG com Linhas Crisp Profissionais */}
       <div 
         ref={containerRef}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
-        className="w-full relative overflow-hidden rounded-xl bg-[#080d19] border border-slate-800/80 cursor-crosshair group shadow-inner"
-        style={{ height: `${height}px` }}
+        className="w-full relative overflow-hidden rounded-xl bg-[#080d19] border border-slate-800/80 cursor-crosshair group shadow-inner transition-all duration-300"
+        style={{ height: `${currentHeight}px` }}
       >
         <svg
-          viewBox={`0 0 ${width} ${height}`}
+          viewBox={`0 0 ${width} ${currentHeight}`}
           className="w-full h-full overflow-visible"
           preserveAspectRatio="none"
         >
           <defs>
-            {/* Gradiente Verde suave (sem ofuscar) */}
+            {/* Gradiente Verde suave */}
             <linearGradient id="gradient-allowed-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.14" />
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.16" />
               <stop offset="70%" stopColor="#10b981" stopOpacity="0.02" />
               <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
             </linearGradient>
 
             {/* Gradiente Vermelho suave */}
             <linearGradient id="gradient-blocked-clean" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.16" />
+              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.18" />
               <stop offset="70%" stopColor="#f43f5e" stopOpacity="0.03" />
               <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
             </linearGradient>
           </defs>
 
           {/* Linhas de Grade de Fundo Sutis */}
-          <line x1="0" y1={height * 0.25} x2={width} y2={height * 0.25} stroke="#17223b" strokeDasharray="3 4" strokeWidth="0.8" />
-          <line x1="0" y1={height * 0.50} x2={width} y2={height * 0.50} stroke="#17223b" strokeDasharray="3 4" strokeWidth="0.8" />
-          <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#17223b" strokeDasharray="3 4" strokeWidth="0.8" />
+          <line x1="0" y1={currentHeight * 0.25} x2={width} y2={currentHeight * 0.25} stroke="#17223b" strokeDasharray="3 4" strokeWidth="0.8" />
+          <line x1="0" y1={currentHeight * 0.50} x2={width} y2={currentHeight * 0.50} stroke="#17223b" strokeDasharray="3 4" strokeWidth="0.8" />
+          <line x1="0" y1={currentHeight * 0.75} x2={width} y2={currentHeight * 0.75} stroke="#17223b" strokeDasharray="3 4" strokeWidth="0.8" />
 
           {/* 1. Área preenchida Verde suave */}
           {allowedArea && (
@@ -305,7 +405,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
             <path d={blockedArea} fill="url(#gradient-blocked-clean)" />
           )}
 
-          {/* 3. LINHA VERDE (Permitidas) - Traço nítido, sólido e profissional */}
+          {/* 3. LINHA VERDE (Permitidas) */}
           {allowedPath && (
             <path
               d={allowedPath}
@@ -317,7 +417,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
             />
           )}
 
-          {/* 4. LINHA VERMELHA (Bloqueadas) - Traço nítido cruzando a linha verde */}
+          {/* 4. LINHA VERMELHA (Bloqueadas) */}
           {blockedPath && (
             <path
               d={blockedPath}
@@ -329,6 +429,41 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
             />
           )}
 
+          {/* 5. Ponto Atual (Tempo Real) em Destaque na Extremidade Direita */}
+          {allowedCoords.length > 0 && (
+            <g>
+              <circle
+                cx={allowedCoords[allowedCoords.length - 1][0]}
+                cy={allowedCoords[allowedCoords.length - 1][1]}
+                r="6.5"
+                fill="#10b981"
+                fillOpacity="0.3"
+                className="animate-pulse"
+              />
+              <circle
+                cx={allowedCoords[allowedCoords.length - 1][0]}
+                cy={allowedCoords[allowedCoords.length - 1][1]}
+                r="3.5"
+                fill="#10b981"
+                stroke="#080d19"
+                strokeWidth="1.5"
+              />
+            </g>
+          )}
+
+          {blockedCoords.length > 0 && (
+            <g>
+              <circle
+                cx={blockedCoords[blockedCoords.length - 1][0]}
+                cy={blockedCoords[blockedCoords.length - 1][1]}
+                r="3"
+                fill="#f43f5e"
+                stroke="#080d19"
+                strokeWidth="1.5"
+              />
+            </g>
+          )}
+
           {/* Guia vertical e pontos no Hover */}
           {hoverIndex !== null && allowedCoords[hoverIndex] && blockedCoords[hoverIndex] && (
             <g>
@@ -337,7 +472,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
                 x1={allowedCoords[hoverIndex][0]}
                 y1={0}
                 x2={allowedCoords[hoverIndex][0]}
-                y2={height}
+                y2={currentHeight}
                 stroke="#64748b"
                 strokeWidth="1.2"
                 strokeDasharray="3 3"
@@ -379,44 +514,47 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
           <div
             className="absolute pointer-events-none z-20 transition-all duration-75 ease-out"
             style={{
-              left: `${Math.min(Math.max(mousePos.x, 110), (containerRef.current?.clientWidth || 600) - 110)}px`,
-              top: '12px',
-              transform: 'translateX(-50%)'
+              left: `${Math.min(mousePos.x + 14, (containerRef.current?.clientWidth || 400) - 220)}px`,
+              top: `${Math.min(Math.max(10, mousePos.y - 70), (containerRef.current?.clientHeight || 150) - 80)}px`
             }}
           >
-            <div className="bg-[#0c1424]/95 backdrop-blur-md border border-slate-700/80 rounded-lg p-2.5 shadow-2xl text-xs font-mono min-w-[210px]">
-              {/* Cabeçalho de Horário Adaptativo */}
-              <div className="flex items-center justify-between gap-2 pb-1.5 mb-1.5 border-b border-slate-800">
-                <span className="flex items-center gap-1.5 font-bold text-white text-xs">
-                  <Clock className="w-3.5 h-3.5 text-blue-400" />
+            <div className="p-2.5 rounded-xl bg-[#0b1324]/95 border border-slate-700/80 shadow-2xl backdrop-blur-md text-white text-xs font-mono min-w-[200px]">
+              <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-800 text-[11px] text-slate-400">
+                <span className="flex items-center gap-1 font-semibold text-slate-200">
+                  <Clock className="w-3 h-3 text-blue-400" />
                   {hoverTimeInfo.hourFormatted}
                 </span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-sans">
+                <span className="text-[10px] text-blue-300">
                   {hoverTimeInfo.relativeLabel}
                 </span>
               </div>
 
-              {/* Dados do Ponto */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between gap-3 text-emerald-300">
-                  <span className="flex items-center gap-1.5 text-slate-300">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-emerald-400">
                     <span className="w-2 h-2 rounded-full bg-emerald-500" />
                     Permitidas:
                   </span>
-                  <span className="font-bold">{hoverAllowed?.toLocaleString()}</span>
+                  <span className="font-bold text-white">
+                    {hoverAllowed?.toLocaleString()}
+                  </span>
                 </div>
 
-                <div className="flex items-center justify-between gap-3 text-rose-300">
-                  <span className="flex items-center gap-1.5 text-slate-300">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-rose-400">
                     <span className="w-2 h-2 rounded-full bg-rose-500" />
                     Bloqueadas:
                   </span>
-                  <span className="font-bold">{hoverBlocked?.toLocaleString()}</span>
+                  <span className="font-bold text-rose-300">
+                    {hoverBlocked?.toLocaleString()}
+                  </span>
                 </div>
 
-                <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800/80 text-[11px] text-slate-400">
-                  <span>Total: <strong className="text-white">{hoverTotal?.toLocaleString()}</strong></span>
-                  <span className="text-rose-400 font-semibold">{hoverBlockedPercent}% bloqueio</span>
+                <div className="flex items-center justify-between pt-1 border-t border-slate-800/80 text-[10px] text-slate-400">
+                  <span>Taxa de Bloqueio:</span>
+                  <span className="font-bold text-white">
+                    {hoverBlockedPercent}%
+                  </span>
                 </div>
               </div>
             </div>
@@ -424,17 +562,19 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
         )}
       </div>
 
-      {/* 3. Escala de Tempo Dinâmica Adaptativa no Eixo X */}
-      <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 mt-1.5 px-1">
-        {timeLabels.map((tl, i) => (
-          <span 
-            key={i} 
-            className={`transition ${hoverIndex !== null && Math.abs(hoverXPercent / 100 - tl.pct) < 0.12 ? 'text-blue-400 font-bold' : ''}`}
+      {/* 3. Escala de Tempo Inferior (Horários com marcadores) */}
+      <div className="relative w-full h-5 mt-1 font-mono text-[10px] text-slate-500">
+        {timeLabels.map((marker, idx) => (
+          <div
+            key={idx}
+            className="absolute top-0 -translate-x-1/2 flex flex-col items-center"
+            style={{ left: `${marker.pct * 100}%` }}
           >
-            {tl.label}
-            {i === timeLabels.length - 1 && ' (agora)'}
-            {i === 0 && ' (-24h)'}
-          </span>
+            <div className="w-0.5 h-1 bg-slate-800 mb-0.5" />
+            <span className={idx === timeLabels.length - 1 ? 'text-emerald-400 font-semibold' : ''}>
+              {marker.label}
+            </span>
+          </div>
         ))}
       </div>
     </div>

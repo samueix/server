@@ -16,6 +16,9 @@ import { NetworkTab } from './components/tabs/NetworkTab';
 import { CommandsTab } from './components/tabs/CommandsTab';
 import { SystemTab } from './components/tabs/SystemTab';
 import { AdGuardHomeTab } from './components/tabs/AdGuardHomeTab';
+import { PingTab } from './components/tabs/PingTab';
+import { N8nTab } from './components/tabs/N8nTab';
+import { LogsTab } from './components/tabs/LogsTab';
 import { DocumentationTab } from './components/tabs/DocumentationTab';
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -353,6 +356,15 @@ export default function App() {
     );
   }
 
+  const currentUserRole: 'admin' | 'user' = authSession?.role || (authSession?.user === 'admin' ? 'admin' : 'user');
+
+  // Garante que o usuário comum 'user' tenha acesso APENAS aos gráficos (overview, monitoring, ping)
+  useEffect(() => {
+    if (currentUserRole === 'user' && !['overview', 'monitoring', 'ping'].includes(activeTab)) {
+      setActiveTab('overview');
+    }
+  }, [currentUserRole, activeTab]);
+
   return (
     <SecurityVaultProvider>
       <div className="min-h-screen bg-[#070c14] text-slate-100 flex flex-col font-sans select-text relative overflow-x-hidden">
@@ -384,6 +396,9 @@ export default function App() {
         <Sidebar
           currentTab={activeTab}
           onSelectTab={(tab) => {
+            if (currentUserRole === 'user' && !['overview', 'monitoring', 'ping'].includes(tab)) {
+              return;
+            }
             setActiveTab(tab);
             setMobileMenuOpen(false);
           }}
@@ -394,6 +409,7 @@ export default function App() {
           serverIp={serverIp}
           onOpenSettings={() => setIsSettingsOpen(true)}
           currentUser={authSession?.user}
+          currentUserRole={currentUserRole}
           onLogout={() => setIsLogoutModalOpen(true)}
         />
 
@@ -411,6 +427,9 @@ export default function App() {
             {connectionStatus !== 'connected' && 
              activeTab !== 'adguard' && 
              activeTab !== 'adguard_ai' && 
+             activeTab !== 'ping' &&
+             activeTab !== 'logs' &&
+             activeTab !== 'n8n' &&
              activeTab !== 'commands' && 
              activeTab !== 'documentation' && (
               <OfflineBanner
@@ -424,13 +443,28 @@ export default function App() {
               />
             )}
 
-            {/* AdGuard Home Tab */}
-            {(activeTab === 'adguard' || activeTab === 'adguard_ai') && (
+            {/* AdGuard Home Tab (Liberado para Administrador) */}
+            {(activeTab === 'adguard' || activeTab === 'adguard_ai') && currentUserRole === 'admin' && (
               <AdGuardHomeTab />
             )}
 
+            {/* Ping & Latência Externa Tab (Acesso liberado para User e Admin) */}
+            {activeTab === 'ping' && (
+              <PingTab />
+            )}
+
+            {/* Logs de Sistema em Tempo Real (Liberado para Administrador) */}
+            {activeTab === 'logs' && currentUserRole === 'admin' && (
+              <LogsTab />
+            )}
+
+            {/* n8n Workflow Automation Tab (Liberado para Administrador) */}
+            {activeTab === 'n8n' && currentUserRole === 'admin' && (
+              <N8nTab />
+            )}
+
             {/* Render Server Telemetry Tabs */}
-            {activeTab !== 'adguard' && activeTab !== 'adguard_ai' && (
+            {activeTab !== 'adguard' && activeTab !== 'adguard_ai' && activeTab !== 'ping' && activeTab !== 'n8n' && activeTab !== 'logs' && (
               <>
                 {activeTab === 'overview' && (
                   <OverviewTab
@@ -456,7 +490,7 @@ export default function App() {
                   />
                 )}
 
-                {activeTab === 'processes' && (
+                {activeTab === 'processes' && currentUserRole === 'admin' && (
                   <ProcessesTab
                     processes={processesData}
                     isLoading={connectionStatus === 'connecting'}
@@ -465,14 +499,14 @@ export default function App() {
                   />
                 )}
 
-                {activeTab === 'services' && (
+                {activeTab === 'services' && currentUserRole === 'admin' && (
                   <ServicesTab
                     services={servicesData}
                     isLoading={connectionStatus === 'connecting'}
                   />
                 )}
 
-                {activeTab === 'network' && (
+                {activeTab === 'network' && currentUserRole === 'admin' && (
                   <NetworkTab
                     network={networkData}
                     history={history}
@@ -480,11 +514,11 @@ export default function App() {
                   />
                 )}
 
-                {activeTab === 'commands' && (
+                {activeTab === 'commands' && currentUserRole === 'admin' && (
                   <CommandsTab />
                 )}
 
-                {activeTab === 'system' && (
+                {activeTab === 'system' && currentUserRole === 'admin' && (
                   <SystemTab
                     server={serverData}
                     serverIp={serverIp}
@@ -493,7 +527,7 @@ export default function App() {
                   />
                 )}
 
-                {activeTab === 'documentation' && (
+                {activeTab === 'documentation' && currentUserRole === 'admin' && (
                   <DocumentationTab />
                 )}
               </>

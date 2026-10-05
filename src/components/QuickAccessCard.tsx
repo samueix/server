@@ -77,7 +77,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const adguardUrl = '/adguard-api/';
+  const adguardUrl = `http://${serverIp}:8081/#`;
   const ipv4SshCmd = `ssh samuel@${serverIp}`;
   const ipv6SshCmd = `ssh samuel@[${SERVER_IPV6}]`;
   const currentSshCmd = selectedSshVersion === 'ipv6' ? ipv6SshCmd : ipv4SshCmd;

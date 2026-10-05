@@ -1,4 +1,5 @@
 import { API } from '../config';
+import { getAuthHeaders } from './authService';
 
 export interface AdGuardStatus {
   online: boolean;
@@ -71,23 +72,24 @@ export interface AdGuardFullTelemetry {
 }
 
 // Prefixo detectado dinamicamente para compatibilidade com qualquer configuração Nginx
-// (/adguard-api ou /adguard-api/control)
+// (/adguard-api, /adguard-api/control ou proxy interno /api/adguard)
 let detectedPrefix: string | null = null;
 
 async function adguardFetch<T = any>(endpoint: string, signal?: AbortSignal): Promise<T> {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // Se já sabemos qual prefixo funciona, tenta direto
+  // Se já sabemos qual prefixo funciona, tenta direto; caso contrário testa /api/adguard e /adguard-api
   const prefixesToTry = detectedPrefix 
-    ? [detectedPrefix]
-    : [API.adguard, `${API.adguard}/control`];
+    ? [detectedPrefix, '/api/adguard', API.adguard, `${API.adguard}/control`]
+    : ['/api/adguard', API.adguard, `${API.adguard}/control`];
 
   let lastError: Error | null = null;
+  const authHeaders = getAuthHeaders();
 
   for (const prefix of prefixesToTry) {
     const targetUrl = `${prefix}${cleanEndpoint}`;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     const onExternalAbort = () => controller.abort();
     if (signal) {
@@ -102,7 +104,8 @@ async function adguardFetch<T = any>(endpoint: string, signal?: AbortSignal): Pr
       const response = await fetch(targetUrl, {
         method: 'GET',
         headers: {
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          ...authHeaders
         },
         signal: controller.signal
       });

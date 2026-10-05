@@ -128,56 +128,26 @@ class AdGuardDirectClient {
       const saved = localStorage.getItem(STORAGE_LAST_STATS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && Number(parsed.num_dns_queries) >= 1424) {
-          return { ...parsed, connected: true };
-        }
+        if (parsed) return parsed;
       }
     } catch {}
 
-    // Snapshot real do AdGuard Home de Samuel (192.168.100.23:8081)
     return {
-      connected: true,
-      num_dns_queries: 1424,
-      num_blocked_filtering: 89,
+      connected: false,
+      num_dns_queries: 0,
+      num_blocked_filtering: 0,
       num_replaced_safebrowsing: 0,
       num_replaced_safesearch: 0,
-      blocked_percentage: 6.25,
-      avg_processing_time: 0.1186,
-      top_queried_domains: [
-        { 'youtubei.googleapis.com': 342 },
-        { 'www.youtube.com': 106 },
-        { 'i.ytimg.com': 88 },
-        { 's.youtube.com': 80 },
-        { 'www.google.com': 75 },
-        { 'yt3.ggpht.com': 60 },
-        { 'gateway.icloud.com': 27 },
-        { 'rr4---sn-bg07dner.googlevideo.com': 26 },
-        { 'android.clients.google.com': 24 },
-        { 'rr5---sn-bg07dnss.googlevideo.com': 23 }
-      ],
-      top_blocked_domains: [
-        { 'googleads.g.doubleclick.net': 20 },
-        { 'ad.doubleclick.net': 20 },
-        { 'tpc.googlesyndication.com': 14 },
-        { 'ade.googlesyndication.com': 12 },
-        { 'clienttracing-pa.googleapis.com': 10 },
-        { 'pagead2.googlesyndication.com': 6 },
-        { 'sb.scorecardresearch.com': 5 }
-      ],
-      top_clients: [
-        { '192.168.100.22': 1034 },
-        { '192.168.100.21': 341 },
-        { '192.168.100.23': 37 },
-        { '192.168.100.24': 12 }
-      ],
-      top_upstreams_responses: [
-        { 'https://dns10.quad9.net:443/dns-query': 1191 },
-        { '192.168.100.1:53': 233 }
-      ],
-      dns_queries: [48, 18, 10, 11, 1, 1, 14, 9, 23, 0, 127, 81, 10, 222, 177, 83, 135, 124, 34, 64, 34, 38, 116, 44],
-      blocked_filtering: [0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 5, 2, 2, 28, 28, 0, 6, 0, 0, 0, 0, 0, 6, 10],
+      blocked_percentage: 0,
+      avg_processing_time: 0,
+      top_queried_domains: [],
+      top_blocked_domains: [],
+      top_clients: [],
+      top_upstreams_responses: [],
+      dns_queries: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      blocked_filtering: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
       time_units: 'hours',
-      last_updated: new Date().toISOString()
+      last_updated: '--:--:--'
     };
   }
 
@@ -186,51 +156,10 @@ class AdGuardDirectClient {
       const saved = localStorage.getItem(STORAGE_LAST_LOGS_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch {}
-
-    const now = Date.now();
-    return [
-      {
-        domain: 'youtubei.googleapis.com',
-        client: '192.168.100.22',
-        time: new Date(now - 8000).toISOString(),
-        elapsed_ms: 118.6,
-        status: 'PROCESSED',
-        reason: 'NotFilteredNotFound',
-        dns_type: 'A'
-      },
-      {
-        domain: 'googleads.g.doubleclick.net',
-        client: '192.168.100.22',
-        time: new Date(now - 16000).toISOString(),
-        elapsed_ms: 0.8,
-        status: 'BLOCKED',
-        reason: 'AdGuard DNS filter',
-        rule: '||doubleclick.net^',
-        dns_type: 'HTTPS'
-      },
-      {
-        domain: 'tpc.googlesyndication.com',
-        client: '192.168.100.21',
-        time: new Date(now - 28000).toISOString(),
-        elapsed_ms: 0.5,
-        status: 'BLOCKED',
-        reason: 'AdGuard DNS filter',
-        rule: '||googlesyndication.com^',
-        dns_type: 'A'
-      },
-      {
-        domain: 'gateway.icloud.com',
-        client: '192.168.100.21',
-        time: new Date(now - 45000).toISOString(),
-        elapsed_ms: 82.3,
-        status: 'PROCESSED',
-        reason: 'NotFilteredNotFound',
-        dns_type: 'HTTPS'
-      }
-    ];
+    return [];
   }
 
   /**

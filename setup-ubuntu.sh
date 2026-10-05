@@ -41,6 +41,9 @@ if [[ "$RESPOSTA" =~ ^[Ss]$ ]]; then
     CURRENT_USER=$(whoami)
     SERVICE_FILE="/etc/systemd/system/adguard-ai.service"
 
+    echo "⚙️ Configurando permissões de leitura de logs (/var/log/syslog) para o usuário ${CURRENT_USER}..."
+    sudo usermod -aG adm,systemd-journal "${CURRENT_USER}" || true
+
     echo "⚙️ Configurando ${SERVICE_FILE}..."
     sudo bash -c "cat <<EOF > ${SERVICE_FILE}
 [Unit]
@@ -50,6 +53,7 @@ After=network.target
 [Service]
 Type=simple
 User=${CURRENT_USER}
+SupplementaryGroups=adm systemd-journal
 WorkingDirectory=${CURRENT_DIR}
 Environment=NODE_ENV=production
 Environment=PORT=3000

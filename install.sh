@@ -50,6 +50,7 @@ cp -f "${SRC_BACKEND}/monitor.py" "${INSTALL_DIR}/"
 cp -f "${SRC_BACKEND}/services.py" "${INSTALL_DIR}/"
 cp -f "${SRC_BACKEND}/adguard.py" "${INSTALL_DIR}/"
 cp -f "${SRC_BACKEND}/auth.py" "${INSTALL_DIR}/"
+cp -f "${SRC_BACKEND}/logs.py" "${INSTALL_DIR}/"
 cp -f "${SRC_BACKEND}/requirements.txt" "${INSTALL_DIR}/"
 
 if [ -f "${SRC_BACKEND}/.env.example" ]; then

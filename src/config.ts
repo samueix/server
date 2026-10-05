@@ -34,6 +34,8 @@ export interface AppConfig {
   ramThreshold?: number;  // Default 85%
   tempThreshold?: number; // Default 75°C
   serverIpv6?: string;
+  serverIpv4?: string;
+  serverHost?: string;
   refreshIntervalSeconds?: number; // 2 a 5s
 }
 
@@ -42,6 +44,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   ramThreshold: 85,
   tempThreshold: 75,
   serverIpv6: SERVER_IPV6,
+  serverIpv4: SERVER_IPV4,
+  serverHost: SERVER_IPV4,
   refreshIntervalSeconds: 3
 };
 
@@ -55,6 +59,8 @@ export function loadConfig(): AppConfig {
         ramThreshold: typeof parsed.ramThreshold === 'number' ? parsed.ramThreshold : 85,
         tempThreshold: typeof parsed.tempThreshold === 'number' ? parsed.tempThreshold : 75,
         serverIpv6: parsed.serverIpv6 || SERVER_IPV6,
+        serverIpv4: parsed.serverIpv4 || SERVER_IPV4,
+        serverHost: parsed.serverHost || parsed.serverIpv4 || SERVER_IPV4,
         refreshIntervalSeconds: typeof parsed.refreshIntervalSeconds === 'number' ? parsed.refreshIntervalSeconds : 3
       };
     }

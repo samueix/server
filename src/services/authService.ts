@@ -12,6 +12,7 @@ const AUTH_STORAGE_KEY = 'server_panel_auth_v1';
 export interface AuthSession {
   authenticated: boolean;
   user: string;
+  role: 'admin' | 'user';
   authHeader?: string;
   apiKey?: string;
   authType: 'basic' | 'bearer' | 'apikey';
@@ -27,12 +28,20 @@ export function getStoredAuth(): AuthSession | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && parsed.authenticated) {
+      if (!parsed.role) {
+        parsed.role = parsed.user === 'admin' ? 'admin' : 'user';
+      }
       return parsed;
     }
   } catch (e) {
     console.error('Erro ao ler autenticação do localStorage', e);
   }
   return null;
+}
+
+export function getUserRole(): 'admin' | 'user' {
+  const session = getStoredAuth();
+  return session?.role || (session?.user === 'admin' ? 'admin' : 'user');
 }
 
 /**
@@ -94,8 +103,14 @@ export async function verifyCredentialsWithServer(
   let authType: 'basic' | 'bearer' | 'apikey' = 'basic';
   let tokenKey = options.apiKey;
 
-  if (options.username && options.password) {
-    authHeader = `Basic ${btoa(`${options.username}:${options.password}`)}`;
+  let userVal = options.username ? options.username.trim() : '';
+  const passVal = options.password ? options.password.trim() : '';
+
+  if (passVal) {
+    if (!userVal) {
+      userVal = (passVal === '075561@Sam' || passVal === 'admin') ? 'admin' : 'user';
+    }
+    authHeader = `Basic ${btoa(`${userVal}:${passVal}`)}`;
     headers['Authorization'] = authHeader;
     authType = 'basic';
   } else if (options.apiKey) {
@@ -127,10 +142,12 @@ export async function verifyCredentialsWithServer(
 
     const data = await res.json();
     const username = data.user || options.username || 'admin';
+    const role: 'admin' | 'user' = data.role === 'admin' || username === 'admin' ? 'admin' : 'user';
 
     const session: AuthSession = {
       authenticated: true,
       user: username,
+      role,
       authHeader,
       apiKey: tokenKey,
       authType,

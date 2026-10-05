@@ -11,7 +11,10 @@ import {
   BookOpen,
   X,
   User,
-  LogOut
+  LogOut,
+  Radio,
+  GitBranch,
+  ScrollText
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 import { ServerPanelLogo } from './ServerPanelLogo';
@@ -26,6 +29,7 @@ interface SidebarProps {
   serverIp: string;
   onOpenSettings: () => void;
   currentUser?: string | null;
+  currentUserRole?: 'admin' | 'user';
   onLogout?: () => void;
 }
 
@@ -34,18 +38,22 @@ interface NavItemConfig {
   label: string;
   icon: React.ElementType;
   badge?: string;
+  adminOnly?: boolean;
 }
 
-const NAV_ITEMS: NavItemConfig[] = [
+const ALL_NAV_ITEMS: NavItemConfig[] = [
   { id: 'overview', label: 'Visão geral', icon: LayoutDashboard },
   { id: 'monitoring', label: 'Monitoramento', icon: Activity },
-  { id: 'processes', label: 'Processos', icon: Cpu },
-  { id: 'services', label: 'Serviços', icon: ShieldCheck },
-  { id: 'network', label: 'Rede', icon: Network },
-  { id: 'adguard', label: 'AdGuard Home', icon: Shield },
-  { id: 'commands', label: 'Comandos', icon: Terminal },
-  { id: 'system', label: 'Sistema', icon: Server },
-  { id: 'documentation', label: 'Documentação', icon: BookOpen }
+  { id: 'ping', label: 'Ping & Latência', icon: Radio },
+  { id: 'processes', label: 'Processos', icon: Cpu, adminOnly: true },
+  { id: 'services', label: 'Serviços', icon: ShieldCheck, adminOnly: true },
+  { id: 'network', label: 'Rede', icon: Network, adminOnly: true },
+  { id: 'adguard', label: 'AdGuard Home', icon: Shield, adminOnly: true },
+  { id: 'logs', label: 'Logs de Sistema', icon: ScrollText, adminOnly: true },
+  { id: 'n8n', label: 'n8n Workflows', icon: GitBranch, adminOnly: true },
+  { id: 'commands', label: 'Comandos', icon: Terminal, adminOnly: true },
+  { id: 'system', label: 'Sistema', icon: Server, adminOnly: true },
+  { id: 'documentation', label: 'Documentação', icon: BookOpen, adminOnly: true }
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -56,9 +64,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
   connectionStatus,
   serverIp,
   currentUser,
+  currentUserRole = 'admin',
   onLogout
 }) => {
   const isOnline = connectionStatus === 'connected';
+
+  // Se for usuário padrão (user), exibe APENAS gráficos (Visão Geral, Monitoramento e Ping)
+  const visibleNavItems = ALL_NAV_ITEMS.filter(item => {
+    if (currentUserRole === 'user') {
+      return !item.adminOnly;
+    }
+    return true; // Admin tem acesso a todos os módulos
+  });
 
   const content = (
     <div className="flex flex-col h-full justify-between select-none text-slate-200">
@@ -76,13 +93,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Section Label */}
-        <div className="px-3 pt-1 text-[11px] font-medium tracking-wider text-white/40 uppercase">
-          Módulos
+        <div className="px-3 pt-1 text-[11px] font-medium tracking-wider text-white/40 uppercase flex items-center justify-between">
+          <span>Módulos</span>
+          {currentUserRole === 'user' && (
+            <span className="text-[10px] text-blue-400 font-mono lowercase bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-800/40">
+              apenas gráficos
+            </span>
+          )}
         </div>
 
         {/* Navigation list */}
         <nav className="space-y-1.5">
-          {NAV_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentTab === item.id;
 
@@ -118,7 +140,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Compact Apple-style Glass Status Footer */}
       <div className="mt-4 p-3 rounded-2xl bg-black/20 border border-white/10 text-[11px] font-mono text-white/70 space-y-1.5 backdrop-blur-md">
         <div className="flex items-center justify-between">
-          <span className="text-white/40 font-sans">API FastAPI:</span>
+          <span className="text-white/40 font-sans">API Servidor:</span>
           <span className={`font-semibold flex items-center gap-1.5 ${isOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
             <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-rose-400'}`} />
             {isOnline ? 'Conectado' : 'Offline'}
@@ -130,6 +152,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {serverIp || '192.168.100.23'}
           </span>
         </div>
+        <div className="flex items-center justify-between text-white/50 pt-1 border-t border-white/10">
+          <span className="font-sans">Acesso:</span>
+          <span className={`font-mono text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+            currentUserRole === 'admin'
+              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+              : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+          }`}>
+            {currentUserRole === 'admin' ? 'ADMIN (Total)' : 'USER (Gráficos)'}
+          </span>
+        </div>
+      </div>
 
         {currentUser && onLogout && (
           <div className="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[11px]">
@@ -147,7 +180,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
         )}
-      </div>
     </div>
   );
 

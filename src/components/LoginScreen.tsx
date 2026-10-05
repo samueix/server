@@ -70,9 +70,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setLoading(true);
 
     try {
+      const cleanPass = password.trim();
+      let cleanUser = username.trim();
+
+      // Se informou a senha do administrador (075561@Sam), assume o usuário admin automaticamente
+      if (!cleanUser && (cleanPass === '075561@Sam' || cleanPass === 'admin')) {
+        cleanUser = 'admin';
+      }
+
       const result = await verifyCredentialsWithServer(
         authMode === 'basic'
-          ? { username: username.trim(), password }
+          ? { username: cleanUser, password: cleanPass }
           : { apiKey: apiKey.trim() }
       );
 
@@ -199,8 +207,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="Usuário"
-                      required
+                      placeholder="admin ou user (opcional se digitar a senha admin)"
                       autoComplete="username"
                       className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-blue-500 transition"
                     />
@@ -219,7 +226,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••"
+                      placeholder="075561@Sam (Admin) ou user"
                       required
                       autoComplete="current-password"
                       className="w-full pl-9 pr-10 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-blue-500 transition"
@@ -233,6 +240,32 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
+                </div>
+
+                {/* Atalhos Rápidos de Acesso para Admin e User */}
+                <div className="pt-1 flex items-center justify-between gap-2 text-[11px] font-mono">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsername('admin');
+                      setPassword('075561@Sam');
+                    }}
+                    className="flex-1 py-1.5 px-2 rounded-lg bg-blue-950/40 hover:bg-blue-900/40 border border-blue-800/50 text-blue-300 transition text-left"
+                  >
+                    <div className="font-semibold">Admin (Total)</div>
+                    <div className="text-[10px] text-blue-400/80">075561@Sam</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUsername('user');
+                      setPassword('user');
+                    }}
+                    className="flex-1 py-1.5 px-2 rounded-lg bg-slate-900/60 hover:bg-slate-800 border border-slate-700/60 text-slate-300 transition text-left"
+                  >
+                    <div className="font-semibold">User (Gráficos)</div>
+                    <div className="text-[10px] text-slate-400">user / user</div>
+                  </button>
                 </div>
               </>
             ) : (

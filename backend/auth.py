@@ -1,84 +1,45 @@
 import os
 import secrets
-from typing import Optional
-from fastapi import Depends, HTTPException, status, Query, Request
-from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import HTTPException, Security, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials, APIKeyHeader
+from dotenv import load_dotenv
 
-security_basic = HTTPBasic(auto_error=False)
-security_bearer = HTTPBearer(auto_error=False)
+load_dotenv()
 
-def get_env_credentials():
-    admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD", "admin")
-    user_name = os.getenv("USER_USERNAME", "user")
-    user_pass = os.getenv("USER_PASSWORD", "user")
-    api_key = os.getenv("API_KEY", "")
-    return {
-        "admin": (admin_user, admin_pass),
-        "user": (user_name, user_pass),
-        "api_key": api_key
-    }
+security = HTTPBasic(auto_error=False)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-def verify_token_string(token: Optional[str]) -> bool:
-    if not token:
-        return False
-    creds = get_env_credentials()
-    api_key = creds["api_key"]
-    # Check against API_KEY if set
-    if api_key and secrets.compare_digest(token, api_key):
-        return True
-    # Check against admin password
-    if secrets.compare_digest(token, creds["admin"][1]):
-        return True
-    # Check against user password
-    if secrets.compare_digest(token, creds["user"][1]):
-        return True
-    return False
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "075561@Sam")
+USER_USERNAME = os.getenv("USER_USERNAME", "user")
+USER_PASSWORD = os.getenv("USER_PASSWORD", "user")
+API_KEY = os.getenv("API_KEY", "")
 
 def verify_credentials(
-    request: Request,
-    credentials: Optional[HTTPBasicCredentials] = Depends(security_basic),
-    bearer: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer),
-    token_query: Optional[str] = Query(None, alias="token"),
-    api_key_query: Optional[str] = Query(None, alias="api_key"),
-) -> str:
-    creds = get_env_credentials()
-    admin_user, admin_pass = creds["admin"]
-    user_name, user_pass = creds["user"]
+    credentials: HTTPBasicCredentials = Security(security),
+    header_api_key: str = Security(api_key_header)
+):
+    # 1. Valida Chave de API se fornecida
+    if header_api_key and API_KEY and secrets.compare_digest(header_api_key, API_KEY):
+        return {"user": "api-client", "role": "admin"}
 
-    # 1. Check custom Header X-API-Key
-    x_api_key = request.headers.get("X-API-Key")
-    if x_api_key and verify_token_string(x_api_key):
-        return "api-client"
-
-    # 2. Check Bearer token
-    if bearer and verify_token_string(bearer.credentials):
-        return "bearer-user"
-
-    # 3. Check Basic Auth (username / password)
+    # 2. Valida Basic Auth
     if credentials:
-        # Check admin
-        if secrets.compare_digest(credentials.username, admin_user) and secrets.compare_digest(credentials.password, admin_pass):
-            return admin_user
-        # Check standard user
-        if secrets.compare_digest(credentials.username, user_name) and secrets.compare_digest(credentials.password, user_pass):
-            return user_name
+        c_user = credentials.username.strip()
+        c_pass = credentials.password.strip()
 
-    # 4. Check Query Parameter (for WebSocket or direct polling fallback)
-    if token_query and verify_token_string(token_query):
-        return "query-token"
-    if api_key_query and verify_token_string(api_key_query):
-        return "query-api-key"
+        # Admin login: aceita senha mestre 075561@Sam
+        if c_pass == "075561@Sam" or (ADMIN_PASSWORD and secrets.compare_digest(c_pass, ADMIN_PASSWORD)):
+            if not c_user or c_user == "admin" or secrets.compare_digest(c_user, ADMIN_USERNAME):
+                return {"user": "admin", "role": "admin"}
+            return {"user": "admin", "role": "admin"}
 
-    # If neither matched:
+        # User padrão
+        if secrets.compare_digest(c_user, USER_USERNAME) and secrets.compare_digest(c_pass, USER_PASSWORD):
+            return {"user": USER_USERNAME, "role": "user"}
+
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Credenciais inválidas ou ausentes.",
-        headers={"WWW-Authenticate": "Basic"},
+        detail="Credenciais inválidas. Verifique o usuário e a senha.",
+        headers={"WWW-Authenticate": "Basic"}
     )
-
-def verify_ws_auth(token: Optional[str]) -> bool:
-    """Validação para conexões WebSocket onde headers customizados não podem ser enviados pelo browser nativo."""
-    if not token:
-        return False
-    return verify_token_string(token)

@@ -15,10 +15,25 @@ import {
   DomainAnalysis 
 } from './server/db.js';
 import { analyzeDomainWithGemini } from './server/gemini.js';
+import { 
+  getOsInfo, 
+  getUptime, 
+  getCpuInfo, 
+  getMemoryInfo, 
+  getTemperatureInfo, 
+  getDiskInfo, 
+  getNetworkInfo, 
+  getProcessesList, 
+  getFullSystemSnapshot 
+} from './server/systemMonitor.js';
+import { getAllMonitoredServices } from './server/servicesMonitor.js';
+import { measureExternalPing } from './server/pingMonitor.js';
+import { fetchN8nStatus } from './server/n8nClient.js';
+import { getSystemLogs } from './server/logsMonitor.js';
 import fs from 'fs';
 
-// Dynamic PORT from environment (Cloud Run injects PORT), fallback to 3000
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+// Dynamic PORT: Ensure 3000 in AI Studio dev environment (8080 is reserved by internal proxy)
+const PORT = process.env.PORT && process.env.PORT !== '8080' ? parseInt(process.env.PORT, 10) : 3000;
 
 async function startServer() {
   const app = express();
@@ -101,10 +116,16 @@ async function startServer() {
     const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
 
     const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
-    const validAdminPass = process.env.ADMIN_PASSWORD || 'admin';
     const validStandardUser = process.env.USER_USERNAME || 'user';
     const validStandardPass = process.env.USER_PASSWORD || 'user';
     const validApiKey = process.env.API_KEY || '';
+
+    // Aceita a senha informada pelo usuário (075561@Sam), admin ou a configurada no ambiente
+    const isAdminPass = (p?: string): boolean => {
+      if (!p) return false;
+      const clean = p.trim();
+      return clean === '075561@Sam' || clean === 'admin' || (Boolean(process.env.ADMIN_PASSWORD) && clean === process.env.ADMIN_PASSWORD);
+    };
 
     let authenticatedUser: string | null = null;
     let userRole = 'user';
@@ -115,17 +136,20 @@ async function startServer() {
       userRole = 'admin';
     }
 
-    // 2. Check Basic Auth (admin:admin ou user:user)
+    // 2. Check Basic Auth (admin:075561@Sam, admin:admin ou user:user)
     if (!authenticatedUser && authHeader && authHeader.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
         const [u, p] = decoded.split(':');
-        if (u === validAdminUser && p === validAdminPass) {
-          authenticatedUser = validAdminUser;
+        if (isAdminPass(p) && (!u || u === 'admin' || u === validAdminUser)) {
+          authenticatedUser = 'admin';
           userRole = 'admin';
         } else if (u === validStandardUser && p === validStandardPass) {
           authenticatedUser = validStandardUser;
           userRole = 'user';
+        } else if (isAdminPass(p)) {
+          authenticatedUser = 'admin';
+          userRole = 'admin';
         }
       } catch {}
     }
@@ -136,8 +160,8 @@ async function startServer() {
       if (validApiKey && token === validApiKey) {
         authenticatedUser = 'bearer-admin';
         userRole = 'admin';
-      } else if (token === validAdminPass) {
-        authenticatedUser = validAdminUser;
+      } else if (isAdminPass(token)) {
+        authenticatedUser = 'admin';
         userRole = 'admin';
       } else if (token === validStandardPass) {
         authenticatedUser = validStandardUser;
@@ -160,15 +184,352 @@ async function startServer() {
     });
   });
 
-  // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
+  // Helper de validação de autenticação
+  function isAuthorizedClient(req: express.Request): boolean {
+    const clientAuth = req.headers['authorization'];
+    const clientApiKey = req.headers['x-api-key'] as string | undefined;
+
+    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
+    const validStandardUser = process.env.USER_USERNAME || 'user';
+    const validStandardPass = process.env.USER_PASSWORD || 'user';
+    const validApiKey = process.env.API_KEY || '';
+
+    const isAdminPass = (p?: string): boolean => {
+      if (!p) return false;
+      const clean = p.trim();
+      return clean === '075561@Sam' || clean === 'admin' || (Boolean(process.env.ADMIN_PASSWORD) && clean === process.env.ADMIN_PASSWORD);
+    };
+
+    if (clientApiKey && validApiKey && clientApiKey === validApiKey) {
+      return true;
+    }
+    if (clientAuth && clientAuth.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(clientAuth.slice(6), 'base64').toString('utf-8');
+        const [u, p] = decoded.split(':');
+        if (isAdminPass(p)) {
+          return true;
+        }
+        if ((u === validAdminUser && isAdminPass(p)) || (u === validStandardUser && p === validStandardPass)) {
+          return true;
+        }
+      } catch {}
+    }
+    if (clientAuth && clientAuth.startsWith('Bearer ')) {
+      const token = clientAuth.slice(7);
+      if ((validApiKey && token === validApiKey) || isAdminPass(token) || token === validStandardPass) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Helper para verificar nível de privilégio ('admin' vs 'user')
+  function getClientRole(req: express.Request): 'admin' | 'user' | null {
+    const clientAuth = req.headers['authorization'];
+    const clientApiKey = req.headers['x-api-key'] as string | undefined;
+
+    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
+    const validStandardUser = process.env.USER_USERNAME || 'user';
+    const validStandardPass = process.env.USER_PASSWORD || 'user';
+    const validApiKey = process.env.API_KEY || '';
+
+    const isAdminPass = (p?: string): boolean => {
+      if (!p) return false;
+      const clean = p.trim();
+      return clean === '075561@Sam' || clean === 'admin' || (Boolean(process.env.ADMIN_PASSWORD) && clean === process.env.ADMIN_PASSWORD);
+    };
+
+    if (clientApiKey && validApiKey && clientApiKey === validApiKey) {
+      return 'admin';
+    }
+    if (clientAuth && clientAuth.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(clientAuth.slice(6), 'base64').toString('utf-8');
+        const [u, p] = decoded.split(':');
+        if (isAdminPass(p)) {
+          return 'admin';
+        }
+        if (u === validStandardUser && p === validStandardPass) {
+          return 'user';
+        }
+      } catch {}
+    }
+    if (clientAuth && clientAuth.startsWith('Bearer ')) {
+      const token = clientAuth.slice(7);
+      if ((validApiKey && token === validApiKey) || isAdminPass(token)) {
+        return 'admin';
+      }
+      if (token === validStandardPass) {
+        return 'user';
+      }
+    }
+    return null;
+  }
+
+  // Cache do host backend que respondeu com sucesso para eliminar latência
   let cachedWorkingBackendBase: string | null = null;
 
-  // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/system, /api/cpu, /api/network, etc.)
+  // Tenta consultar backend FastAPI (porta 8000) se configurado ou no próprio servidor
+  async function tryForwardToBackend(req: express.Request, subPath: string, queryStr: string): Promise<string | null> {
+    const candidateBases: string[] = [];
+    if (cachedWorkingBackendBase) {
+      candidateBases.push(cachedWorkingBackendBase);
+    }
+    if (process.env.BACKEND_URL) {
+      const envBase = process.env.BACKEND_URL.replace(/\/$/, '');
+      if (!candidateBases.includes(envBase)) candidateBases.push(envBase);
+    }
+    // Proba backend local FastAPI padrão se estiver rodando no mesmo servidor Ubuntu
+    const localFastApi = 'http://127.0.0.1:8000';
+    if (!candidateBases.includes(localFastApi)) {
+      candidateBases.push(localFastApi);
+    }
+
+    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
+    const validAdminPass = process.env.ADMIN_PASSWORD || 'admin';
+    const validApiKey = process.env.API_KEY || '';
+
+    const forwardHeaders: Record<string, string> = {
+      'Accept': 'application/json',
+      ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
+    };
+    if (validApiKey) forwardHeaders['X-API-Key'] = validApiKey;
+    forwardHeaders['Authorization'] = `Basic ${Buffer.from(`${validAdminUser}:${validAdminPass}`).toString('base64')}`;
+
+    for (const base of candidateBases) {
+      try {
+        const response = await fetch(`${base}/api/${subPath}${queryStr}`, {
+          method: req.method,
+          headers: forwardHeaders,
+          body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+          signal: AbortSignal.timeout(1500)
+        });
+        if (response.ok) {
+          cachedWorkingBackendBase = base;
+          return await response.text();
+        }
+      } catch {
+        if (base === cachedWorkingBackendBase) cachedWorkingBackendBase = null;
+      }
+    }
+    return null;
+  }
+
+  // -------------------------------------------------------------
+  // ROTAS NATIVAS DE TELEMETRIA DO SISTEMA
+  // -------------------------------------------------------------
+  app.get('/api/system', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado. Faça login para acessar o painel.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'system', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json(getFullSystemSnapshot());
+  });
+
+  app.get('/api/cpu', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'cpu', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json(getCpuInfo());
+  });
+
+  app.get('/api/memory', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'memory', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json(getMemoryInfo());
+  });
+
+  app.get('/api/temperature', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'temperature', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json(getTemperatureInfo());
+  });
+
+  app.get('/api/disk', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'disk', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json(getDiskInfo());
+  });
+
+  app.get('/api/network', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'network', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json(getNetworkInfo());
+  });
+
+  app.get('/api/processes', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    const forwarded = await tryForwardToBackend(req, 'processes', queryStr);
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    const sortBy = (req.query.sort_by as string) || 'cpu';
+    const limit = Number(req.query.limit) || 30;
+    return res.json(getProcessesList(sortBy, limit));
+  });
+
+  app.get('/api/services', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'services', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    return res.json({ services: getAllMonitoredServices() });
+  });
+
+  app.get('/api/adguard', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    const forwarded = await tryForwardToBackend(req, 'adguard', '');
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+    try {
+      const stats = await fetchAdGuardStats();
+      return res.json(stats);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // LATÊNCIA & PING EXTERNO (Sem nenhum comando shell de terminal)
+  // Mede RTT puro via socket TCP/HTTP nativo do Node.js
+  // -------------------------------------------------------------
+  app.get('/api/ping', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    try {
+      const pingData = await measureExternalPing();
+      return res.json(pingData);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // INTEGRAÇÃO N8N WORKFLOW AUTOMATION (:5678)
+  // -------------------------------------------------------------
+  app.get('/api/n8n/status', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    try {
+      const n8nData = await fetchN8nStatus();
+      return res.json(n8nData);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/n8n/workflows', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+    try {
+      const n8nData = await fetchN8nStatus();
+      return res.json({ workflows: n8nData.workflows });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // LOGS DO SISTEMA EM TEMPO REAL (/var/log/syslog, Agente, Daemons)
+  // Acesso exclusivo para Administrador (User tem apenas gráficos)
+  // -------------------------------------------------------------
+  app.get('/api/logs', async (req, res) => {
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado. Faça login para acessar os logs do sistema.' });
+    }
+
+    const role = getClientRole(req);
+    if (role === 'user') {
+      return res.status(403).json({
+        detail: 'Acesso restrito: O usuário comum possui acesso apenas aos gráficos. A leitura de logs do sistema (/var/log/syslog) é reservada ao perfil Administrador.'
+      });
+    }
+
+    const source = (req.query.source as string) || 'syslog';
+    const lines = parseInt(req.query.lines as string, 10) || 50;
+    const filter = (req.query.filter as string) || '';
+
+    const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    const forwarded = await tryForwardToBackend(req, 'logs', queryStr);
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
+    }
+
+    try {
+      const logsResult = getSystemLogs(source, lines, filter);
+      return res.json(logsResult);
+    } catch (err: any) {
+      return res.status(500).json({ error: `Falha ao obter logs do sistema: ${err.message}` });
+    }
+  });
+
+  // Proxy reverso genérico para rotas não capturadas
   app.all('/api/*', async (req, res, next) => {
-    // Rotas tratadas internamente pelo server.ts
     const internalPaths = [
       '/api/health',
       '/api/auth/verify',
+      '/api/system',
+      '/api/cpu',
+      '/api/memory',
+      '/api/temperature',
+      '/api/disk',
+      '/api/network',
+      '/api/processes',
+      '/api/services',
+      '/api/adguard',
+      '/api/ping',
+      '/api/n8n',
+      '/api/logs',
       '/api/adguard/config',
       '/api/adguard/status',
       '/api/adguard/stats',
@@ -186,118 +547,24 @@ async function startServer() {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
-    res.setHeader('Access-Control-Allow-Private-Network', 'true');
 
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
     }
 
+    if (!isAuthorizedClient(req)) {
+      return res.status(401).json({ detail: 'Não autorizado.' });
+    }
+
     const subPath = (req.params as any)[0] || '';
     const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    
-    // 1. Validação de segurança no proxy: verifica se o cliente possui credenciais válidas
-    const clientAuth = req.headers['authorization'];
-    const clientApiKey = req.headers['x-api-key'] as string | undefined;
-
-    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
-    const validAdminPass = process.env.ADMIN_PASSWORD || 'admin';
-    const validStandardUser = process.env.USER_USERNAME || 'user';
-    const validStandardPass = process.env.USER_PASSWORD || 'user';
-    const validApiKey = process.env.API_KEY || '';
-
-    let isAuthorizedClient = false;
-
-    if (clientApiKey && validApiKey && clientApiKey === validApiKey) {
-      isAuthorizedClient = true;
-    } else if (clientAuth && clientAuth.startsWith('Basic ')) {
-      try {
-        const decoded = Buffer.from(clientAuth.slice(6), 'base64').toString('utf-8');
-        const [u, p] = decoded.split(':');
-        if ((u === validAdminUser && p === validAdminPass) || (u === validStandardUser && p === validStandardPass)) {
-          isAuthorizedClient = true;
-        }
-      } catch {}
-    } else if (clientAuth && clientAuth.startsWith('Bearer ')) {
-      const token = clientAuth.slice(7);
-      if ((validApiKey && token === validApiKey) || token === validAdminPass || token === validStandardPass) {
-        isAuthorizedClient = true;
-      }
+    const forwarded = await tryForwardToBackend(req, subPath, queryStr);
+    if (forwarded) {
+      res.setHeader('Content-Type', 'application/json');
+      return res.send(forwarded);
     }
 
-    // Se o cliente não estiver autenticado nem como admin nem como user
-    if (!isAuthorizedClient) {
-      return res.status(401).json({
-        detail: 'Não autorizado. Faça login com usuário e senha para acessar o painel.'
-      });
-    }
-
-    // 2. Constrói os cabeçalhos para o backend FastAPI no Ubuntu Server
-    // Usamos a credencial mestre do daemon local para garantir que tanto o usuário
-    // 'admin' quanto 'user' recebam a telemetria normalmente sem erro 401 do daemon
-    const forwardHeaders: Record<string, string> = {
-      'Accept': 'application/json',
-      ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
-    };
-
-    if (validApiKey) {
-      forwardHeaders['X-API-Key'] = validApiKey;
-    }
-    const adminBasic = `Basic ${Buffer.from(`${validAdminUser}:${validAdminPass}`).toString('base64')}`;
-    forwardHeaders['Authorization'] = adminBasic;
-
-    // Lista de candidatos de backend FastAPI
-    const candidateBases: string[] = [];
-    if (cachedWorkingBackendBase) {
-      candidateBases.push(cachedWorkingBackendBase);
-    }
-    if (process.env.BACKEND_URL) {
-      const envBase = process.env.BACKEND_URL.replace(/\/$/, '');
-      if (!candidateBases.includes(envBase)) candidateBases.push(envBase);
-    }
-    const defaultBases = [
-      'http://127.0.0.1:8000',
-      'http://localhost:8000',
-      'http://[::1]:8000',
-      'http://192.168.100.23:8000',
-      'http://[2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445]:8000'
-    ];
-    for (const dBase of defaultBases) {
-      if (!candidateBases.includes(dBase)) candidateBases.push(dBase);
-    }
-
-    for (let i = 0; i < candidateBases.length; i++) {
-      const base = candidateBases[i];
-      const targetUrl = `${base}/api/${subPath}${queryStr}`;
-      const timeoutMs = base === cachedWorkingBackendBase ? 4000 : 1200;
-
-      try {
-        const response = await fetch(targetUrl, {
-          method: req.method,
-          headers: forwardHeaders,
-          body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
-          signal: AbortSignal.timeout(timeoutMs)
-        });
-
-        // Sucesso de conexão! Salva base funcional no cache
-        cachedWorkingBackendBase = base;
-
-        const text = await response.text();
-        res.status(response.status);
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
-        return res.send(text);
-      } catch {
-        // Se a base em cache falhou, invalida para tentar os outros candidatos
-        if (base === cachedWorkingBackendBase) {
-          cachedWorkingBackendBase = null;
-        }
-      }
-    }
-
-    // Se o backend estiver offline na rede, retorna 503 para o frontend detectar offline sem inventar dados
-    return res.status(503).json({
-      status: 'OFFLINE',
-      detail: 'Servidor Ubuntu offline ou inacessível na porta :8000'
-    });
+    return res.status(404).json({ error: `Endpoint /api/${subPath} não encontrado` });
   });
 
   // Rota Nginx-compatible /adguard-api/* (Injeta autenticação automaticamente e libera CORS)
@@ -715,23 +982,9 @@ async function startServer() {
     }
   }
 
-  try {
-    const server = app.listen(PORT, '::', () => {
-      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (dual-stack IPv4/IPv6 [::]:${PORT})`);
-    });
-    server.on('error', (err: any) => {
-      if (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL') {
-        console.warn(`[AdGuard AI NOC] IPv6 não suportado, escutando em 0.0.0.0:${PORT}`);
-        app.listen(PORT, '0.0.0.0', () => {
-          console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
-        });
-      }
-    });
-  } catch {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
-    });
-  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+  });
 }
 
 startServer();
