@@ -17,6 +17,7 @@ from monitor import (
 from services import get_all_services
 from adguard import fetch_adguard_stats, fetch_adguard_status, fetch_adguard_querylog
 from logs import get_system_logs
+from n8n import fetch_n8n_status
 
 load_dotenv()
 
@@ -114,6 +115,15 @@ def get_logs(
         from fastapi import HTTPException
         raise HTTPException(status_code=403, detail="Acesso restrito ao perfil Administrador.")
     return get_system_logs(source=source, lines_count=lines, filter_term=filter)
+
+@app.get("/api/n8n/status")
+async def get_n8n_status(user_data: dict = Depends(verify_credentials)):
+    return await fetch_n8n_status()
+
+@app.get("/api/n8n/workflows")
+async def get_n8n_workflows(user_data: dict = Depends(verify_credentials)):
+    status_data = await fetch_n8n_status()
+    return {"workflows": status_data.get("workflows", [])}
 
 @app.websocket("/ws/monitor")
 async def websocket_telemetry(websocket: WebSocket):

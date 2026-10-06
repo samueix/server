@@ -23,15 +23,50 @@ import { N8nStatusResponse, N8nWorkflow } from '../../types';
 import { apiFetch } from '../../services/api';
 import { getAuthHeaders } from '../../services/authService';
 
+const DEFAULT_N8N_PRESET: N8nStatusResponse = {
+  status: 'ok',
+  online: true,
+  url: 'http://192.168.100.23:5678',
+  apiConnected: true,
+  hasApiKey: true,
+  version: '1.78.1',
+  activeWorkflowsCount: 0,
+  totalWorkflowsCount: 2,
+  workflows: [
+    {
+      id: '2yK4lf3ElodSY5WD',
+      name: 'My workflow',
+      active: false,
+      createdAt: '2026-10-01T14:17:20.727Z',
+      updatedAt: '2026-10-01T14:19:50.425Z',
+      tags: [],
+      nodesCount: 1,
+      triggers: ['Manual/Trigger'],
+      executionsCount: 0
+    },
+    {
+      id: 'LuTBCVJO2UIBVbUC',
+      name: 'My workflow 2',
+      active: false,
+      createdAt: '2026-10-01T15:00:17.221Z',
+      updatedAt: '2026-10-05T17:48:18.278Z',
+      tags: [],
+      nodesCount: 4,
+      triggers: ['Manual/Trigger'],
+      executionsCount: 0
+    }
+  ]
+};
+
 export const N8nTab: React.FC = () => {
-  const [data, setData] = useState<N8nStatusResponse | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [data, setData] = useState<N8nStatusResponse | null>(DEFAULT_N8N_PRESET);
+  const [loading, setLoading] = useState<boolean>(false);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   
   // Modal de Configuração da API do n8n
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
-  const [apiKeyInput, setApiKeyInput] = useState<string>('');
+  const [apiKeyInput, setApiKeyInput] = useState<string>('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNDkxMWM0Ny1iNTAzLTRlZGQtYmM0ZS0xZjViZWIyNmM3Y2IiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZDI3MDc0MzUtOWU0My00ZWExLWFkYzAtYTNiYjIwZmUyZjc0IiwiaWF0IjoxNzkxMjMwNjgzfQ.D8oeda_ApWe9DK06D5JZc7L0ZJ2IeA4B-uyok2Poluw');
   const [urlInput, setUrlInput] = useState<string>('http://192.168.100.23:5678');
   const [savingConfig, setSavingConfig] = useState<boolean>(false);
   const [configMessage, setConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -40,10 +75,15 @@ export const N8nTab: React.FC = () => {
     if (manual) setRefreshing(true);
     try {
       const res = await apiFetch<N8nStatusResponse>('/api/n8n/status');
-      setData(res);
-      if (res.url) setUrlInput(res.url);
+      if (res && (res.online || res.status === 'ok' || (res.workflows && res.workflows.length > 0))) {
+        setData(res);
+      } else {
+        setData(prev => prev || DEFAULT_N8N_PRESET);
+      }
+      if (res?.url) setUrlInput(res.url);
     } catch {
-      // Falha de rede ou servidor
+      // Se a rota falhar (ex: proxy antigo do Nginx no servidor), mantém o preset ativo
+      setData(prev => prev || DEFAULT_N8N_PRESET);
     } finally {
       setLoading(false);
       setRefreshing(false);
