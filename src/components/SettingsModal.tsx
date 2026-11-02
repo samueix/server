@@ -162,65 +162,63 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="border-t-2 border-[#1A1A2E]/20 pt-4">
             <span className="text-xs font-bold font-title text-[#1A1A2E] block mb-3">Limiares de alerta</span>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-[#4A4A68] text-xs font-bold block font-sans">
-                  Alerta de CPU (%)
+                  Alerta de CPU (%) (1 a 100)
                 </label>
                 <input
                   type="number"
-                  min="50"
-                  max="99"
+                  min="1"
+                  max="100"
                   value={cpuThreshold}
-                  onChange={(e) => setCpuThreshold(Number(e.target.value))}
+                  onChange={(e) => setCpuThreshold(Math.min(100, Math.max(1, Number(e.target.value))))}
                   className="w-full px-3 py-2 rounded-md bg-white border-2 border-[#1A1A2E] text-[#1A1A2E] font-mono text-xs focus:outline-none focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36]"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[#4A4A68] text-xs font-bold block font-sans">
-                  Alerta de RAM (%)
+                  Alerta de RAM (%) (1 a 100)
                 </label>
                 <input
                   type="number"
-                  min="50"
-                  max="99"
+                  min="1"
+                  max="100"
                   value={ramThreshold}
-                  onChange={(e) => setRamThreshold(Number(e.target.value))}
+                  onChange={(e) => setRamThreshold(Math.min(100, Math.max(1, Number(e.target.value))))}
                   className="w-full px-3 py-2 rounded-md bg-white border-2 border-[#1A1A2E] text-[#1A1A2E] font-mono text-xs focus:outline-none focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36]"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[#4A4A68] text-xs font-bold block font-sans">
-                  Alerta de temperatura (°C)
+                  Alerta de temperatura (°C) (30 a 110)
                 </label>
                 <input
                   type="number"
-                  min="50"
-                  max="95"
+                  min="30"
+                  max="110"
                   value={tempThreshold}
-                  onChange={(e) => setTempThreshold(Number(e.target.value))}
+                  onChange={(e) => setTempThreshold(Math.min(110, Math.max(30, Number(e.target.value))))}
                   className="w-full px-3 py-2 rounded-md bg-white border-2 border-[#1A1A2E] text-[#1A1A2E] font-mono text-xs focus:outline-none focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36]"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-[#4A4A68] text-xs font-bold block font-sans">
-                  Intervalo de atualização (segundos)
+                  Intervalo de atualização (2 a 30 segundos)
                 </label>
                 <input
                   type="number"
                   min="2"
-                  max="10"
+                  max="30"
                   value={refreshInterval}
-                  onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                  onChange={(e) => setRefreshInterval(Math.min(30, Math.max(2, Number(e.target.value))))}
                   className="w-full px-3 py-2 rounded-md bg-white border-2 border-[#1A1A2E] text-[#1A1A2E] font-mono text-xs focus:outline-none focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36]"
                 />
               </div>
             </div>
           </div>
-        </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t-2 border-[#1A1A2E] bg-[#FFF7E8]">

@@ -70,14 +70,35 @@ export const PingTab: React.FC = () => {
   useEffect(() => {
     loadPing(false);
     const interval = setInterval(() => {
-      loadPing(false);
+      if (!document.hidden) {
+        loadPing(false);
+      }
     }, 4000);
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        loadPing(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, []);
+
+  const pingStats = React.useMemo(() => {
+    if (history.length === 0) return { min: 0, max: 0, avg: 0, packetLoss: 0, samples: 0 };
+    const valid = history.map(h => h.avgMs).filter(v => v > 0);
+    const min = valid.length > 0 ? Math.min(...valid) : 0;
+    const max = valid.length > 0 ? Math.max(...valid) : 0;
+    const avg = valid.length > 0 ? Math.round(valid.reduce((a, b) => a + b, 0) / valid.length) : 0;
+    const failedCount = history.filter(h => h.avgMs <= 0).length;
+    const packetLoss = Math.round((failedCount / history.length) * 100);
+    return { min, max, avg, packetLoss, samples: history.length };
+  }, [history]);
 
   const getQualityBadge = (quality: string) => {
     switch (quality) {
@@ -152,6 +173,41 @@ export const PingTab: React.FC = () => {
           </span>
         </div>
         <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FFF7E8] px-2.5 py-1 rounded-full border border-[#1A1A2E] hidden md:inline">Atualização a cada 4s</span>
+      </div>
+
+      {/* Estatísticas das últimas amostras (E6) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="p-3.5 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
+          <span className="text-[10px] font-sans font-bold text-[#4A4A68] uppercase tracking-wider block">Média das Amostras</span>
+          <div className="text-xl font-mono font-black text-[#1A1A2E] mt-0.5 tabular-nums">
+            {pingStats.avg ? `${pingStats.avg} ms` : '--'}
+          </div>
+          <span className="text-[10px] text-[#717188] font-mono">{pingStats.samples} medições</span>
+        </div>
+
+        <div className="p-3.5 bg-[#ECFDF3] border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
+          <span className="text-[10px] font-sans font-bold text-[#12B76A] uppercase tracking-wider block">Menor Latência (Mín)</span>
+          <div className="text-xl font-mono font-black text-[#12B76A] mt-0.5 tabular-nums">
+            {pingStats.min ? `${pingStats.min} ms` : '--'}
+          </div>
+          <span className="text-[10px] text-[#12B76A]/80 font-mono">Melhor rota</span>
+        </div>
+
+        <div className="p-3.5 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
+          <span className="text-[10px] font-sans font-bold text-[#F79009] uppercase tracking-wider block">Maior Pico (Máx)</span>
+          <div className="text-xl font-mono font-black text-[#F79009] mt-0.5 tabular-nums">
+            {pingStats.max ? `${pingStats.max} ms` : '--'}
+          </div>
+          <span className="text-[10px] text-[#717188] font-mono">Pico registrado</span>
+        </div>
+
+        <div className="p-3.5 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
+          <span className="text-[10px] font-sans font-bold text-[#4A4A68] uppercase tracking-wider block">Perda de Pacotes</span>
+          <div className={`text-xl font-mono font-black mt-0.5 tabular-nums ${pingStats.packetLoss === 0 ? 'text-[#12B76A]' : 'text-[#F04438]'}`}>
+            {pingStats.packetLoss}%
+          </div>
+          <span className="text-[10px] text-[#717188] font-mono">Taxa de descarte</span>
+        </div>
       </div>
 
       {/* Varied Hierarchy: Latência Principal à esquerda, alvos detalhados à direita */}

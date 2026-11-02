@@ -3,7 +3,9 @@ import {
   ShieldCheck, 
   RefreshCw, 
   Search, 
-  Globe
+  Globe,
+  Copy,
+  Check
 } from 'lucide-react';
 import { ServiceItem } from '../../types';
 
@@ -123,6 +125,15 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
 }) => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState<string>('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyCommand = (serviceName: string, action: 'status' | 'restart') => {
+    const clean = serviceName.endsWith('.service') ? serviceName : `${serviceName}.service`;
+    const cmd = `sudo systemctl ${action} ${clean}`;
+    navigator.clipboard.writeText(cmd);
+    setCopiedId(`${serviceName}-${action}`);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
 
   // Mescla dados reais do sistema com os metadados sem duplicatas
   const enrichedServices = useMemo(() => {
@@ -444,6 +455,31 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
                       {svc.isExternal ? 'Cloud API' : svc.isFuture ? 'Planejado' : isOnline ? 'Online' : isErro ? 'Erro' : 'Offline'}
                     </span>
                   </div>
+
+                  {!svc.isExternal && (
+                    <div className="flex items-center gap-1 pl-2 border-l border-[#1A1A2E]/20">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCommand(svc.nome, 'status')}
+                        className="px-2 py-1 rounded bg-[#FFF7E8] hover:bg-[#FFC857]/50 border border-[#1A1A2E] text-[10px] font-mono font-bold flex items-center gap-1 shadow-[1px_1px_0px_#1A1A2E] transition active:translate-x-[0.5px]"
+                        title={`Copiar: sudo systemctl status ${svc.nome}`}
+                        aria-label={`Copiar comando systemctl status para ${svc.nome}`}
+                      >
+                        {copiedId === `${svc.nome}-status` ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#4A4A68]" />}
+                        <span>status</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCommand(svc.nome, 'restart')}
+                        className="px-2 py-1 rounded bg-[#FFF7E8] hover:bg-[#FFC857]/50 border border-[#1A1A2E] text-[10px] font-mono font-bold flex items-center gap-1 shadow-[1px_1px_0px_#1A1A2E] transition active:translate-x-[0.5px]"
+                        title={`Copiar: sudo systemctl restart ${svc.nome}`}
+                        aria-label={`Copiar comando systemctl restart para ${svc.nome}`}
+                      >
+                        {copiedId === `${svc.nome}-restart` ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#4A4A68]" />}
+                        <span>restart</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             );

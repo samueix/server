@@ -12,10 +12,12 @@ from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from auth import verify_credentials, verify_ws_auth
+from auth import verify_credentials, require_admin, verify_ws_auth
 import monitor
 import services
 import adguard
+import logs as system_logs
+import n8n as n8n_client
 
 # Configuração de Logs
 logging.basicConfig(
@@ -174,6 +176,35 @@ async def get_services(user: str = Depends(verify_credentials)):
 async def get_adguard_metrics(user: str = Depends(verify_credentials)):
     """Consulta à API interna do AdGuard Home configurada no servidor."""
     return await adguard.fetch_adguard_stats()
+
+@app.get("/api/logs", tags=["Logs"])
+async def get_logs_endpoint(
+    source: str = Query("syslog", enum=["syslog", "agent", "panel", "adguard", "auth", "dmesg"]),
+    lines: int = Query(50, ge=5, le=300),
+    filter: str = Query(""),
+    user: str = Depends(require_admin)
+):
+    """Logs do sistema e dos daemons (acesso restrito ao perfil Administrador)."""
+    return system_logs.get_system_logs(source=source, lines=lines, filter=filter)
+
+@app.get("/api/n8n/status", tags=["n8n"])
+async def get_n8n_status_endpoint(user: str = Depends(require_admin)):
+    """Status operacional e fluxos do n8n (acesso restrito ao perfil Administrador)."""
+    return await n8n_client.fetch_n8n_status()
+
+@app.post("/api/n8n/config", tags=["n8n"])
+async def update_n8n_config_endpoint(request: Request, user: str = Depends(require_admin)):
+    """Atualização dinâmica de endereço e chave de API do n8n."""
+    body = await request.json()
+    url = body.get("url")
+    api_key = body.get("apiKey")
+    n8n_client.update_n8n_config(url=url, api_key=api_key)
+    updated_status = await n8n_client.fetch_n8n_status()
+    return {
+        "success": True,
+        "message": "Configuração do n8n atualizada com sucesso.",
+        "status": updated_status
+    }
 
 # -------------------------------------------------------------
 # API DE FORNECEDORES DE MAC (api.macvendors.com)

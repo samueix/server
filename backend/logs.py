@@ -2,8 +2,11 @@ import os
 import subprocess
 from datetime import datetime
 
-def get_system_logs(source: str = "syslog", lines_count: int = 50, filter_term: str = ""):
-    count = max(5, min(lines_count, 300))
+def get_system_logs(source: str = "syslog", lines_count: int = 50, filter_term: str = "", lines: int = None, filter: str = None):
+    effective_lines = lines if lines is not None else lines_count
+    effective_filter = filter if filter is not None else filter_term
+    count = max(5, min(effective_lines, 300))
+    filter_term = effective_filter
     raw_lines = []
     source_path = "/var/log/syslog"
     file_exists = False

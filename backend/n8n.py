@@ -5,11 +5,22 @@ from typing import Dict, Any, List
 DEFAULT_N8N_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNDkxMWM0Ny1iNTAzLTRlZGQtYmM0ZS0xZjViZWIyNmM3Y2IiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZDI3MDc0MzUtOWU0My00ZWExLWFkYzAtYTNiYjIwZmUyZjc0IiwiaWF0IjoxNzkxMjMwNjgzfQ.D8oeda_ApWe9DK06D5JZc7L0ZJ2IeA4B-uyok2Poluw"
 DEFAULT_N8N_URL = os.getenv("N8N_URL", "http://127.0.0.1:5678")
 
+_custom_n8n_key: str = None
+_custom_n8n_url: str = None
+
+def update_n8n_config(url: str = None, api_key: str = None):
+    global _custom_n8n_url, _custom_n8n_key
+    if url:
+        _custom_n8n_url = url.rstrip("/")
+    if api_key is not None:
+        _custom_n8n_key = api_key.strip()
+
 async def fetch_n8n_status() -> Dict[str, Any]:
-    api_key = os.getenv("N8N_API_KEY", DEFAULT_N8N_API_KEY)
+    api_key = _custom_n8n_key if _custom_n8n_key is not None else os.getenv("N8N_API_KEY", DEFAULT_N8N_API_KEY)
+    active_base = _custom_n8n_url or os.getenv("N8N_URL", "http://127.0.0.1:5678").rstrip("/")
     
     candidate_urls = [
-        os.getenv("N8N_URL", "http://127.0.0.1:5678").rstrip("/"),
+        active_base,
         "http://127.0.0.1:5678",
         "http://localhost:5678",
         "http://[2804:2d5c:a2:852:5ecd:5bff:fe5a:7445]:5678",

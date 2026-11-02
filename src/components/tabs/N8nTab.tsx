@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   GitBranch, 
   ExternalLink, 
@@ -59,10 +59,11 @@ const DEFAULT_N8N_PRESET: N8nStatusResponse = {
 };
 
 export const N8nTab: React.FC = () => {
-  const [data, setData] = useState<N8nStatusResponse | null>(DEFAULT_N8N_PRESET);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [data, setData] = useState<N8nStatusResponse | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   // Modal de Configuração da API do n8n
   const [isConfigModalOpen, setIsConfigModalOpen] = useState<boolean>(false);
@@ -71,29 +72,53 @@ export const N8nTab: React.FC = () => {
   const [savingConfig, setSavingConfig] = useState<boolean>(false);
   const [configMessage, setConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isFetchingRef = useRef<boolean>(false);
+
   const loadData = async (manual = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
     if (manual) setRefreshing(true);
+    if (abortControllerRef.current) abortControllerRef.current.abort();
+    abortControllerRef.current = new AbortController();
+
     try {
-      const res = await apiFetch<N8nStatusResponse>('/api/n8n/status');
-      if (res && (res.online || res.status === 'ok' || (res.workflows && res.workflows.length > 0))) {
-        setData(res);
-      } else {
-        setData(prev => prev || DEFAULT_N8N_PRESET);
-      }
+      const res = await apiFetch<N8nStatusResponse>('/api/n8n/status', abortControllerRef.current.signal);
+      setData(res);
+      setErrorMessage(null);
       if (res?.url) setUrlInput(res.url);
-    } catch {
-      // Se a rota falhar (ex: proxy antigo do Nginx no servidor), mantém o preset ativo
-      setData(prev => prev || DEFAULT_N8N_PRESET);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setErrorMessage(err.message || 'Falha ao contatar a API do n8n na porta 5678.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
+      isFetchingRef.current = false;
     }
   };
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(() => loadData(), 8000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        loadData();
+      }
+    }, 8000);
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (abortControllerRef.current) abortControllerRef.current.abort();
+    };
   }, []);
 
   const handleSaveConfig = async (e: React.FormEvent) => {

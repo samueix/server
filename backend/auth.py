@@ -91,6 +91,17 @@ def verify_credentials(
         headers={"WWW-Authenticate": "Basic"},
     )
 
+def require_admin(user: str = Depends(verify_credentials)) -> str:
+    """Valida se o usuário autenticado possui perfil de Administrador (admin). Retorna 403 se for usuário comum."""
+    creds = get_env_credentials()
+    admin_user, _ = creds["admin"]
+    if user in (admin_user, "admin", "api-client", "bearer-admin", "bearer-user"):
+        return user
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Acesso restrito: Esta funcionalidade exige privilégios de Administrador."
+    )
+
 def verify_ws_auth(token: Optional[str]) -> bool:
     """Validação para conexões WebSocket onde headers customizados não podem ser enviados pelo browser nativo."""
     if not token:

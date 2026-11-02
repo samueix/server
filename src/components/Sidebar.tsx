@@ -12,7 +12,9 @@ import {
   X, 
   User, 
   LogOut, 
-  Radio 
+  Radio,
+  ScrollText,
+  GitBranch
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 
@@ -46,6 +48,8 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'processes', label: 'Processos', icon: Cpu, adminOnly: true },
   { id: 'services', label: 'Serviços', icon: ShieldCheck, adminOnly: true },
   { id: 'network', label: 'Rede & MAC', icon: Network, adminOnly: true },
+  { id: 'logs', label: 'Logs do Sistema', icon: ScrollText, adminOnly: true },
+  { id: 'n8n', label: 'n8n Workflows', icon: GitBranch, adminOnly: true },
   { id: 'commands', label: 'Comandos', icon: Terminal, adminOnly: true },
   { id: 'system', label: 'Sistema', icon: Server, adminOnly: true },
   { id: 'documentation', label: 'Documentação', icon: BookOpen, adminOnly: true }

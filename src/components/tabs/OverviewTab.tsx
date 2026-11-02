@@ -41,6 +41,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   network,
   history,
   isConnected,
+  isStaleData = false,
   serverIp = SERVER_IPV4
 }) => {
   const hostname = server?.sistema?.hostname || server?.servidor || status?.servidor || (isConnected ? 'samuelserver' : 'Servidor');
@@ -109,9 +110,18 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     });
   }, [server]);
 
+  const [secondsAgo, setSecondsAgo] = React.useState<number>(0);
+  React.useEffect(() => {
+    setSecondsAgo(0);
+    const interval = setInterval(() => {
+      setSecondsAgo(s => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [server, status]);
+
   return (
     <div className="space-y-4 font-sans text-[#1A1A2E]">
-      {/* 1. Faixa de status no topo */}
+      {/* 1. Faixa de status no topo: Servidor online · uptime · última atualização */}
       <div className="p-4 sm:p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
@@ -127,8 +137,13 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     : 'bg-[#FEE4E2] text-[#F04438]'
                 }`}>
                   <span className={`w-2 h-2 rounded-full border border-[#1A1A2E] ${isConnected ? 'bg-[#12B76A]' : 'bg-[#F04438]'}`} />
-                  {isConnected ? 'Online' : 'Offline'}
+                  {isConnected ? 'Servidor online' : 'Servidor offline'}
                 </span>
+                {isStaleData && (
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708] border border-[#F79009]">
+                    Dado em cache / desatualizado
+                  </span>
+                )}
                 <span className="text-xs font-medium text-[#4A4A68]">
                   {osName} {osVersion}
                 </span>
@@ -138,6 +153,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 <span className="flex items-center gap-1.5 font-mono tabular-nums font-medium text-[#1A1A2E]">
                   <Calendar className="w-3.5 h-3.5 text-[#FF5A36]" />
                   <span>{serverDateTime}</span>
+                </span>
+                <span className="text-[#FF5A36] font-bold font-mono text-[11px] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E]/20" aria-live="polite">
+                  Atualizado há {secondsAgo}s
                 </span>
               </div>
             </div>

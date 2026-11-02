@@ -20,28 +20,36 @@ export interface AuthSession {
 }
 
 /**
- * Lê a sessão salva no localStorage
+ * Lê a sessão salva priorizando sessionStorage (com migração de localStorage)
  */
 export function getStoredAuth(): AuthSession | null {
   try {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    let raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) {
+      // Migração suave de localStorage se existente
+      raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (raw) {
+        sessionStorage.setItem(AUTH_STORAGE_KEY, raw);
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+      }
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && parsed.authenticated) {
       return parsed;
     }
   } catch (e) {
-    console.error('Erro ao ler autenticação do localStorage', e);
+    console.error('Erro ao ler autenticação de sessão', e);
   }
   return null;
 }
 
 /**
- * Salva a sessão no localStorage
+ * Salva a sessão no sessionStorage
  */
 export function saveAuthSession(session: AuthSession): void {
   try {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
   } catch (e) {
     console.error('Erro ao salvar autenticação', e);
   }
@@ -52,10 +60,25 @@ export function saveAuthSession(session: AuthSession): void {
  */
 export function clearAuthSession(): void {
   try {
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(AUTH_STORAGE_KEY);
   } catch (e) {
     console.error('Erro ao limpar autenticação', e);
   }
+}
+
+let isHandling401 = false;
+/**
+ * Emite evento de 401 (sessão expirada) uma única vez para evitar loop
+ */
+export function notifyUnauthorized(message = 'Sessão expirada. Faça login novamente.'): void {
+  if (isHandling401) return;
+  isHandling401 = true;
+  clearAuthSession();
+  window.dispatchEvent(new CustomEvent('server-panel:unauthorized', { detail: { message } }));
+  setTimeout(() => {
+    isHandling401 = false;
+  }, 3000);
 }
 
 /**

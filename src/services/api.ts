@@ -11,7 +11,7 @@ import {
   PingTarget
 } from '../types';
 import { API, SERVER_IPV4, SERVER_IPV6 } from '../config';
-import { getAuthHeaders } from './authService';
+import { getAuthHeaders, notifyUnauthorized } from './authService';
 
 // Armazena a leitura anterior de rede para cálculo de velocidade em tempo real (MB/s ou KB/s)
 let lastNetworkSnapshot: {
@@ -87,6 +87,7 @@ export async function apiFetch<T = any>(endpoint: string, signal?: AbortSignal):
     if (signal) signal.removeEventListener('abort', onExternalAbort);
 
     if (response.status === 401) {
+      notifyUnauthorized('Sessão expirada ou credenciais inválidas. Faça login novamente.');
       throw new ApiError('Sessão expirada ou credenciais inválidas (401)', 401);
     }
     if (response.status === 403) {

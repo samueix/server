@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -9,15 +9,18 @@ import { SecurityVaultProvider } from './context/SecurityVaultContext';
 import { SecurityUnlockModal } from './components/SecurityUnlockModal';
 
 import { OverviewTab } from './components/tabs/OverviewTab';
-import { MonitoringTab } from './components/tabs/MonitoringTab';
-import { ProcessesTab } from './components/tabs/ProcessesTab';
-import { ServicesTab } from './components/tabs/ServicesTab';
-import { NetworkTab } from './components/tabs/NetworkTab';
-import { CommandsTab } from './components/tabs/CommandsTab';
-import { SystemTab } from './components/tabs/SystemTab';
-import { AdGuardHomeTab } from './components/tabs/AdGuardHomeTab';
-import { DocumentationTab } from './components/tabs/DocumentationTab';
-import { PingTab } from './components/tabs/PingTab';
+const MonitoringTab = React.lazy(() => import('./components/tabs/MonitoringTab').then(m => ({ default: m.MonitoringTab })));
+const ProcessesTab = React.lazy(() => import('./components/tabs/ProcessesTab').then(m => ({ default: m.ProcessesTab })));
+const ServicesTab = React.lazy(() => import('./components/tabs/ServicesTab').then(m => ({ default: m.ServicesTab })));
+const NetworkTab = React.lazy(() => import('./components/tabs/NetworkTab').then(m => ({ default: m.NetworkTab })));
+const CommandsTab = React.lazy(() => import('./components/tabs/CommandsTab').then(m => ({ default: m.CommandsTab })));
+const SystemTab = React.lazy(() => import('./components/tabs/SystemTab').then(m => ({ default: m.SystemTab })));
+const AdGuardHomeTab = React.lazy(() => import('./components/tabs/AdGuardHomeTab').then(m => ({ default: m.AdGuardHomeTab })));
+const DocumentationTab = React.lazy(() => import('./components/tabs/DocumentationTab').then(m => ({ default: m.DocumentationTab })));
+const PingTab = React.lazy(() => import('./components/tabs/PingTab').then(m => ({ default: m.PingTab })));
+const LogsTab = React.lazy(() => import('./components/tabs/LogsTab').then(m => ({ default: m.LogsTab })));
+const N8nTab = React.lazy(() => import('./components/tabs/N8nTab').then(m => ({ default: m.N8nTab })));
+
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
 import { getStoredAuth, clearAuthSession, AuthSession } from './services/authService';
@@ -30,10 +33,56 @@ import {
   ApiTemperatureResponse,
   ProcessItem, 
   ServiceItem, 
-  HistoryPoint 
+  HistoryPoint,
+  AlertHistoryItem
 } from './types';
 import { apiService, NetworkTelemetry } from './services/api';
 import { loadConfig, SERVER_IPV4 } from './config';
+
+class TabErrorBoundary extends React.Component<
+  { tabName: string; children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { tabName: string; children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error(`Erro na aba ${this.props.tabName}:`, error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] text-[#1A1A2E] space-y-3 font-sans">
+          <div className="flex items-center gap-2 text-[#F04438] font-bold">
+            <span className="w-3 h-3 rounded-full bg-[#F04438]" />
+            <span className="text-base font-title">Falha ao exibir o módulo {this.props.tabName}</span>
+          </div>
+          <p className="text-xs text-[#4A4A68] font-mono bg-[#FFF7E8] p-3 rounded-md border border-[#1A1A2E]/20">
+            {this.state.error?.message || 'Erro inesperado durante a renderização.'}
+          </p>
+          <button
+            onClick={() => this.setState({ hasError: false, error: null })}
+            className="px-4 py-2 rounded-md bg-[#FF5A36] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522] transition"
+          >
+            Recarregar aba
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const TabLoadingFallback: React.FC = () => (
+  <div className="p-12 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] text-center font-mono text-xs flex flex-col items-center justify-center gap-3">
+    <div className="w-8 h-8 rounded-full border-4 border-[#1A1A2E] border-t-[#FF5A36] animate-spin" />
+    <span className="font-bold text-[#1A1A2E]">Carregando módulo...</span>
+  </div>
+);
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavigationTab>('overview');
@@ -60,7 +109,30 @@ export default function App() {
   const [processesData, setProcessesData] = useState<ProcessItem[]>([]);
   const [servicesData, setServicesData] = useState<ServiceItem[]>([]);
   const [networkData, setNetworkData] = useState<NetworkTelemetry | null>(null);
-  const [history, setHistory] = useState<HistoryPoint[]>([]);
+
+  // Histórico em memória de até 120 pontos persistido em sessionStorage (sobrevive ao F5)
+  const [history, setHistory] = useState<HistoryPoint[]>(() => {
+    try {
+      const raw = sessionStorage.getItem('server_panel_history_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
+  // Histórico das últimas 20 ocorrências de alertas na sessão
+  const [alertHistory, setAlertHistory] = useState<AlertHistoryItem[]>(() => {
+    try {
+      const raw = sessionStorage.getItem('server_panel_alerts_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
 
   // Polling control refs
   const isPollingBusyRef = useRef<boolean>(false);
@@ -138,11 +210,47 @@ export default function App() {
     return alerts;
   }, [connectionStatus, serverData, temperatureData, currentConfig, dismissedAlerts]);
 
+  // Registra novas ocorrências no histórico de alertas da sessão
+  useEffect(() => {
+    if (activeAlerts.length > 0) {
+      setAlertHistory(prev => {
+        const nowStr = new Date().toLocaleTimeString('pt-BR');
+        const additions: AlertHistoryItem[] = [];
+        activeAlerts.forEach(a => {
+          const already = prev.find(p => p.type === a.id && p.value === a.value);
+          if (!already) {
+            additions.push({
+              id: `${a.id}-${Date.now()}`,
+              type: a.id,
+              level: a.level,
+              title: a.title,
+              message: a.message,
+              value: a.value,
+              threshold: a.threshold,
+              timestamp: nowStr
+            });
+          }
+        });
+        if (additions.length === 0) return prev;
+        const next = [...additions, ...prev].slice(0, 20);
+        try {
+          sessionStorage.setItem('server_panel_alerts_v1', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    }
+  }, [activeAlerts]);
+
   const handleDismissAlert = (id: string) => {
     setDismissedAlerts(prev => ({ ...prev, [id]: Date.now() }));
   };
 
-  // Helper to record history points
+  const handleClearAlertHistory = () => {
+    setAlertHistory([]);
+    sessionStorage.removeItem('server_panel_alerts_v1');
+  };
+
+  // Helper to record history points (mantém até 120 pontos)
   const recordHistory = useCallback((
     server: ApiServerResponse | null, 
     net: NetworkTelemetry | null, 
@@ -172,10 +280,11 @@ export default function App() {
         netUp
       };
       const updated = [...prev, point];
-      if (updated.length > 30) {
-        return updated.slice(updated.length - 30);
-      }
-      return updated;
+      const trimmed = updated.length > 120 ? updated.slice(updated.length - 120) : updated;
+      try {
+        sessionStorage.setItem('server_panel_history_v1', JSON.stringify(trimmed.slice(-60)));
+      } catch {}
+      return trimmed;
     });
   }, []);
 
@@ -309,27 +418,69 @@ export default function App() {
     setLogoutNotice('Sessão encerrada com sucesso no servidor. Faça login para continuar.');
   };
 
-  // Periodic polling hook (a cada 3s ou conforme configuração)
+  // Listener para evento 401 unificado (sessão expirada)
   useEffect(() => {
-    // Initial fetch immediately
-    executePoll();
+    const handleUnauthorized = (e: any) => {
+      setAuthSession(null);
+      setLogoutNotice(e.detail?.message || 'Sua sessão expirou. Por favor, autentique-se novamente.');
+    };
+    window.addEventListener('server-panel:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('server-panel:unauthorized', handleUnauthorized);
+  }, []);
 
-    const intervalMs = Math.max(2500, (currentConfig.refreshIntervalSeconds || 3) * 1000);
-    pollTimerRef.current = setInterval(() => {
-      executePoll();
-    }, intervalMs);
+  // Polling com Backoff Exponencial e Pausa Inteligente em document.hidden
+  const scheduleNextPoll = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (document.hidden) return;
+
+    let delay = Math.max(2500, (currentConfig.refreshIntervalSeconds || 3) * 1000);
+    if (consecutiveFailuresRef.current > 0) {
+      // 2.5s -> 5s -> 10s -> 20s -> máx 30s
+      delay = Math.min(2500 * Math.pow(2, Math.min(consecutiveFailuresRef.current - 1, 4)), 30000);
+    }
+
+    pollTimerRef.current = setTimeout(async () => {
+      await executePoll();
+      scheduleNextPoll();
+    }, delay);
+  }, [currentConfig.refreshIntervalSeconds, executePoll]);
+
+  // Periodic polling hook & visibilitychange listener
+  useEffect(() => {
+    executePoll();
+    scheduleNextPoll();
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        if (pollTimerRef.current) {
+          clearTimeout(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+      } else {
+        // Retomou: executa atualização imediata e reativa o timer
+        executePoll();
+        scheduleNextPoll();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       if (pollTimerRef.current) {
-        clearInterval(pollTimerRef.current);
+        clearTimeout(pollTimerRef.current);
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [executePoll, currentConfig.refreshIntervalSeconds]);
+  }, [executePoll, scheduleNextPoll]);
 
   // Manual refresh handler
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     await executePoll();
+    scheduleNextPoll();
     setIsRefreshing(false);
   };
 
@@ -384,7 +535,7 @@ export default function App() {
           currentTab={activeTab}
           onSelectTab={(tab) => {
             // Se usuário comum tentar acessar aba restrita de admin, força fallback seguro
-            const adminTabs: NavigationTab[] = ['processes', 'services', 'network', 'commands', 'system', 'documentation'];
+            const adminTabs: NavigationTab[] = ['processes', 'services', 'network', 'logs', 'n8n', 'commands', 'system', 'documentation'];
             if (currentUserRole === 'user' && adminTabs.includes(tab)) {
               setActiveTab('overview');
             } else {
@@ -409,7 +560,9 @@ export default function App() {
             {/* System Resource Alerts Banner (CPU, RAM, Temp) */}
             <AlertBanner
               alerts={activeAlerts}
+              alertHistory={alertHistory}
               onDismissAlert={handleDismissAlert}
+              onClearAlertHistory={handleClearAlertHistory}
               onSelectTab={setActiveTab}
             />
 
@@ -418,6 +571,8 @@ export default function App() {
              activeTab !== 'adguard' && 
              activeTab !== 'adguard_ai' && 
              activeTab !== 'ping' &&
+             activeTab !== 'logs' &&
+             activeTab !== 'n8n' &&
              activeTab !== 'commands' && 
              activeTab !== 'documentation' && (
               <OfflineBanner
@@ -431,34 +586,25 @@ export default function App() {
               />
             )}
 
-            {/* Ping & Latência Externa Tab */}
-            {activeTab === 'ping' && (
-              <PingTab />
+            {/* Overview Tab (Initial Tab - Renderizado diretamente sem lazy) */}
+            {activeTab === 'overview' && (
+              <OverviewTab
+                server={serverData}
+                status={statusData}
+                temperature={temperatureData}
+                network={networkData}
+                history={history}
+                isConnected={connectionStatus === 'connected'}
+                isStaleData={isStaleData}
+                serverIp={serverIp}
+                onSelectTab={setActiveTab}
+              />
             )}
 
-            {/* AdGuard Home Tab */}
-            {(activeTab === 'adguard' || activeTab === 'adguard_ai') && (
-              <AdGuardHomeTab userRole={currentUserRole} />
-            )}
-
-            {/* Render Server Telemetry Tabs */}
-            {activeTab !== 'adguard' && activeTab !== 'adguard_ai' && activeTab !== 'ping' && (
-              <>
-                {activeTab === 'overview' && (
-                  <OverviewTab
-                    server={serverData}
-                    status={statusData}
-                    temperature={temperatureData}
-                    network={networkData}
-                    history={history}
-                    isConnected={connectionStatus === 'connected'}
-                    isStaleData={isStaleData}
-                    serverIp={serverIp}
-                    onSelectTab={setActiveTab}
-                  />
-                )}
-
-                {activeTab === 'monitoring' && (
+            {/* Outras abas protegidas por Suspense + ErrorBoundary independente */}
+            {activeTab === 'monitoring' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Monitoramento">
                   <MonitoringTab
                     server={serverData}
                     temperature={temperatureData}
@@ -466,49 +612,107 @@ export default function App() {
                     history={history}
                     isConnected={connectionStatus === 'connected'}
                   />
-                )}
+                </TabErrorBoundary>
+              </Suspense>
+            )}
 
-                {activeTab === 'processes' && (
+            {(activeTab === 'adguard' || activeTab === 'adguard_ai') && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="AdGuard Home">
+                  <AdGuardHomeTab userRole={currentUserRole} />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'ping' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Ping & Latência">
+                  <PingTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'processes' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Processos">
                   <ProcessesTab
                     processes={processesData}
                     isLoading={connectionStatus === 'connecting'}
                     onRefresh={handleManualRefresh}
                     isRefreshing={isRefreshing}
                   />
-                )}
+                </TabErrorBoundary>
+              </Suspense>
+            )}
 
-                {activeTab === 'services' && (
+            {activeTab === 'services' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Serviços">
                   <ServicesTab
                     services={servicesData}
                     isLoading={connectionStatus === 'connecting'}
+                    onRefresh={handleManualRefresh}
+                    isRefreshing={isRefreshing}
                   />
-                )}
+                </TabErrorBoundary>
+              </Suspense>
+            )}
 
-                {activeTab === 'network' && (
+            {activeTab === 'network' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Rede & MAC">
                   <NetworkTab
                     network={networkData}
                     history={history}
                     isLoading={connectionStatus === 'connecting'}
                   />
-                )}
+                </TabErrorBoundary>
+              </Suspense>
+            )}
 
-                {activeTab === 'commands' && (
+            {activeTab === 'logs' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Logs do Sistema">
+                  <LogsTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'n8n' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="n8n Workflows">
+                  <N8nTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'commands' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Comandos">
                   <CommandsTab />
-                )}
+                </TabErrorBoundary>
+              </Suspense>
+            )}
 
-                {activeTab === 'system' && (
+            {activeTab === 'system' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Sistema">
                   <SystemTab
                     server={serverData}
                     serverIp={serverIp}
                     isConnected={connectionStatus === 'connected'}
                     onOpenCodeViewer={() => setIsCodeViewerOpen(true)}
                   />
-                )}
+                </TabErrorBoundary>
+              </Suspense>
+            )}
 
-                {activeTab === 'documentation' && (
+            {activeTab === 'documentation' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Documentação">
                   <DocumentationTab />
-                )}
-              </>
+                </TabErrorBoundary>
+              </Suspense>
             )}
           </main>
 

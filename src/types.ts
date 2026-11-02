@@ -10,9 +10,22 @@ export type NavigationTab =
   | 'adguard'
   | 'adguard_ai'
   | 'ping'
+  | 'logs'
+  | 'n8n'
   | 'commands' 
   | 'system'
   | 'documentation';
+
+export interface AlertHistoryItem {
+  id: string;
+  type: 'cpu' | 'ram' | 'temp';
+  level: 'warning' | 'critical';
+  title: string;
+  message: string;
+  value: string;
+  threshold: string;
+  timestamp: string;
+}
 
 export type DomainRiskLevel = 'baixo' | 'médio' | 'alto' | 'crítico' | 'desconhecido';
 

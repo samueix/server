@@ -15,6 +15,8 @@ import {
   DomainAnalysis 
 } from './server/db.js';
 import { analyzeDomainWithGemini } from './server/gemini.js';
+import { fetchN8nStatus as fetchN8nFallback, setN8nConfig as setN8nConfigFallback } from './server/n8nClient.js';
+import { getSystemLogs as getSystemLogsFallback } from './server/logsMonitor.js';
 import fs from 'fs';
 
 // Dynamic PORT from environment (Cloud Run injects PORT), fallback to 3000
@@ -105,6 +107,9 @@ async function startServer() {
     return allowed.includes(pass);
   }
 
+  // Rate limiting de tentativas de login por IP (5 tentativas incorretas em 5 minutos -> HTTP 429)
+  const failedLoginAttempts = new Map<string, { count: number; resetAt: number }>();
+
   // Verificação de autenticação de dois usuários: admin e user
   app.get('/api/auth/verify', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -113,6 +118,18 @@ async function startServer() {
 
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const rateLimit = failedLoginAttempts.get(clientIp);
+
+    if (rateLimit && now < rateLimit.resetAt && rateLimit.count >= 5) {
+      const waitSeconds = Math.ceil((rateLimit.resetAt - now) / 1000);
+      return res.status(429).json({
+        authenticated: false,
+        detail: `Muitas tentativas consecutivas incorretas. Por segurança, aguarde ${waitSeconds}s antes de tentar novamente.`
+      });
     }
 
     const authHeader = req.headers['authorization'];
@@ -162,12 +179,21 @@ async function startServer() {
     }
 
     if (authenticatedUser) {
+      // Sucesso: reseta histórico de falhas do IP
+      failedLoginAttempts.delete(clientIp);
       return res.json({
         authenticated: true,
         user: authenticatedUser,
         role: userRole,
         timestamp: new Date().toISOString()
       });
+    }
+
+    // Falha: incrementa contador de tentativas com janela de 5 minutos
+    if (!rateLimit || now > rateLimit.resetAt) {
+      failedLoginAttempts.set(clientIp, { count: 1, resetAt: now + 300000 });
+    } else {
+      rateLimit.count += 1;
     }
 
     return res.status(401).json({
@@ -307,21 +333,34 @@ async function startServer() {
     const validApiKey = process.env.API_KEY || '';
 
     let isAuthorizedClient = false;
+    let clientRole = 'user';
 
     if (clientApiKey && validApiKey && clientApiKey === validApiKey) {
       isAuthorizedClient = true;
+      clientRole = 'admin';
     } else if (clientAuth && clientAuth.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(clientAuth.slice(6), 'base64').toString('utf-8');
         const [u, p] = decoded.split(':');
-        if ((u === validAdminUser && checkAdminPass(p)) || (u === validStandardUser && checkUserPass(p))) {
+        if (u === validAdminUser && checkAdminPass(p)) {
           isAuthorizedClient = true;
+          clientRole = 'admin';
+        } else if (u === validStandardUser && checkUserPass(p)) {
+          isAuthorizedClient = true;
+          clientRole = 'user';
         }
       } catch {}
     } else if (clientAuth && clientAuth.startsWith('Bearer ')) {
       const token = clientAuth.slice(7);
-      if ((validApiKey && token === validApiKey) || checkAdminPass(token) || checkUserPass(token)) {
+      if (validApiKey && token === validApiKey) {
         isAuthorizedClient = true;
+        clientRole = 'admin';
+      } else if (checkAdminPass(token)) {
+        isAuthorizedClient = true;
+        clientRole = 'admin';
+      } else if (checkUserPass(token)) {
+        isAuthorizedClient = true;
+        clientRole = 'user';
       }
     }
 
@@ -329,6 +368,14 @@ async function startServer() {
     if (!isAuthorizedClient) {
       return res.status(401).json({
         detail: 'Não autorizado. Faça login com usuário e senha para acessar o painel.'
+      });
+    }
+
+    // Admin obrigatório para /api/logs e /api/n8n/config no Node (retorna 403)
+    const requiresAdmin = subPath === 'logs' || subPath.startsWith('logs') || subPath === 'n8n/config' || subPath.startsWith('n8n/config');
+    if (requiresAdmin && clientRole !== 'admin') {
+      return res.status(403).json({
+        detail: 'Acesso restrito: Apenas a conta Administrador possui permissão para acessar este recurso.'
       });
     }
 
@@ -379,19 +426,40 @@ async function startServer() {
           signal: AbortSignal.timeout(timeoutMs)
         });
 
-        // Sucesso de conexão! Salva base funcional no cache
-        cachedWorkingBackendBase = base;
+        if (response.ok || response.status < 500) {
+          // Sucesso de conexão! Salva base funcional no cache
+          cachedWorkingBackendBase = base;
 
-        const text = await response.text();
-        res.status(response.status);
-        res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
-        return res.send(text);
+          const text = await response.text();
+          res.status(response.status);
+          res.setHeader('Content-Type', response.headers.get('content-type') || 'application/json');
+          return res.send(text);
+        }
       } catch {
         // Se a base em cache falhou, invalida para tentar os outros candidatos
         if (base === cachedWorkingBackendBase) {
           cachedWorkingBackendBase = null;
         }
       }
+    }
+
+    // Fallback nativo quando :8000 estiver offline na porta 8000
+    if (subPath.startsWith('n8n')) {
+      if (subPath === 'n8n/config' && req.method === 'POST') {
+        setN8nConfigFallback(req.body?.url, req.body?.apiKey);
+        const st = await fetchN8nFallback();
+        return res.json({ success: true, message: 'Configuração salva no nó fallback.', status: st });
+      }
+      const st = await fetchN8nFallback();
+      return res.json(st);
+    }
+
+    if (subPath.startsWith('logs')) {
+      const source = (req.query.source as string) || 'syslog';
+      const lines = parseInt((req.query.lines as string) || '50', 10);
+      const filter = (req.query.filter as string) || '';
+      const logsResult = getSystemLogsFallback(source, lines, filter);
+      return res.json(logsResult);
     }
 
     // Se o backend estiver offline na rede, retorna 503 para o frontend detectar offline sem inventar dados
