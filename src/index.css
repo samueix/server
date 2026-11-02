@@ -1,0 +1,177 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-title: 'Bricolage Grotesque', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Vibrant Joyful Brand Colors */
+  --color-cream: #FFF7E8;
+  --color-graphite: #1A1A2E;
+  --color-coral: #FF5A36;
+  --color-coral-dark: #E04522;
+  --color-sky: #00A6FB;
+  --color-sky-light: #E0F4FE;
+  --color-yellow: #FFC857;
+  --color-yellow-light: #FFF8E7;
+
+  /* Semantic Status Colors */
+  --color-ok: #12B76A;
+  --color-ok-light: #D1FADF;
+  --color-warn: #F79009;
+  --color-warn-light: #FEF0C7;
+  --color-err: #F04438;
+  --color-err-light: #FEE4E2;
+
+  /* Hierarchical Radii */
+  --radius-xs: 4px;
+  --radius-sm: 4px;
+  --radius-md: 6px; /* inputs */
+  --radius-lg: 10px; /* cards */
+  --radius-xl: 14px; /* modais */
+  --radius-2xl: 16px;
+  --radius-full: 9999px; /* pills */
+}
+
+@layer base {
+  :root {
+    --bg-page: #FFF7E8;
+    --bg-surface: #FFFFFF;
+    --text-main: #1A1A2E;
+    --text-muted: #4A4A68;
+    --border-main: #1A1A2E;
+    --color-primary: #FF5A36;
+    --color-secondary: #00A6FB;
+    --color-accent: #FFC857;
+  }
+
+  body {
+    font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+    background-color: #FFF7E8;
+    color: #1A1A2E;
+    letter-spacing: normal;
+  }
+
+  h1, h2, h3, .font-title {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    letter-spacing: -0.015em;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  *:focus-visible {
+    outline: 2px solid #FF5A36;
+    outline-offset: 2px;
+  }
+}
+
+/* Energetic Flat Style Utilities with Solid Offset Shadows */
+.font-title {
+  font-family: 'Bricolage Grotesque', sans-serif;
+}
+
+.neo-card {
+  background: #FFFFFF;
+  border: 2px solid #1A1A2E;
+  border-radius: 10px;
+  box-shadow: 3px 3px 0px #1A1A2E;
+}
+
+.neo-card-sm {
+  background: #FFFFFF;
+  border: 2px solid #1A1A2E;
+  border-radius: 8px;
+  box-shadow: 2px 2px 0px #1A1A2E;
+}
+
+.neo-card-lg {
+  background: #FFFFFF;
+  border: 2px solid #1A1A2E;
+  border-radius: 12px;
+  box-shadow: 4px 4px 0px #1A1A2E;
+}
+
+.neo-btn {
+  border: 2px solid #1A1A2E;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0px #1A1A2E;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.neo-btn:hover:not(:disabled) {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 3px 0px #1A1A2E;
+}
+
+.neo-btn:active:not(:disabled) {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px #1A1A2E;
+}
+
+.neo-input {
+  border: 2px solid #1A1A2E;
+  border-radius: 6px;
+  background-color: #FFFFFF;
+  color: #1A1A2E;
+  transition: all 120ms ease;
+}
+
+.neo-input:focus {
+  outline: none;
+  border-color: #FF5A36;
+  box-shadow: 2px 2px 0px #FF5A36;
+}
+
+.neo-pill {
+  border: 1.5px solid #1A1A2E;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+/* Fallback classes for unmigrated components so they render cleanly on white/cream */
+.apple-glass, .rack-card {
+  background: #FFFFFF;
+  border: 2px solid #1A1A2E;
+  border-radius: 10px;
+  box-shadow: 3px 3px 0px #1A1A2E;
+}
+
+.apple-glass-subtle, .apple-glass-dark {
+  background: #FFF7E8;
+  border: 1.5px solid #1A1A2E;
+  border-radius: 8px;
+}
+
+.apple-glass-pill {
+  background: #FFFFFF;
+  border: 1.5px solid #1A1A2E;
+  border-radius: 9999px;
+}
+
+.apple-glass-active {
+  background: #FF5A36 !important;
+  color: #FFFFFF !important;
+  border: 2px solid #1A1A2E !important;
+  box-shadow: 2px 2px 0px #1A1A2E !important;
+}
+
+/* Light theme solid scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #FFF7E8;
+}
+::-webkit-scrollbar-thumb {
+  background: #1A1A2E;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #FF5A36;
+}

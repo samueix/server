@@ -1,0 +1,18 @@
+services:
+  adguard-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: adguard-home-ai
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - ADGUARD_URL=http://192.168.100.23:8081
+      - ADGUARD_USERNAME=samuel
+      - ADGUARD_PASSWORD=sua_senha_adguard
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    volumes:
+      - ./data:/app/data
