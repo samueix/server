@@ -85,9 +85,15 @@ def verify_credentials(
 
     # 4. Check Basic Auth (username / password)
     if credentials:
-        if admin_pass and secrets.compare_digest(credentials.username, admin_user) and check_admin_password(credentials.password):
+        u_clean = credentials.username.strip().lower()
+        admin_clean = admin_user.strip().lower()
+        user_clean = user_name.strip().lower()
+
+        if admin_pass and (u_clean == admin_clean or u_clean == "admin") and check_admin_password(credentials.password):
             return "admin"
-        if user_pass and secrets.compare_digest(credentials.username, user_name) and check_user_password(credentials.password):
+        if admin_pass and check_admin_password(credentials.password) and not (user_pass and check_user_password(credentials.password)):
+            return "admin"
+        if user_pass and (u_clean == user_clean or u_clean == "user") and check_user_password(credentials.password):
             return "user"
 
     # 5. Check Query Parameter (para WebSocket ou polling direto)

@@ -22,14 +22,16 @@ import { getAdGuardStats, getAdGuardStatus, AdGuardStats, AdGuardStatus } from '
 
 interface QuickAccessCardProps {
   serverIp?: string;
+  serverIpv6?: string;
   showAdGuardStatsDefault?: boolean;
 }
 
 export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
   serverIp = '192.168.100.23',
+  serverIpv6,
   showAdGuardStatsDefault = true
 }) => {
-  const { isUnlocked, lock, requestUnlock } = useSecurityVault();
+  const { isUnlocked, lock, requestUnlock, sshUser, sshPassword } = useSecurityVault();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [showSshPass, setShowSshPass] = useState<boolean>(false);
   const [selectedSshVersion, setSelectedSshVersion] = useState<'ipv6' | 'ipv4'>('ipv6');
@@ -75,8 +77,16 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
   };
 
   const adguardUrl = `http://${serverIp}:8081/#`;
-  const ipv4SshCmd = `ssh samuel@${serverIp}`;
-  const ipv6SshCmd = `ssh samuel@[${SERVER_IPV6}]`;
+  const effectiveUser = isUnlocked && sshUser ? sshUser : null;
+  const displayUser = isUnlocked ? (sshUser || 'não configurado') : '••••••••';
+  const displayPassword = isUnlocked 
+    ? (showSshPass ? (sshPassword || 'não configurado') : '••••••••••••')
+    : '••••••••••••';
+
+  const userForCmd = effectiveUser || 'user';
+  const targetIpv6 = serverIpv6 || SERVER_IPV6;
+  const ipv4SshCmd = `ssh ${userForCmd}@${serverIp}`;
+  const ipv6SshCmd = `ssh ${userForCmd}@[${targetIpv6}]`;
   const currentSshCmd = selectedSshVersion === 'ipv6' ? ipv6SshCmd : ipv4SshCmd;
 
   return (
@@ -304,7 +314,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <div className="flex items-center gap-1.5 text-xs font-sans text-[#4A4A68] font-semibold">
                     <span className="px-1.5 py-0.5 rounded bg-white text-[#1A1A2E] border border-[#1A1A2E] font-bold">IPv6</span>
-                    <span>ssh samuel@[{SERVER_IPV6}]</span>
+                    <span>ssh {userForCmd}@[{targetIpv6}]</span>
                   </div>
                   <button
                     onClick={() => copyToClipboard(ipv6SshCmd, 'ssh-ipv6')}
@@ -328,7 +338,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <div className="flex items-center gap-1.5 text-xs font-sans text-[#4A4A68] font-semibold">
                     <span className="px-1.5 py-0.5 rounded bg-white text-[#1A1A2E] border border-[#1A1A2E] font-bold">IPv4</span>
-                    <span>ssh samuel@{serverIp}</span>
+                    <span>ssh {userForCmd}@{serverIp}</span>
                   </div>
                   <button
                     onClick={() => copyToClipboard(ipv4SshCmd, 'ssh-ipv4')}
@@ -347,16 +357,31 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-0.5">
                 {/* User */}
                 <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-between gap-2 shadow-[2px_2px_0px_#1A1A2E]">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 truncate">
                     <span className="text-[#4A4A68] font-sans font-semibold">Login:</span>
-                    <span className="text-[#1A1A2E] font-bold">samuel</span>
+                    <span className={`font-bold truncate ${isUnlocked && !sshUser ? 'text-[#4A4A68] italic font-normal text-xs' : 'text-[#1A1A2E]'}`}>
+                      {displayUser}
+                    </span>
                   </div>
                   <button
-                    onClick={() => copyToClipboard('samuel', 'ssh-user')}
-                    className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                    title="Copiar login"
+                    onClick={() => {
+                      if (!isUnlocked) {
+                        requestUnlock('Acesso às credenciais SSH');
+                      } else if (sshUser) {
+                        copyToClipboard(sshUser, 'ssh-user');
+                      }
+                    }}
+                    className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition shrink-0"
+                    title={!isUnlocked ? 'Desbloquear cofre' : (sshUser ? 'Copiar login' : 'Não configurado')}
+                    disabled={isUnlocked && !sshUser}
                   >
-                    {copiedKey === 'ssh-user' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
+                    {!isUnlocked ? (
+                      <Lock className="w-3.5 h-3.5 text-[#F79009]" />
+                    ) : copiedKey === 'ssh-user' ? (
+                      <Check className="w-3.5 h-3.5 text-[#12B76A]" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
                   </button>
                 </div>
 
@@ -364,21 +389,21 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-between gap-2 shadow-[2px_2px_0px_#1A1A2E]">
                   <div className="flex items-center gap-2 overflow-hidden">
                     <span className="text-[#4A4A68] font-sans font-semibold">Senha:</span>
-                    <span className="text-[#1A1A2E] font-bold font-mono text-xs">
-                      {isUnlocked && showSshPass ? 'Configurada no PAM' : '••••••••••••'}
+                    <span className={`font-mono text-xs truncate ${isUnlocked && showSshPass && !sshPassword ? 'text-[#4A4A68] italic font-sans font-normal' : 'text-[#1A1A2E] font-bold'}`}>
+                      {displayPassword}
                     </span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => {
                         if (!isUnlocked) {
-                          requestUnlock('Visualizar status da senha SSH do servidor', () => setShowSshPass(true));
+                          requestUnlock('Visualizar senha SSH do servidor', () => setShowSshPass(true));
                         } else {
                           setShowSshPass(!showSshPass);
                         }
                       }}
                       className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (showSshPass ? 'Ocultar' : 'Ver status')}
+                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (showSshPass ? 'Ocultar senha' : 'Ver senha')}
                     >
                       {!isUnlocked ? (
                         <Lock className="w-3.5 h-3.5 text-[#F79009]" />
@@ -391,13 +416,14 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                     <button
                       onClick={() => {
                         if (!isUnlocked) {
-                          requestUnlock('Acesso às credenciais SSH');
-                        } else {
-                          copyToClipboard('samuel', 'ssh-user');
+                          requestUnlock('Copiar senha SSH');
+                        } else if (sshPassword) {
+                          copyToClipboard(sshPassword, 'ssh-pass');
                         }
                       }}
                       className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                      title="Copiar usuário"
+                      title={!isUnlocked ? 'Desbloquear cofre' : (sshPassword ? 'Copiar senha' : 'Não configurado')}
+                      disabled={isUnlocked && !sshPassword}
                     >
                       {copiedKey === 'ssh-pass' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>

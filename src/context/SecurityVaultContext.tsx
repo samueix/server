@@ -11,6 +11,8 @@ interface SecurityVaultContextType {
   isModalOpen: boolean;
   modalReason: string;
   closeModal: () => void;
+  sshUser: string | null;
+  sshPassword: string | null;
 }
 
 const SecurityVaultContext = createContext<SecurityVaultContextType | undefined>(undefined);
@@ -39,6 +41,9 @@ export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ child
     }
     return false;
   });
+
+  const [sshUser, setSshUser] = useState<string | null>(null);
+  const [sshPassword, setSshPassword] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [modalReason, setModalReason] = useState<string>('Acesso a dados confidenciais');
@@ -72,6 +77,9 @@ export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ child
       const data = await res.json();
       if (data.ok || data.success) {
         setIsUnlocked(true);
+        // Guarda unicamente no estado React da sessão do cofre (nunca em storage, nunca em log)
+        setSshUser(data.sshUser || null);
+        setSshPassword(data.sshPassword || null);
         try {
           sessionStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify({ unlockedAt: Date.now() }));
         } catch {}
@@ -93,6 +101,8 @@ export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ child
 
   const lock = () => {
     setIsUnlocked(false);
+    setSshUser(null);
+    setSshPassword(null);
     try {
       sessionStorage.removeItem(VAULT_STORAGE_KEY);
     } catch {
@@ -128,7 +138,9 @@ export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ child
         requestUnlock,
         isModalOpen,
         modalReason,
-        closeModal
+        closeModal,
+        sshUser,
+        sshPassword
       }}
     >
       {children}

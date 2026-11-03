@@ -79,25 +79,31 @@ class AdGuardDirectClient {
 
   public setCredentials(username?: string, password?: string): void {
     try {
-      if (username) localStorage.setItem(STORAGE_AUTH_USER_KEY, username);
-      else localStorage.removeItem(STORAGE_AUTH_USER_KEY);
+      if (username) sessionStorage.setItem(STORAGE_AUTH_USER_KEY, username);
+      else sessionStorage.removeItem(STORAGE_AUTH_USER_KEY);
 
-      if (password) localStorage.setItem(STORAGE_AUTH_PASS_KEY, password);
-      else localStorage.removeItem(STORAGE_AUTH_PASS_KEY);
+      if (password) sessionStorage.setItem(STORAGE_AUTH_PASS_KEY, password);
+      else sessionStorage.removeItem(STORAGE_AUTH_PASS_KEY);
+
+      // Limpeza de qualquer resquício legado em localStorage
+      localStorage.removeItem(STORAGE_AUTH_USER_KEY);
+      localStorage.removeItem(STORAGE_AUTH_PASS_KEY);
     } catch {}
     this.reconnect();
   }
 
   public getSavedUsername(): string {
     try {
-      return localStorage.getItem(STORAGE_AUTH_USER_KEY) || 'samuel';
+      return sessionStorage.getItem(STORAGE_AUTH_USER_KEY) || '';
     } catch {
-      return 'samuel';
+      return '';
     }
   }
 
   public clearCredentials(): void {
     try {
+      sessionStorage.removeItem(STORAGE_AUTH_USER_KEY);
+      sessionStorage.removeItem(STORAGE_AUTH_PASS_KEY);
       localStorage.removeItem(STORAGE_AUTH_USER_KEY);
       localStorage.removeItem(STORAGE_AUTH_PASS_KEY);
     } catch {}
@@ -114,8 +120,8 @@ class AdGuardDirectClient {
 
   private getAuthHeader(): string | null {
     try {
-      const user = localStorage.getItem(STORAGE_AUTH_USER_KEY) || 'samuel';
-      const pass = localStorage.getItem(STORAGE_AUTH_PASS_KEY) || '12345678';
+      const user = sessionStorage.getItem(STORAGE_AUTH_USER_KEY);
+      const pass = sessionStorage.getItem(STORAGE_AUTH_PASS_KEY);
       if (user && pass) {
         return 'Basic ' + btoa(`${user}:${pass}`);
       }

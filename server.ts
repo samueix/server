@@ -120,12 +120,20 @@ async function startServer() {
     return timingSafeCompare(pass, process.env.USER_PASSWORD);
   }
 
+  // Função centralizada para CORS configurável via ALLOWED_ORIGIN (padrão: mesma origem do painel, sem cabeçalho CORS)
+  function applyCors(res: express.Response) {
+    const allowedOrigin = process.env.ALLOWED_ORIGIN?.trim();
+    if (allowedOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+    }
+  }
+
   // Rate limiting de tentativas de login por IP (5 tentativas incorretas em 5 minutos -> HTTP 429)
   const failedLoginAttempts = new Map<string, { count: number; resetAt: number }>();
 
   // Verificação de autenticação de dois usuários: admin e user
   app.get('/api/auth/verify', async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
 
@@ -165,11 +173,21 @@ async function startServer() {
     if (!authenticatedUser && authHeader && authHeader.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
-        const [u, p] = decoded.split(':');
-        if (u === validAdminUser && checkAdminPass(p)) {
+        const colonIdx = decoded.indexOf(':');
+        const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
+        const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
+
+        const uClean = u.trim().toLowerCase();
+        const adminClean = validAdminUser.trim().toLowerCase();
+        const stdClean = validStandardUser.trim().toLowerCase();
+
+        if ((uClean === adminClean || uClean === 'admin') && checkAdminPass(p)) {
           authenticatedUser = validAdminUser;
           userRole = 'admin';
-        } else if (u === validStandardUser && checkUserPass(p)) {
+        } else if (checkAdminPass(p) && !checkUserPass(p)) {
+          authenticatedUser = validAdminUser;
+          userRole = 'admin';
+        } else if ((uClean === stdClean || uClean === 'user') && checkUserPass(p)) {
           authenticatedUser = validStandardUser;
           userRole = 'user';
         }
@@ -220,7 +238,7 @@ async function startServer() {
 
   // Endpoint seguro de desbloqueio do cofre (valida VAULT_PASSWORD em tempo constante no servidor)
   app.post('/api/vault/unlock', (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
 
@@ -253,8 +271,15 @@ async function startServer() {
     } else if (authHeader && authHeader.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
-        const [u, p] = decoded.split(':');
-        if ((u === validAdminUser && checkAdminPass(p)) || (u === validStandardUser && checkUserPass(p))) {
+        const colonIdx = decoded.indexOf(':');
+        const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
+        const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
+        const uClean = u.trim().toLowerCase();
+        if (
+          ((uClean === validAdminUser.trim().toLowerCase() || uClean === 'admin') && checkAdminPass(p)) ||
+          checkAdminPass(p) ||
+          ((uClean === validStandardUser.trim().toLowerCase() || uClean === 'user') && checkUserPass(p))
+        ) {
           isAuthorized = true;
         }
       } catch {}
@@ -291,7 +316,12 @@ async function startServer() {
     const isMatch = timingSafeCompare(inputPassword, vaultPassword);
     if (isMatch) {
       failedVaultAttempts.delete(clientIp);
-      return res.json({ ok: true, success: true });
+      return res.json({
+        ok: true,
+        success: true,
+        sshUser: process.env.VAULT_SSH_USER || null,
+        sshPassword: process.env.VAULT_SSH_PASSWORD || null
+      });
     }
 
     // Falha: incrementa contador de tentativas
@@ -336,7 +366,7 @@ async function startServer() {
 
   // Endpoint de Ping do servidor para a internet (sem comandos externos)
   app.get('/api/ping', async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
     if (req.method === 'OPTIONS') {
@@ -417,7 +447,7 @@ async function startServer() {
       return next();
     }
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
     res.setHeader('Access-Control-Allow-Private-Network', 'true');
@@ -446,11 +476,21 @@ async function startServer() {
     } else if (clientAuth && clientAuth.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(clientAuth.slice(6), 'base64').toString('utf-8');
-        const [u, p] = decoded.split(':');
-        if (u === validAdminUser && checkAdminPass(p)) {
+        const colonIdx = decoded.indexOf(':');
+        const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
+        const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
+
+        const uClean = u.trim().toLowerCase();
+        const adminClean = validAdminUser.trim().toLowerCase();
+        const stdClean = validStandardUser.trim().toLowerCase();
+
+        if ((uClean === adminClean || uClean === 'admin') && checkAdminPass(p)) {
           isAuthorizedClient = true;
           clientRole = 'admin';
-        } else if (u === validStandardUser && checkUserPass(p)) {
+        } else if (checkAdminPass(p) && !checkUserPass(p)) {
+          isAuthorizedClient = true;
+          clientRole = 'admin';
+        } else if ((uClean === stdClean || uClean === 'user') && checkUserPass(p)) {
           isAuthorizedClient = true;
           clientRole = 'user';
         }
@@ -577,7 +617,7 @@ async function startServer() {
 
   // Rota Nginx-compatible /adguard-api/* (Injeta autenticação automaticamente e libera CORS)
   app.all('/adguard-api/*', async (req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept');
 

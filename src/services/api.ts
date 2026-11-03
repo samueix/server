@@ -481,6 +481,7 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
 
   let totalReceived = 0;
   let totalSent = 0;
+  const dynamicIpv6 = raw.primaryIpv6 || raw.primary_ipv6 || rawList.find((i: any) => i.ipv6 && !i.ipv6.startsWith('fe80:'))?.ipv6;
 
   const interfaces: NetworkInterfaceItem[] = rawList.map((item: any) => {
     const nome = item.interface || item.nome || item.name || 'eth0';
@@ -506,7 +507,7 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
     if (!ipv4 && ip !== '--' && !ip.includes(':')) ipv4 = ip;
     if (!ipv6 && ip.includes(':')) ipv6 = ip;
     if (!ipv6 && (nome.startsWith('en') || nome.startsWith('eth') || nome === 'primary')) {
-      ipv6 = raw.primary_ipv6 || SERVER_IPV6;
+      ipv6 = dynamicIpv6 || SERVER_IPV6;
     }
 
     // Status: "online" / "active" / "up"
@@ -603,9 +604,9 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
   return {
     interfaces,
     activeClients,
-    primaryInterface: raw.primary_interface || 'enp2s0',
-    primaryIp: raw.primary_ip || SERVER_IPV4,
-    primaryIpv6: raw.primary_ipv6 || SERVER_IPV6,
+    primaryInterface: raw.primary_interface || raw.primaryInterface || 'enp2s0',
+    primaryIp: raw.primaryIp || raw.primary_ip || SERVER_IPV4,
+    primaryIpv6: dynamicIpv6 || SERVER_IPV6,
     downloadSpeedFormatted: formatSpeed(downloadSpeedBps),
     uploadSpeedFormatted: formatSpeed(uploadSpeedBps),
     downloadSpeedBytes: downloadSpeedBps,
