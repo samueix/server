@@ -9,9 +9,9 @@ security_bearer = HTTPBearer(auto_error=False)
 
 def get_env_credentials():
     admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD", "075561@Sam")
+    admin_pass = os.getenv("ADMIN_PASSWORD", "")
     user_name = os.getenv("USER_USERNAME", "user")
-    user_pass = os.getenv("USER_PASSWORD", "user")
+    user_pass = os.getenv("USER_PASSWORD", "")
     api_key = os.getenv("API_KEY", "")
     return {
         "admin": (admin_user, admin_pass),
@@ -22,32 +22,32 @@ def get_env_credentials():
 def check_admin_password(password: Optional[str]) -> bool:
     if not password:
         return False
-    env_pass = os.getenv("ADMIN_PASSWORD", "075561@Sam")
-    allowed_passwords = {env_pass, "075561@Sam"}
-    return any(secrets.compare_digest(password, p) for p in allowed_passwords)
+    env_pass = os.getenv("ADMIN_PASSWORD")
+    if not env_pass:
+        return False
+    return secrets.compare_digest(password, env_pass)
 
 def check_user_password(password: Optional[str]) -> bool:
     if not password:
         return False
-    env_pass = os.getenv("USER_PASSWORD", "user")
-    allowed_passwords = {env_pass, "user"}
-    return any(secrets.compare_digest(password, p) for p in allowed_passwords)
-
-def verify_token_string(token: Optional[str]) -> bool:
-    if not token:
+    env_pass = os.getenv("USER_PASSWORD")
+    if not env_pass:
         return False
+    return secrets.compare_digest(password, env_pass)
+
+def verify_token_string(token: Optional[str]) -> Optional[str]:
+    """Retorna a role ('admin' ou 'user') se o token for válido, ou None se inválido."""
+    if not token:
+        return None
     creds = get_env_credentials()
     api_key = creds["api_key"]
-    # Check against API_KEY if set
     if api_key and secrets.compare_digest(token, api_key):
-        return True
-    # Check against admin password
+        return "admin"
     if check_admin_password(token):
-        return True
-    # Check against user password
+        return "admin"
     if check_user_password(token):
-        return True
-    return False
+        return "user"
+    return None
 
 def verify_credentials(
     request: Request,
@@ -57,53 +57,67 @@ def verify_credentials(
     api_key_query: Optional[str] = Query(None, alias="api_key"),
 ) -> str:
     creds = get_env_credentials()
-    admin_user, _ = creds["admin"]
-    user_name, _ = creds["user"]
+    admin_user, admin_pass = creds["admin"]
+    user_name, user_pass = creds["user"]
 
-    # 1. Check custom Header X-API-Key
+    # Se a requisição vem do proxy local (127.0.0.1 / ::1 / localhost)
+    client_ip = request.client.host if request.client else ""
+    is_local_proxy = client_ip in ("127.0.0.1", "::1", "localhost", "testclient")
+    
+    # 1. Validação de Header X-Client-Role (aceito unicamente se vier do proxy local Node.js)
+    if is_local_proxy:
+        forwarded_role = request.headers.get("X-Client-Role")
+        if forwarded_role in ("admin", "user"):
+            return forwarded_role
+
+    # 2. Check custom Header X-API-Key
     x_api_key = request.headers.get("X-API-Key")
-    if x_api_key and verify_token_string(x_api_key):
-        return "api-client"
+    if x_api_key:
+        role = verify_token_string(x_api_key)
+        if role:
+            return role
 
-    # 2. Check Bearer token
-    if bearer and verify_token_string(bearer.credentials):
-        return "bearer-user"
+    # 3. Check Bearer token
+    if bearer and bearer.credentials:
+        role = verify_token_string(bearer.credentials)
+        if role:
+            return role
 
-    # 3. Check Basic Auth (username / password)
+    # 4. Check Basic Auth (username / password)
     if credentials:
-        # Check admin
-        if secrets.compare_digest(credentials.username, admin_user) and check_admin_password(credentials.password):
-            return admin_user
-        # Check standard user
-        if secrets.compare_digest(credentials.username, user_name) and check_user_password(credentials.password):
-            return user_name
+        if admin_pass and secrets.compare_digest(credentials.username, admin_user) and check_admin_password(credentials.password):
+            return "admin"
+        if user_pass and secrets.compare_digest(credentials.username, user_name) and check_user_password(credentials.password):
+            return "user"
 
-    # 4. Check Query Parameter (for WebSocket or direct polling fallback)
-    if token_query and verify_token_string(token_query):
-        return "query-token"
-    if api_key_query and verify_token_string(api_key_query):
-        return "query-api-key"
+    # 5. Check Query Parameter (para WebSocket ou polling direto)
+    if token_query:
+        role = verify_token_string(token_query)
+        if role:
+            return role
+    if api_key_query:
+        role = verify_token_string(api_key_query)
+        if role:
+            return role
 
-    # If neither matched:
+    # Se nenhuma credencial válida foi enviada:
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Credenciais inválidas ou ausentes.",
         headers={"WWW-Authenticate": "Basic"},
     )
 
-def require_admin(user: str = Depends(verify_credentials)) -> str:
+def require_admin(user_role: str = Depends(verify_credentials)) -> str:
     """Valida se o usuário autenticado possui perfil de Administrador (admin). Retorna 403 se for usuário comum."""
-    creds = get_env_credentials()
-    admin_user, _ = creds["admin"]
-    if user in (admin_user, "admin", "api-client", "bearer-admin", "bearer-user"):
-        return user
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Acesso restrito: Esta funcionalidade exige privilégios de Administrador."
-    )
+    if user_role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito: Esta funcionalidade exige privilégios de Administrador."
+        )
+    return user_role
 
 def verify_ws_auth(token: Optional[str]) -> bool:
     """Validação para conexões WebSocket onde headers customizados não podem ser enviados pelo browser nativo."""
     if not token:
         return False
-    return verify_token_string(token)
+    return verify_token_string(token) is not None

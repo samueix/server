@@ -6,7 +6,7 @@ load_dotenv()
 
 ADGUARD_URL = os.getenv("ADGUARD_URL", "http://127.0.0.1:8081").rstrip("/")
 ADGUARD_USERNAME = os.getenv("ADGUARD_USERNAME", "samuel")
-ADGUARD_PASSWORD = os.getenv("ADGUARD_PASSWORD", "12345678")
+ADGUARD_PASSWORD = os.getenv("ADGUARD_PASSWORD", "")
 
 async def fetch_adguard_stats():
     auth = (ADGUARD_USERNAME, ADGUARD_PASSWORD) if ADGUARD_USERNAME and ADGUARD_PASSWORD else None

@@ -23,20 +23,31 @@ export const SecurityUnlockModal: React.FC = () => {
 
   if (!isModalOpen) return null;
 
-  const handleSubmit = (e?: React.FormEvent) => {
+  const [loading, setLoading] = useState<boolean>(false);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!password) {
       setError('Por favor, digite a senha mestre.');
       return;
     }
 
-    const success = unlock(password);
-    if (success) {
-      setIsSuccess(true);
-      setError(null);
-    } else {
-      setError('Senha mestre incorreta. Acesso negado.');
-      inputRef.current?.select();
+    setLoading(true);
+    setError(null);
+
+    try {
+      const success = await unlock(password);
+      if (success) {
+        setIsSuccess(true);
+        setError(null);
+      } else {
+        setError('Senha mestre incorreta. Acesso negado.');
+        inputRef.current?.select();
+      }
+    } catch (err: any) {
+      setError(err.message || 'Erro ao validar senha com o servidor.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -145,10 +156,11 @@ export const SecurityUnlockModal: React.FC = () => {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-md bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+              disabled={loading}
+              className="px-4 py-2 rounded-md bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none disabled:opacity-50"
             >
               <Key className="w-3.5 h-3.5" />
-              <span>Desbloquear senhas</span>
+              <span>{loading ? 'Verificando...' : 'Desbloquear senhas'}</span>
             </button>
           </div>
         </form>

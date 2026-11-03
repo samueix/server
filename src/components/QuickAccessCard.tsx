@@ -365,20 +365,20 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                   <div className="flex items-center gap-2 overflow-hidden">
                     <span className="text-[#4A4A68] font-sans font-semibold">Senha:</span>
                     <span className="text-[#1A1A2E] font-bold font-mono text-xs">
-                      {isUnlocked && showSshPass ? '12345678' : '••••••••••••'}
+                      {isUnlocked && showSshPass ? 'Configurada no PAM' : '••••••••••••'}
                     </span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       onClick={() => {
                         if (!isUnlocked) {
-                          requestUnlock('Visualizar senha SSH do servidor', () => setShowSshPass(true));
+                          requestUnlock('Visualizar status da senha SSH do servidor', () => setShowSshPass(true));
                         } else {
                           setShowSshPass(!showSshPass);
                         }
                       }}
                       className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (showSshPass ? 'Ocultar senha' : 'Ver senha')}
+                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (showSshPass ? 'Ocultar' : 'Ver status')}
                     >
                       {!isUnlocked ? (
                         <Lock className="w-3.5 h-3.5 text-[#F79009]" />
@@ -391,13 +391,13 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                     <button
                       onClick={() => {
                         if (!isUnlocked) {
-                          requestUnlock('Copiar senha SSH do servidor', () => copyToClipboard('12345678', 'ssh-pass'));
+                          requestUnlock('Acesso às credenciais SSH');
                         } else {
-                          copyToClipboard('12345678', 'ssh-pass');
+                          copyToClipboard('samuel', 'ssh-user');
                         }
                       }}
                       className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                      title="Copiar senha"
+                      title="Copiar usuário"
                     >
                       {copiedKey === 'ssh-pass' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>

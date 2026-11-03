@@ -284,28 +284,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </button>
             </form>
           </div>
-
-          {/* Acesso rápido do Operador */}
-          <div className="mt-5 pt-4 border-t-2 border-[#1A1A2E]/20">
-            <span className="text-xs font-bold text-[#4A4A68] block mb-2 font-sans">Acesso rápido:</span>
-            <div className="grid grid-cols-1 text-xs font-mono">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('basic');
-                  setUsername('user');
-                  setPassword('user');
-                }}
-                className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] hover:bg-[#00A6FB]/20 shadow-[2px_2px_0px_#1A1A2E] text-left transition-all active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
-              >
-                <div className="font-bold text-[#1A1A2E] flex items-center justify-between">
-                  <span>Acesso Operador (user)</span>
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-[#00A6FB]/30 border border-[#1A1A2E] font-bold">operador</span>
-                </div>
-                <div className="text-[11px] text-[#4A4A68] mt-0.5">Telemetria operacional em tempo real</div>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

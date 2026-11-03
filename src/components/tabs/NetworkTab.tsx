@@ -32,6 +32,7 @@ interface NetworkTabProps {
   network: NetworkTelemetry | null;
   history: HistoryPoint[];
   isLoading: boolean;
+  isStaleData?: boolean;
 }
 
 type ClientSortField = 'ip' | 'name' | 'mac' | 'status' | 'traffic';
@@ -39,8 +40,18 @@ type ClientSortField = 'ip' | 'name' | 'mac' | 'status' | 'traffic';
 export const NetworkTab: React.FC<NetworkTabProps> = ({
   network,
   history,
-  isLoading
+  isLoading,
+  isStaleData = false
 }) => {
+  const [secondsAgo, setSecondsAgo] = useState<number>(0);
+  useEffect(() => {
+    setSecondsAgo(0);
+    const interval = setInterval(() => {
+      setSecondsAgo(s => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [network]);
+
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [clientSearch, setClientSearch] = useState<string>('');
   const [clientFilter, setClientFilter] = useState<'all' | 'online' | 'offline'>('all');
@@ -390,9 +401,19 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
               <span className="text-xs text-[#4A4A68] font-medium">Conexão dual-stack IPv4 e IPv6</span>
             </div>
           </div>
-          <span className="text-xs font-mono font-bold text-[#12B76A] bg-[#D1FADF] px-3 py-1 rounded-full border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">
-            IPv6 dinâmico ativo
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {isStaleData && (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708] border border-[#F79009]">
+                Dado em cache / desatualizado
+              </span>
+            )}
+            <span className="text-[#FF5A36] font-bold font-mono text-[11px] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E]/20" aria-live="polite">
+              Atualizado há {secondsAgo}s
+            </span>
+            <span className="text-xs font-mono font-bold text-[#12B76A] bg-[#D1FADF] px-3 py-1 rounded-full border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">
+              IPv6 dinâmico ativo
+            </span>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">

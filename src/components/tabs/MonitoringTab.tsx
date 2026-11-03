@@ -18,6 +18,7 @@ interface MonitoringTabProps {
   network?: NetworkTelemetry | null;
   history: HistoryPoint[];
   isConnected: boolean;
+  isStaleData?: boolean;
 }
 
 export const MonitoringTab: React.FC<MonitoringTabProps> = ({
@@ -25,8 +26,17 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
   temperature = { disponivel: false, sensores: [] },
   network,
   history,
-  isConnected
+  isConnected,
+  isStaleData = false
 }) => {
+  const [secondsAgo, setSecondsAgo] = React.useState<number>(0);
+  React.useEffect(() => {
+    setSecondsAgo(0);
+    const interval = setInterval(() => {
+      setSecondsAgo(s => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [server]);
   const cpuHistory = useMemo(() => history.map(h => h.cpu), [history]);
   const ramHistory = useMemo(() => history.map(h => h.ram), [history]);
   const netDownHistory = useMemo(() => history.map(h => h.netDown || 0), [history]);
@@ -161,14 +171,24 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
     <div className="space-y-4 font-sans text-[#1A1A2E]">
       {/* 1. Faixa de status de eventos e monitoramento no topo */}
       <div className="rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] overflow-hidden">
-        <div className="px-4 py-3 bg-[#FFF7E8] border-b-2 border-[#1A1A2E] flex items-center justify-between text-xs">
+        <div className="px-4 py-3 bg-[#FFF7E8] border-b-2 border-[#1A1A2E] flex items-center justify-between text-xs flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-[#FF5A36]" />
             <h2 className="font-bold font-title text-[#1A1A2E]">Eventos e telemetria</h2>
           </div>
-          <span className="text-[#1A1A2E] font-mono font-bold text-xs bg-white px-2 py-0.5 rounded-full border border-[#1A1A2E]">
-            {isConnected ? 'Tempo real' : 'Offline'}
-          </span>
+          <div className="flex items-center gap-2 flex-wrap">
+            {isStaleData && (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708] border border-[#F79009]">
+                Dado em cache / desatualizado
+              </span>
+            )}
+            <span className="text-[#FF5A36] font-bold font-mono text-[11px] bg-white px-2 py-0.5 rounded border border-[#1A1A2E]/20" aria-live="polite">
+              Atualizado há {secondsAgo}s
+            </span>
+            <span className="text-[#1A1A2E] font-mono font-bold text-xs bg-white px-2 py-0.5 rounded-full border border-[#1A1A2E]">
+              {isConnected ? 'Tempo real' : 'Offline'}
+            </span>
+          </div>
         </div>
 
         <div className="divide-y-2 sm:divide-y-0 sm:divide-x-2 divide-[#1A1A2E]/20 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 text-xs">

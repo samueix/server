@@ -11,7 +11,7 @@ export interface N8nWorkflowItem {
 }
 
 export interface N8nStatusInfo {
-  status: 'ok' | 'offline';
+  status: 'ok' | 'warning' | 'offline' | 'unconfigured';
   online: boolean;
   url: string;
   apiConnected: boolean;
@@ -24,8 +24,6 @@ export interface N8nStatusInfo {
   lastChecked: string;
 }
 
-// Chave da API do n8n oficial fornecida pelo usuário
-export const DEFAULT_N8N_API_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIyNDkxMWM0Ny1iNTAzLTRlZGQtYmM0ZS0xZjViZWIyNmM3Y2IiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwianRpIjoiZDI3MDc0MzUtOWU0My00ZWExLWFkYzAtYTNiYjIwZmUyZjc0IiwiaWF0IjoxNzkxMjMwNjgzfQ.D8oeda_ApWe9DK06D5JZc7L0ZJ2IeA4B-uyok2Poluw';
 export const DEFAULT_N8N_IPV6_URL = 'http://[2804:2d5c:a2:852:5ecd:5bff:fe5a:7445]:5678';
 
 let customN8nApiKey: string | null = null;
@@ -41,7 +39,7 @@ export function setN8nConfig(url?: string, apiKey?: string) {
 
 export function getN8nConfig() {
   const activeUrl = customN8nUrl || process.env.N8N_URL || DEFAULT_N8N_IPV6_URL;
-  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || DEFAULT_N8N_API_KEY);
+  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || '');
   return {
     url: activeUrl,
     hasApiKey: Boolean(activeKey)
@@ -53,10 +51,25 @@ const N8N_BACKOFF_MS = 6000;
 
 export async function fetchN8nStatus(): Promise<N8nStatusInfo> {
   const isBackingOff = Date.now() - lastUnreachableN8n < N8N_BACKOFF_MS;
+  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || '');
 
-  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || DEFAULT_N8N_API_KEY);
+  if (!activeKey) {
+    return {
+      status: 'unconfigured',
+      online: false,
+      url: customN8nUrl || process.env.N8N_URL || DEFAULT_N8N_IPV6_URL,
+      apiConnected: false,
+      apiAuthError: 'n8n não configurado: Chave de API ausente.',
+      hasApiKey: false,
+      version: undefined,
+      activeWorkflowsCount: 0,
+      totalWorkflowsCount: 0,
+      workflows: [],
+      lastChecked: new Date().toISOString()
+    };
+  }
 
-  // Lista de URLs candidatas (prioriza a última que funcionou e o IPv6 do servidor)
+  // Lista de URLs candidatas
   const candidateUrls: string[] = [];
   if (cachedWorkingN8nUrl) candidateUrls.push(cachedWorkingN8nUrl);
   if (customN8nUrl) candidateUrls.push(customN8nUrl.replace(/\/$/, ''));
@@ -74,7 +87,6 @@ export async function fetchN8nStatus(): Promise<N8nStatusInfo> {
   if (!isBackingOff) {
     for (const baseUrl of uniqueCandidates) {
       try {
-        // 1. Testa healthz na porta do n8n (timeout ágil de 1.5s)
         const healthRes = await fetch(`${baseUrl}/healthz`, {
           method: 'GET',
           signal: AbortSignal.timeout(1500)
@@ -86,7 +98,6 @@ export async function fetchN8nStatus(): Promise<N8nStatusInfo> {
           let apiConnected = false;
           let apiAuthError: string | null = null;
 
-          // 2. Tenta listar workflows com a chave de API fornecida
           if (activeKey) {
             try {
               const wfRes = await fetch(`${baseUrl}/api/v1/workflows?limit=100`, {
@@ -127,7 +138,7 @@ export async function fetchN8nStatus(): Promise<N8nStatusInfo> {
 
           const activeCount = workflows.filter(w => w.active).length;
           return {
-            status: 'ok',
+            status: apiConnected ? 'ok' : 'warning',
             online: true,
             url: baseUrl,
             apiConnected,

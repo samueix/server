@@ -132,21 +132,46 @@ export const LogsTab: React.FC = () => {
     }
   }, [selectedSource, lineCount]);
 
+  const [secondsAgo, setSecondsAgo] = useState<number>(0);
+
+  useEffect(() => {
+    setSecondsAgo(0);
+    const interval = setInterval(() => {
+      setSecondsAgo(s => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [logsData]);
+
   // Carrega ao mudar fonte ou quantidade de linhas
   useEffect(() => {
     setIsLoading(true);
     loadLogs();
   }, [loadLogs]);
 
-  // Timer para streaming em tempo real
+  // Timer para streaming em tempo real com pausa em document.hidden e retomada imediata
   useEffect(() => {
     if (!isStreaming) return;
 
     const timer = setInterval(() => {
-      loadLogs();
+      if (!document.hidden) {
+        loadLogs();
+      }
     }, streamInterval);
 
-    return () => clearInterval(timer);
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        loadLogs();
+      } else if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [isStreaming, streamInterval, loadLogs]);
 
   // Auto-scroll
@@ -257,6 +282,17 @@ export const LogsTab: React.FC = () => {
 
         {/* Live Controls */}
         <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto justify-end">
+          <div className="flex items-center gap-2">
+            {Boolean(errorMessage) && (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708] border border-[#F79009]">
+                Dado em cache / desatualizado
+              </span>
+            )}
+            <span className="text-[#FF5A36] font-bold font-mono text-[11px] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E]/20" aria-live="polite">
+              Atualizado há {secondsAgo}s
+            </span>
+          </div>
+
           {/* Streaming Toggle */}
           <button
             onClick={() => setIsStreaming(!isStreaming)}

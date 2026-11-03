@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { 
   Cpu, 
   Layers, 
@@ -14,26 +14,107 @@ import {
   Filter
 } from 'lucide-react';
 import { ProcessItem } from '../../types';
+import { getProcesses } from '../../services/api';
 
 interface ProcessesTabProps {
   processes: ProcessItem[];
   isLoading: boolean;
   onRefresh: () => void;
   isRefreshing: boolean;
+  isStaleData?: boolean;
 }
 
 type SortField = 'cpu_percentual' | 'memoria_percentual' | 'nome' | 'usuario' | 'pid' | 'status';
 
 export const ProcessesTab: React.FC<ProcessesTabProps> = ({
-  processes,
+  processes: initialProcesses,
   isLoading,
   onRefresh,
-  isRefreshing
+  isRefreshing,
+  isStaleData: initialStale = false
 }) => {
   const [sortField, setSortField] = useState<SortField>('cpu_percentual');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [localProcesses, setLocalProcesses] = useState<ProcessItem[]>(initialProcesses);
+  const [isStale, setIsStale] = useState<boolean>(initialStale);
+  const [secondsAgo, setSecondsAgo] = useState<number>(0);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const getApiSortBy = (field: SortField): 'cpu' | 'ram' | 'name' => {
+    if (field === 'memoria_percentual') return 'ram';
+    if (field === 'nome') return 'name';
+    return 'cpu';
+  };
+
+  const fetchProcessesWithSort = useCallback(async (field: SortField) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const apiSort = getApiSortBy(field);
+      const data = await getProcesses(abortControllerRef.current.signal, apiSort, 50);
+      setLocalProcesses(data);
+      setIsStale(false);
+      setSecondsAgo(0);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setIsStale(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialProcesses && initialProcesses.length > 0) {
+      setLocalProcesses(initialProcesses);
+      setSecondsAgo(0);
+    }
+  }, [initialProcesses]);
+
+  useEffect(() => {
+    setIsStale(initialStale);
+  }, [initialStale]);
+
+  // Contador de segundos desde a última atualização
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsAgo(s => s + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Polling com pausa em document.hidden e retomada imediata com AbortController
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchProcessesWithSort(sortField);
+      }
+    }, 5000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchProcessesWithSort(sortField);
+      } else if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [sortField, fetchProcessesWithSort]);
+
+  const processes = localProcesses.length > 0 ? localProcesses : initialProcesses;
 
   // Resumos e contadores
   const summary = useMemo(() => {
@@ -78,6 +159,7 @@ export const ProcessesTab: React.FC<ProcessesTabProps> = ({
     } else {
       setSortField(field);
       setSortAsc(field === 'nome' || field === 'usuario' || field === 'pid');
+      fetchProcessesWithSort(field);
     }
   };
 
@@ -253,8 +335,22 @@ export const ProcessesTab: React.FC<ProcessesTabProps> = ({
             </button>
           </div>
 
+          <div className="flex items-center gap-2">
+            {isStale && (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708] border border-[#F79009]">
+                Dado em cache / desatualizado
+              </span>
+            )}
+            <span className="text-[#FF5A36] font-bold font-mono text-[11px] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E]/20" aria-live="polite">
+              Atualizado há {secondsAgo}s
+            </span>
+          </div>
+
           <button
-            onClick={onRefresh}
+            onClick={() => {
+              if (onRefresh) onRefresh();
+              fetchProcessesWithSort(sortField);
+            }}
             disabled={isRefreshing}
             className="px-3.5 py-2 rounded-lg bg-[#FF5A36] text-white font-bold text-xs font-mono flex items-center gap-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#e04826] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition disabled:opacity-50"
             title="Atualizar lista"

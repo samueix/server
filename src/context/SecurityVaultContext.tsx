@@ -1,11 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode } from 'react';
+import { getAuthHeaders } from '../services/authService';
 
-const MASTER_PASSWORD = '075561@Sam';
 const VAULT_STORAGE_KEY = 'server_monitor_vault_session';
 
 interface SecurityVaultContextType {
   isUnlocked: boolean;
-  unlock: (password: string) => boolean;
+  unlock: (password: string) => Promise<boolean>;
   lock: () => void;
   requestUnlock: (reason?: string, onSuccess?: () => void) => void;
   isModalOpen: boolean;
@@ -18,8 +18,7 @@ const SecurityVaultContext = createContext<SecurityVaultContextType | undefined>
 export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isUnlocked, setIsUnlocked] = useState<boolean>(() => {
     try {
-      // Se já estiver logado como administrador, libera o cofre automaticamente
-      const auth = localStorage.getItem('server_panel_auth_v1');
+      const auth = sessionStorage.getItem('server_panel_auth_v1') || localStorage.getItem('server_panel_auth_v1');
       if (auth) {
         const parsedAuth = JSON.parse(auth);
         if (parsedAuth?.authenticated && (parsedAuth?.role === 'admin' || parsedAuth?.user === 'admin')) {
@@ -30,7 +29,7 @@ export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ child
       const saved = sessionStorage.getItem(VAULT_STORAGE_KEY);
       if (saved) {
         const data = JSON.parse(saved);
-        // Expire after 30 minutes
+        // Expira após 30 minutos
         if (Date.now() - data.unlockedAt < 30 * 60 * 1000) {
           return true;
         }
@@ -45,22 +44,51 @@ export const SecurityVaultProvider: React.FC<{ children: ReactNode }> = ({ child
   const [modalReason, setModalReason] = useState<string>('Acesso a dados confidenciais');
   const [pendingCallback, setPendingCallback] = useState<(() => void) | null>(null);
 
-  const unlock = (password: string): boolean => {
-    if (password === MASTER_PASSWORD) {
-      setIsUnlocked(true);
-      try {
-        sessionStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify({ unlockedAt: Date.now() }));
-      } catch {
-        // Ignore
+  const unlock = async (password: string): Promise<boolean> => {
+    try {
+      const authHeaders = getAuthHeaders();
+      const res = await fetch('/api/vault/unlock', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          ...authHeaders
+        },
+        body: JSON.stringify({ password }),
+        signal: AbortSignal.timeout(4000)
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+          throw new Error('Muitas tentativas incorretas. Aguarde alguns minutos.');
+        }
+        if (res.status === 401) {
+          throw new Error('Sessão expirada. Faça login novamente.');
+        }
+        return false;
       }
-      setIsModalOpen(false);
-      if (pendingCallback) {
-        pendingCallback();
-        setPendingCallback(null);
+
+      const data = await res.json();
+      if (data.ok || data.success) {
+        setIsUnlocked(true);
+        try {
+          sessionStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify({ unlockedAt: Date.now() }));
+        } catch {}
+        setIsModalOpen(false);
+        if (pendingCallback) {
+          pendingCallback();
+          setPendingCallback(null);
+        }
+        return true;
       }
-      return true;
+      return false;
+    } catch (err: any) {
+      if (err.message && err.message.includes('Muitas tentativas')) {
+        throw err;
+      }
+      return false;
     }
-    return false;
   };
 
   const lock = () => {

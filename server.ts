@@ -1,5 +1,9 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import path from 'path';
+import crypto from 'crypto';
 import { 
   fetchAdGuardStatus, 
   fetchAdGuardStats, 
@@ -18,6 +22,16 @@ import { analyzeDomainWithGemini } from './server/gemini.js';
 import { fetchN8nStatus as fetchN8nFallback, setN8nConfig as setN8nConfigFallback } from './server/n8nClient.js';
 import { getSystemLogs as getSystemLogsFallback } from './server/logsMonitor.js';
 import fs from 'fs';
+
+// Validação de senhas obrigatórias no ambiente
+if (!process.env.ADMIN_PASSWORD || !process.env.USER_PASSWORD) {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('[ERRO FATAL] ADMIN_PASSWORD e USER_PASSWORD não estão definidas no ambiente (.env). O servidor não iniciará com senhas padrão.');
+    process.exit(1);
+  } else {
+    console.warn('[AVISO DE SEGURANÇA] ADMIN_PASSWORD e USER_PASSWORD não estão definidas no ambiente (.env). Defina-as no arquivo de ambiente.');
+  }
+}
 
 // Dynamic PORT from environment (Cloud Run injects PORT), fallback to 3000
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -89,22 +103,21 @@ async function startServer() {
     }
   });
 
+  function timingSafeCompare(a?: string, b?: string): boolean {
+    if (!a || !b) return false;
+    const hashA = crypto.createHash('sha256').update(a).digest();
+    const hashB = crypto.createHash('sha256').update(b).digest();
+    return crypto.timingSafeEqual(hashA, hashB);
+  }
+
   function checkAdminPass(pass?: string): boolean {
-    if (!pass) return false;
-    const allowed = [
-      process.env.ADMIN_PASSWORD || '075561@Sam',
-      '075561@Sam'
-    ];
-    return allowed.includes(pass);
+    if (!pass || !process.env.ADMIN_PASSWORD) return false;
+    return timingSafeCompare(pass, process.env.ADMIN_PASSWORD);
   }
 
   function checkUserPass(pass?: string): boolean {
-    if (!pass) return false;
-    const allowed = [
-      process.env.USER_PASSWORD || 'user',
-      'user'
-    ];
-    return allowed.includes(pass);
+    if (!pass || !process.env.USER_PASSWORD) return false;
+    return timingSafeCompare(pass, process.env.USER_PASSWORD);
   }
 
   // Rate limiting de tentativas de login por IP (5 tentativas incorretas em 5 minutos -> HTTP 429)
@@ -202,6 +215,98 @@ async function startServer() {
     });
   });
 
+  // Rate limiting de desbloqueio do cofre (5 tentativas consecutivas incorretas em 5 min -> HTTP 429)
+  const failedVaultAttempts = new Map<string, { count: number; resetAt: number }>();
+
+  // Endpoint seguro de desbloqueio do cofre (valida VAULT_PASSWORD em tempo constante no servidor)
+  app.post('/api/vault/unlock', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
+
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    const rateLimit = failedVaultAttempts.get(clientIp);
+
+    if (rateLimit && now < rateLimit.resetAt && rateLimit.count >= 5) {
+      const waitSeconds = Math.ceil((rateLimit.resetAt - now) / 1000);
+      return res.status(429).json({
+        ok: false,
+        error: `Muitas tentativas incorretas no cofre. Por segurança, aguarde ${waitSeconds}s.`
+      });
+    }
+
+    // 1. Exige que a requisição venha de um usuário autenticado no painel
+    const authHeader = req.headers['authorization'];
+    const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
+    const validApiKey = process.env.API_KEY || '';
+    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
+    const validStandardUser = process.env.USER_USERNAME || 'user';
+
+    let isAuthorized = false;
+    if (apiKeyHeader && validApiKey && apiKeyHeader === validApiKey) {
+      isAuthorized = true;
+    } else if (authHeader && authHeader.startsWith('Basic ')) {
+      try {
+        const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+        const [u, p] = decoded.split(':');
+        if ((u === validAdminUser && checkAdminPass(p)) || (u === validStandardUser && checkUserPass(p))) {
+          isAuthorized = true;
+        }
+      } catch {}
+    } else if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.slice(7);
+      if ((validApiKey && token === validApiKey) || checkAdminPass(token) || checkUserPass(token)) {
+        isAuthorized = true;
+      }
+    }
+
+    if (!isAuthorized) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Acesso negado: Autentique-se no painel antes de desbloquear o cofre.'
+      });
+    }
+
+    const vaultPassword = process.env.VAULT_PASSWORD;
+    if (!vaultPassword) {
+      return res.status(500).json({
+        ok: false,
+        error: 'Variável de ambiente VAULT_PASSWORD não configurada no servidor.'
+      });
+    }
+
+    const inputPassword = req.body?.password;
+    if (!inputPassword || typeof inputPassword !== 'string') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Senha mestre não informada.'
+      });
+    }
+
+    const isMatch = timingSafeCompare(inputPassword, vaultPassword);
+    if (isMatch) {
+      failedVaultAttempts.delete(clientIp);
+      return res.json({ ok: true, success: true });
+    }
+
+    // Falha: incrementa contador de tentativas
+    if (!rateLimit || now > rateLimit.resetAt) {
+      failedVaultAttempts.set(clientIp, { count: 1, resetAt: now + 300000 });
+    } else {
+      rateLimit.count += 1;
+    }
+
+    return res.status(403).json({
+      ok: false,
+      error: 'Senha mestre incorreta. Acesso negado.'
+    });
+  });
+
   // Função nativa para teste de Ping/Latência TCP sem dependência de comandos ou sudo
   const measureTcpPing = (host: string, port: number, timeoutMs = 2500): Promise<number | null> => {
     return new Promise((resolve) => {
@@ -296,6 +401,7 @@ async function startServer() {
     const internalPaths = [
       '/api/health',
       '/api/auth/verify',
+      '/api/vault/unlock',
       '/api/adguard/config',
       '/api/adguard/status',
       '/api/adguard/stats',
@@ -328,7 +434,6 @@ async function startServer() {
     const clientApiKey = req.headers['x-api-key'] as string | undefined;
 
     const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
-    const validAdminPass = process.env.ADMIN_PASSWORD || '075561@Sam';
     const validStandardUser = process.env.USER_USERNAME || 'user';
     const validApiKey = process.env.API_KEY || '';
 
@@ -371,8 +476,9 @@ async function startServer() {
       });
     }
 
-    // Admin obrigatório para /api/logs e /api/n8n/config no Node (retorna 403)
-    const requiresAdmin = subPath === 'logs' || subPath.startsWith('logs') || subPath === 'n8n/config' || subPath.startsWith('n8n/config');
+    // Admin obrigatório para toda a lista de prefixos admin (logs, n8n, vault e rotas sensíveis futuras)
+    const ADMIN_PREFIXES = ['logs', 'n8n', 'vault'];
+    const requiresAdmin = ADMIN_PREFIXES.some(prefix => subPath === prefix || subPath.startsWith(prefix + '/'));
     if (requiresAdmin && clientRole !== 'admin') {
       return res.status(403).json({
         detail: 'Acesso restrito: Apenas a conta Administrador possui permissão para acessar este recurso.'
@@ -380,18 +486,18 @@ async function startServer() {
     }
 
     // 2. Constrói os cabeçalhos para o backend FastAPI no Ubuntu Server
-    // Usamos a credencial mestre do daemon local para garantir que tanto o usuário
-    // 'admin' quanto 'user' recebam a telemetria normalmente sem erro 401 do daemon
+    // Repassa o papel real do cliente via X-Client-Role (aceito pelo FastAPI apenas em loopback 127.0.0.1)
     const forwardHeaders: Record<string, string> = {
       'Accept': 'application/json',
+      'X-Client-Role': clientRole,
       ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
     };
 
-    if (validApiKey) {
+    if (clientAuth) {
+      forwardHeaders['Authorization'] = clientAuth;
+    } else if (validApiKey) {
       forwardHeaders['X-API-Key'] = validApiKey;
     }
-    const adminBasic = `Basic ${Buffer.from(`${validAdminUser}:${validAdminPass}`).toString('base64')}`;
-    forwardHeaders['Authorization'] = adminBasic;
 
     // Lista de candidatos de backend FastAPI
     const candidateBases: string[] = [];
@@ -490,6 +596,11 @@ async function startServer() {
       `http://192.168.100.23:8081/control/${cleanSub}${queryStr}`
     ];
 
+    const adgCfg = getAdGuardConfig();
+    const adgUser = process.env.ADGUARD_USERNAME || adgCfg.username || '';
+    const adgPass = process.env.ADGUARD_PASSWORD || adgCfg.password || '';
+    const adgAuthHeader = (adgUser && adgPass) ? `Basic ${Buffer.from(`${adgUser}:${adgPass}`).toString('base64')}` : undefined;
+
     let responded = false;
     for (const targetUrl of candidateUrls) {
       try {
@@ -497,7 +608,7 @@ async function startServer() {
           method: req.method,
           headers: {
             'Accept': 'application/json',
-            'Authorization': 'Basic c2FtdWVsOjEyMzQ1Njc4',
+            ...(adgAuthHeader ? { 'Authorization': adgAuthHeader } : {}),
             ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
           },
           body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,

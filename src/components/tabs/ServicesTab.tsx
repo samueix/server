@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { 
   ShieldCheck, 
   RefreshCw, 
@@ -8,12 +8,14 @@ import {
   Check
 } from 'lucide-react';
 import { ServiceItem } from '../../types';
+import { getServices } from '../../services/api';
 
 interface ServicesTabProps {
   services: ServiceItem[];
   isLoading: boolean;
   onRefresh?: () => void;
   isRefreshing?: boolean;
+  isStaleData?: boolean;
 }
 
 type FilterType = 'all' | 'active' | 'stopped' | 'enabled' | 'disabled';
@@ -118,14 +120,84 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
 ];
 
 export const ServicesTab: React.FC<ServicesTabProps> = ({
-  services = [],
+  services: initialServices = [],
   isLoading,
   onRefresh,
-  isRefreshing = false
+  isRefreshing = false,
+  isStaleData: initialStale = false
 }) => {
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [localServices, setLocalServices] = useState<ServiceItem[]>(initialServices);
+  const [isStale, setIsStale] = useState<boolean>(initialStale);
+  const [secondsAgo, setSecondsAgo] = useState<number>(0);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const fetchServices = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    try {
+      const data = await getServices(abortControllerRef.current.signal);
+      setLocalServices(data);
+      setIsStale(false);
+      setSecondsAgo(0);
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        setIsStale(true);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialServices && initialServices.length > 0) {
+      setLocalServices(initialServices);
+      setSecondsAgo(0);
+    }
+  }, [initialServices]);
+
+  useEffect(() => {
+    setIsStale(initialStale);
+  }, [initialStale]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsAgo(s => s + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchServices();
+      }
+    }, 6000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        fetchServices();
+      } else if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [fetchServices]);
+
+  const services = localServices.length > 0 ? localServices : initialServices;
 
   const handleCopyCommand = (serviceName: string, action: 'status' | 'restart') => {
     const clean = serviceName.endsWith('.service') ? serviceName : `${serviceName}.service`;
@@ -365,17 +437,29 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
             </button>
           </div>
 
-          {onRefresh && (
-            <button
-              onClick={onRefresh}
-              disabled={isRefreshing}
-              className="px-3.5 py-2 rounded-lg bg-[#FF5A36] text-white font-bold text-xs font-mono flex items-center gap-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#e04826] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition disabled:opacity-50"
-              title="Atualizar status dos serviços"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-              Atualizar
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {isStale && (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FEF0C7] text-[#B54708] border border-[#F79009]">
+                Dado em cache / desatualizado
+              </span>
+            )}
+            <span className="text-[#FF5A36] font-bold font-mono text-[11px] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E]/20" aria-live="polite">
+              Atualizado há {secondsAgo}s
+            </span>
+          </div>
+
+          <button
+            onClick={() => {
+              if (onRefresh) onRefresh();
+              fetchServices();
+            }}
+            disabled={isRefreshing}
+            className="px-3.5 py-2 rounded-lg bg-[#FF5A36] text-white font-bold text-xs font-mono flex items-center gap-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#e04826] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition disabled:opacity-50"
+            title="Atualizar status dos serviços"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            Atualizar
+          </button>
         </div>
       </div>
 

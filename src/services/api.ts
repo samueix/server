@@ -631,10 +631,11 @@ export async function getNetwork(signal?: AbortSignal): Promise<NetworkTelemetry
 
 /**
  * GET /api/processes
- * Lista dos processos em execução no servidor
+ * Lista dos processos em execução no servidor (suporta ordenação por cpu, ram, memory, name via sort_by)
  */
-export async function getProcesses(signal?: AbortSignal): Promise<ProcessItem[]> {
-  const raw = await apiFetch<any>('/api/processes', signal);
+export async function getProcesses(signal?: AbortSignal, sortBy: string = 'cpu', limit: number = 50): Promise<ProcessItem[]> {
+  const query = `?sort_by=${encodeURIComponent(sortBy)}&limit=${limit}`;
+  const raw = await apiFetch<any>(`/api/processes${query}`, signal);
   let list: any[] = [];
 
   if (Array.isArray(raw)) {

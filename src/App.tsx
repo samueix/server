@@ -282,8 +282,14 @@ export default function App() {
       const updated = [...prev, point];
       const trimmed = updated.length > 120 ? updated.slice(updated.length - 120) : updated;
       try {
-        sessionStorage.setItem('server_panel_history_v1', JSON.stringify(trimmed.slice(-60)));
-      } catch {}
+        sessionStorage.setItem('server_panel_history_v1', JSON.stringify(trimmed));
+      } catch {
+        try {
+          sessionStorage.setItem('server_panel_history_v1', JSON.stringify(trimmed.slice(-60)));
+        } catch {
+          // Quota de armazenamento do navegador esgotada
+        }
+      }
       return trimmed;
     });
   }, []);
@@ -611,6 +617,7 @@ export default function App() {
                     network={networkData}
                     history={history}
                     isConnected={connectionStatus === 'connected'}
+                    isStaleData={isStaleData}
                   />
                 </TabErrorBoundary>
               </Suspense>
@@ -640,6 +647,7 @@ export default function App() {
                     isLoading={connectionStatus === 'connecting'}
                     onRefresh={handleManualRefresh}
                     isRefreshing={isRefreshing}
+                    isStaleData={isStaleData}
                   />
                 </TabErrorBoundary>
               </Suspense>
@@ -653,6 +661,7 @@ export default function App() {
                     isLoading={connectionStatus === 'connecting'}
                     onRefresh={handleManualRefresh}
                     isRefreshing={isRefreshing}
+                    isStaleData={isStaleData}
                   />
                 </TabErrorBoundary>
               </Suspense>
@@ -665,6 +674,7 @@ export default function App() {
                     network={networkData}
                     history={history}
                     isLoading={connectionStatus === 'connecting'}
+                    isStaleData={isStaleData}
                   />
                 </TabErrorBoundary>
               </Suspense>

@@ -10,7 +10,7 @@ export interface AdGuardConfig {
 let currentConfig: AdGuardConfig = {
   url: process.env.ADGUARD_URL || 'http://192.168.100.23:8081',
   username: process.env.ADGUARD_USERNAME || 'samuel',
-  password: process.env.ADGUARD_PASSWORD || '12345678'
+  password: process.env.ADGUARD_PASSWORD || ''
 };
 
 // Snapshot real capturado do AdGuard Home de Samuel (http://192.168.100.23:8081/control/stats)
@@ -239,10 +239,12 @@ async function makeAdGuardRequest(endpoint: string): Promise<{ ok: boolean; stat
     'User-Agent': 'AdGuard-AI-NOC/1.0'
   };
 
-  const username = currentConfig.username || 'samuel';
-  const password = currentConfig.password || '12345678';
-  const creds = Buffer.from(`${username}:${password}`).toString('base64');
-  headers['Authorization'] = `Basic ${creds}`;
+  const username = currentConfig.username || process.env.ADGUARD_USERNAME || 'samuel';
+  const password = currentConfig.password || process.env.ADGUARD_PASSWORD || '';
+  if (username && password) {
+    const creds = Buffer.from(`${username}:${password}`).toString('base64');
+    headers['Authorization'] = `Basic ${creds}`;
+  }
 
   for (const targetUrl of urlsToTry) {
     const controller = new AbortController();
