@@ -120,6 +120,26 @@ async function startServer() {
     return timingSafeCompare(pass, process.env.USER_PASSWORD);
   }
 
+  function verifyApiKey(key?: string): boolean {
+    if (!key || !process.env.API_KEY) return false;
+    return timingSafeCompare(key, process.env.API_KEY);
+  }
+
+  function verifyUserPass(user?: string, pass?: string): { authenticated: boolean; role?: 'admin' | 'user'; username?: string } {
+    if (!user || !pass) return { authenticated: false };
+    const validAdminUser = (process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
+    const validStandardUser = (process.env.USER_USERNAME || 'user').trim().toLowerCase();
+    const uClean = user.trim().toLowerCase();
+
+    if (uClean === validAdminUser && checkAdminPass(pass)) {
+      return { authenticated: true, role: 'admin', username: process.env.ADMIN_USERNAME || 'admin' };
+    }
+    if (uClean === validStandardUser && checkUserPass(pass)) {
+      return { authenticated: true, role: 'user', username: process.env.USER_USERNAME || 'user' };
+    }
+    return { authenticated: false };
+  }
+
   // Função centralizada para CORS configurável via ALLOWED_ORIGIN (padrão: mesma origem do painel, sem cabeçalho CORS)
   function applyCors(res: express.Response) {
     const allowedOrigin = process.env.ALLOWED_ORIGIN?.trim();
@@ -156,20 +176,16 @@ async function startServer() {
     const authHeader = req.headers['authorization'];
     const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
 
-    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
-    const validStandardUser = process.env.USER_USERNAME || 'user';
-    const validApiKey = process.env.API_KEY || '';
-
     let authenticatedUser: string | null = null;
     let userRole = 'user';
 
     // 1. Check API Key Header
-    if (apiKeyHeader && validApiKey && apiKeyHeader === validApiKey) {
+    if (apiKeyHeader && verifyApiKey(apiKeyHeader)) {
       authenticatedUser = 'api-client';
       userRole = 'admin';
     }
 
-    // 2. Check Basic Auth (admin ou user)
+    // 2. Check Basic Auth (exige usuário E senha)
     if (!authenticatedUser && authHeader && authHeader.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
@@ -177,35 +193,20 @@ async function startServer() {
         const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
         const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
 
-        const uClean = u.trim().toLowerCase();
-        const adminClean = validAdminUser.trim().toLowerCase();
-        const stdClean = validStandardUser.trim().toLowerCase();
-
-        if ((uClean === adminClean || uClean === 'admin') && checkAdminPass(p)) {
-          authenticatedUser = validAdminUser;
-          userRole = 'admin';
-        } else if (checkAdminPass(p) && !checkUserPass(p)) {
-          authenticatedUser = validAdminUser;
-          userRole = 'admin';
-        } else if ((uClean === stdClean || uClean === 'user') && checkUserPass(p)) {
-          authenticatedUser = validStandardUser;
-          userRole = 'user';
+        const result = verifyUserPass(u, p);
+        if (result.authenticated && result.role && result.username) {
+          authenticatedUser = result.username;
+          userRole = result.role;
         }
       } catch {}
     }
 
-    // 3. Check Bearer Token
+    // 3. Check Bearer Token (chave de API)
     if (!authenticatedUser && authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.slice(7);
-      if (validApiKey && token === validApiKey) {
+      if (verifyApiKey(token)) {
         authenticatedUser = 'bearer-admin';
         userRole = 'admin';
-      } else if (checkAdminPass(token)) {
-        authenticatedUser = validAdminUser;
-        userRole = 'admin';
-      } else if (checkUserPass(token)) {
-        authenticatedUser = validStandardUser;
-        userRole = 'user';
       }
     }
 
@@ -261,36 +262,29 @@ async function startServer() {
     // 1. Exige que a requisição venha de um usuário autenticado no painel
     const authHeader = req.headers['authorization'];
     const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
-    const validApiKey = process.env.API_KEY || '';
-    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
-    const validStandardUser = process.env.USER_USERNAME || 'user';
 
-    let isAuthorized = false;
-    if (apiKeyHeader && validApiKey && apiKeyHeader === validApiKey) {
-      isAuthorized = true;
+    let callerRole: 'admin' | 'user' | null = null;
+    if (apiKeyHeader && verifyApiKey(apiKeyHeader)) {
+      callerRole = 'admin';
     } else if (authHeader && authHeader.startsWith('Basic ')) {
       try {
         const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
         const colonIdx = decoded.indexOf(':');
         const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
         const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
-        const uClean = u.trim().toLowerCase();
-        if (
-          ((uClean === validAdminUser.trim().toLowerCase() || uClean === 'admin') && checkAdminPass(p)) ||
-          checkAdminPass(p) ||
-          ((uClean === validStandardUser.trim().toLowerCase() || uClean === 'user') && checkUserPass(p))
-        ) {
-          isAuthorized = true;
+        const result = verifyUserPass(u, p);
+        if (result.authenticated && result.role) {
+          callerRole = result.role;
         }
       } catch {}
     } else if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.slice(7);
-      if ((validApiKey && token === validApiKey) || checkAdminPass(token) || checkUserPass(token)) {
-        isAuthorized = true;
+      if (verifyApiKey(token)) {
+        callerRole = 'admin';
       }
     }
 
-    if (!isAuthorized) {
+    if (!callerRole) {
       return res.status(401).json({
         ok: false,
         error: 'Acesso negado: Autentique-se no painel antes de desbloquear o cofre.'
@@ -316,12 +310,22 @@ async function startServer() {
     const isMatch = timingSafeCompare(inputPassword, vaultPassword);
     if (isMatch) {
       failedVaultAttempts.delete(clientIp);
-      return res.json({
-        ok: true,
-        success: true,
-        sshUser: process.env.VAULT_SSH_USER || null,
-        sshPassword: process.env.VAULT_SSH_PASSWORD || null
-      });
+      if (callerRole === 'admin') {
+        return res.json({
+          ok: true,
+          success: true,
+          sshUser: process.env.VAULT_SSH_USER || null,
+          sshPassword: process.env.VAULT_SSH_PASSWORD || null
+        });
+      } else {
+        // Operador: desbloqueia o cofre mas sem credenciais de infraestrutura
+        return res.json({
+          ok: true,
+          success: true,
+          sshUser: null,
+          sshPassword: null
+        });
+      }
     }
 
     // Falha: incrementa contador de tentativas
@@ -463,14 +467,10 @@ async function startServer() {
     const clientAuth = req.headers['authorization'];
     const clientApiKey = req.headers['x-api-key'] as string | undefined;
 
-    const validAdminUser = process.env.ADMIN_USERNAME || 'admin';
-    const validStandardUser = process.env.USER_USERNAME || 'user';
-    const validApiKey = process.env.API_KEY || '';
-
     let isAuthorizedClient = false;
     let clientRole = 'user';
 
-    if (clientApiKey && validApiKey && clientApiKey === validApiKey) {
+    if (clientApiKey && verifyApiKey(clientApiKey)) {
       isAuthorizedClient = true;
       clientRole = 'admin';
     } else if (clientAuth && clientAuth.startsWith('Basic ')) {
@@ -480,32 +480,17 @@ async function startServer() {
         const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
         const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
 
-        const uClean = u.trim().toLowerCase();
-        const adminClean = validAdminUser.trim().toLowerCase();
-        const stdClean = validStandardUser.trim().toLowerCase();
-
-        if ((uClean === adminClean || uClean === 'admin') && checkAdminPass(p)) {
+        const result = verifyUserPass(u, p);
+        if (result.authenticated && result.role) {
           isAuthorizedClient = true;
-          clientRole = 'admin';
-        } else if (checkAdminPass(p) && !checkUserPass(p)) {
-          isAuthorizedClient = true;
-          clientRole = 'admin';
-        } else if ((uClean === stdClean || uClean === 'user') && checkUserPass(p)) {
-          isAuthorizedClient = true;
-          clientRole = 'user';
+          clientRole = result.role;
         }
       } catch {}
     } else if (clientAuth && clientAuth.startsWith('Bearer ')) {
       const token = clientAuth.slice(7);
-      if (validApiKey && token === validApiKey) {
+      if (verifyApiKey(token)) {
         isAuthorizedClient = true;
         clientRole = 'admin';
-      } else if (checkAdminPass(token)) {
-        isAuthorizedClient = true;
-        clientRole = 'admin';
-      } else if (checkUserPass(token)) {
-        isAuthorizedClient = true;
-        clientRole = 'user';
       }
     }
 
@@ -533,6 +518,7 @@ async function startServer() {
       ...(req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] as string } : {})
     };
 
+    const validApiKey = process.env.API_KEY || '';
     if (clientAuth) {
       forwardHeaders['Authorization'] = clientAuth;
     } else if (validApiKey) {

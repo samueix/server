@@ -36,17 +36,13 @@ def check_user_password(password: Optional[str]) -> bool:
     return secrets.compare_digest(password, env_pass)
 
 def verify_token_string(token: Optional[str]) -> Optional[str]:
-    """Retorna a role ('admin' ou 'user') se o token for válido, ou None se inválido."""
+    """Retorna a role ('admin') se o token coincidir com a API_KEY em tempo constante."""
     if not token:
         return None
     creds = get_env_credentials()
     api_key = creds["api_key"]
     if api_key and secrets.compare_digest(token, api_key):
         return "admin"
-    if check_admin_password(token):
-        return "admin"
-    if check_user_password(token):
-        return "user"
     return None
 
 def verify_credentials(
@@ -59,6 +55,7 @@ def verify_credentials(
     creds = get_env_credentials()
     admin_user, admin_pass = creds["admin"]
     user_name, user_pass = creds["user"]
+    api_key = creds["api_key"]
 
     # Se a requisição vem do proxy local (127.0.0.1 / ::1 / localhost)
     client_ip = request.client.host if request.client else ""
@@ -72,39 +69,28 @@ def verify_credentials(
 
     # 2. Check custom Header X-API-Key
     x_api_key = request.headers.get("X-API-Key")
-    if x_api_key:
-        role = verify_token_string(x_api_key)
-        if role:
-            return role
+    if x_api_key and api_key and secrets.compare_digest(x_api_key, api_key):
+        return "admin"
 
     # 3. Check Bearer token
-    if bearer and bearer.credentials:
-        role = verify_token_string(bearer.credentials)
-        if role:
-            return role
+    if bearer and bearer.credentials and api_key and secrets.compare_digest(bearer.credentials, api_key):
+        return "admin"
 
-    # 4. Check Basic Auth (username / password)
+    # 4. Check Basic Auth (exige usuário E senha)
     if credentials:
         u_clean = credentials.username.strip().lower()
         admin_clean = admin_user.strip().lower()
         user_clean = user_name.strip().lower()
 
-        if admin_pass and (u_clean == admin_clean or u_clean == "admin") and check_admin_password(credentials.password):
+        if admin_pass and secrets.compare_digest(u_clean, admin_clean) and check_admin_password(credentials.password):
             return "admin"
-        if admin_pass and check_admin_password(credentials.password) and not (user_pass and check_user_password(credentials.password)):
-            return "admin"
-        if user_pass and (u_clean == user_clean or u_clean == "user") and check_user_password(credentials.password):
+        if user_pass and secrets.compare_digest(u_clean, user_clean) and check_user_password(credentials.password):
             return "user"
 
-    # 5. Check Query Parameter (para WebSocket ou polling direto)
-    if token_query:
-        role = verify_token_string(token_query)
-        if role:
-            return role
-    if api_key_query:
-        role = verify_token_string(api_key_query)
-        if role:
-            return role
+    # 5. Check Query Parameter (para WebSocket autenticado por chave)
+    token_val = token_query or api_key_query
+    if token_val and api_key and secrets.compare_digest(token_val, api_key):
+        return "admin"
 
     # Se nenhuma credencial válida foi enviada:
     raise HTTPException(

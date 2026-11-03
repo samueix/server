@@ -376,11 +376,8 @@ export function getNetworkInfo() {
   return {
     interfaces,
     primary_interface: primaryInterface,
-    primaryInterface,
     primary_ip: primaryIp,
-    primaryIp,
     primary_ipv6: primaryIpv6,
-    primaryIpv6,
     download_bytes_sec: 24500,
     upload_bytes_sec: 8400
   };

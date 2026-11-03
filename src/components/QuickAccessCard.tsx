@@ -18,6 +18,7 @@ import {
 import { SERVER_IPV6 } from '../config';
 import { AdGuardStatsCard } from './AdGuardStatsCard';
 import { useSecurityVault } from '../context/SecurityVaultContext';
+import { getStoredAuth } from '../services/authService';
 import { getAdGuardStats, getAdGuardStatus, AdGuardStats, AdGuardStatus } from '../services/adguardService';
 
 interface QuickAccessCardProps {
@@ -77,10 +78,15 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
   };
 
   const adguardUrl = `http://${serverIp}:8081/#`;
-  const effectiveUser = isUnlocked && sshUser ? sshUser : null;
-  const displayUser = isUnlocked ? (sshUser || 'não configurado') : '••••••••';
+  const authSession = getStoredAuth();
+  const isAdmin = authSession?.role === 'admin';
+
+  const effectiveUser = isUnlocked && isAdmin && sshUser ? sshUser : null;
+  const displayUser = isUnlocked 
+    ? (isAdmin ? (sshUser || 'não configurado') : 'Disponível apenas para administradores') 
+    : '••••••••';
   const displayPassword = isUnlocked 
-    ? (showSshPass ? (sshPassword || 'não configurado') : '••••••••••••')
+    ? (isAdmin ? (showSshPass ? (sshPassword || 'não configurado') : '••••••••••••') : 'Disponível apenas para administradores')
     : '••••••••••••';
 
   const userForCmd = effectiveUser || 'user';
@@ -359,7 +365,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-between gap-2 shadow-[2px_2px_0px_#1A1A2E]">
                   <div className="flex items-center gap-2 truncate">
                     <span className="text-[#4A4A68] font-sans font-semibold">Login:</span>
-                    <span className={`font-bold truncate ${isUnlocked && !sshUser ? 'text-[#4A4A68] italic font-normal text-xs' : 'text-[#1A1A2E]'}`}>
+                    <span className={`font-bold truncate ${isUnlocked && (!isAdmin || !sshUser) ? 'text-[#4A4A68] italic font-normal text-xs' : 'text-[#1A1A2E]'}`}>
                       {displayUser}
                     </span>
                   </div>
@@ -367,13 +373,13 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                     onClick={() => {
                       if (!isUnlocked) {
                         requestUnlock('Acesso às credenciais SSH');
-                      } else if (sshUser) {
+                      } else if (isAdmin && sshUser) {
                         copyToClipboard(sshUser, 'ssh-user');
                       }
                     }}
                     className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition shrink-0"
-                    title={!isUnlocked ? 'Desbloquear cofre' : (sshUser ? 'Copiar login' : 'Não configurado')}
-                    disabled={isUnlocked && !sshUser}
+                    title={!isUnlocked ? 'Desbloquear cofre' : (isAdmin ? (sshUser ? 'Copiar login' : 'Não configurado') : 'Disponível apenas para administradores')}
+                    disabled={isUnlocked && (!isAdmin || !sshUser)}
                   >
                     {!isUnlocked ? (
                       <Lock className="w-3.5 h-3.5 text-[#F79009]" />
@@ -389,7 +395,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                 <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-between gap-2 shadow-[2px_2px_0px_#1A1A2E]">
                   <div className="flex items-center gap-2 overflow-hidden">
                     <span className="text-[#4A4A68] font-sans font-semibold">Senha:</span>
-                    <span className={`font-mono text-xs truncate ${isUnlocked && showSshPass && !sshPassword ? 'text-[#4A4A68] italic font-sans font-normal' : 'text-[#1A1A2E] font-bold'}`}>
+                    <span className={`font-mono text-xs truncate ${isUnlocked && (!isAdmin || (showSshPass && !sshPassword)) ? 'text-[#4A4A68] italic font-sans font-normal' : 'text-[#1A1A2E] font-bold'}`}>
                       {displayPassword}
                     </span>
                   </div>
@@ -398,12 +404,13 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                       onClick={() => {
                         if (!isUnlocked) {
                           requestUnlock('Visualizar senha SSH do servidor', () => setShowSshPass(true));
-                        } else {
+                        } else if (isAdmin) {
                           setShowSshPass(!showSshPass);
                         }
                       }}
                       className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (showSshPass ? 'Ocultar senha' : 'Ver senha')}
+                      title={!isUnlocked ? 'Desbloquear com senha mestre' : (isAdmin ? (showSshPass ? 'Ocultar senha' : 'Ver senha') : 'Disponível apenas para administradores')}
+                      disabled={isUnlocked && !isAdmin}
                     >
                       {!isUnlocked ? (
                         <Lock className="w-3.5 h-3.5 text-[#F79009]" />
@@ -417,13 +424,13 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                       onClick={() => {
                         if (!isUnlocked) {
                           requestUnlock('Copiar senha SSH');
-                        } else if (sshPassword) {
+                        } else if (isAdmin && sshPassword) {
                           copyToClipboard(sshPassword, 'ssh-pass');
                         }
                       }}
                       className="p-1 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] hover:bg-[#FFC857] transition"
-                      title={!isUnlocked ? 'Desbloquear cofre' : (sshPassword ? 'Copiar senha' : 'Não configurado')}
-                      disabled={isUnlocked && !sshPassword}
+                      title={!isUnlocked ? 'Desbloquear cofre' : (isAdmin ? (sshPassword ? 'Copiar senha' : 'Não configurado') : 'Disponível apenas para administradores')}
+                      disabled={isUnlocked && (!isAdmin || !sshPassword)}
                     >
                       {copiedKey === 'ssh-pass' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>

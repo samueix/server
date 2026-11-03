@@ -108,13 +108,14 @@ async def health_check():
 # -------------------------------------------------------------
 
 @app.get("/api/auth/verify", tags=["Auth"])
-async def verify_auth(user: str = Depends(verify_credentials)):
+async def verify_auth(role: str = Depends(verify_credentials)):
     """Valida as credenciais enviadas pelo frontend e retorna informações básicas."""
     admin_env_user = os.getenv("ADMIN_USERNAME", "admin")
-    role = "admin" if user in ("admin", "api-client", "bearer-admin", "bearer-user", admin_env_user) else "user"
+    user_env_user = os.getenv("USER_USERNAME", "user")
+    username = admin_env_user if role == "admin" else user_env_user
     return {
         "authenticated": True,
-        "user": user,
+        "user": username,
         "role": role,
         "server": monitor.get_os_info()
     }

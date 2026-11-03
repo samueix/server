@@ -128,28 +128,6 @@ def get_temperature_info():
         "sensores": sensores
     }
 
-def get_current_realtime_ipv6() -> Optional[str]:
-    """Obtém o IPv6 público/global atual em tempo real no Linux via iproute2."""
-    try:
-        import subprocess
-        res = subprocess.run(
-            ["ip", "-6", "-brief", "addr", "show", "scope", "global"],
-            capture_output=True,
-            text=True,
-            timeout=1.5
-        )
-        if res.returncode == 0 and res.stdout:
-            for line in res.stdout.strip().splitlines():
-                parts = line.split()
-                if len(parts) >= 3 and parts[1] == "UP":
-                    for ip_cidr in parts[2:]:
-                        ip_clean = ip_cidr.split("/")[0].strip()
-                        if ip_clean and not ip_clean.startswith("fe80:") and not ip_clean.startswith("fd00:"):
-                            return ip_clean
-    except Exception:
-        pass
-    return None
-
 def get_network_info():
     addrs = psutil.net_if_addrs()
     stats = psutil.net_if_stats()
@@ -194,15 +172,9 @@ def get_network_info():
             "bytes_recebidos": nic_io.bytes_recv if nic_io else 0
         })
 
-    realtime_ipv6 = get_current_realtime_ipv6()
-    if realtime_ipv6:
-        primary_ipv6 = realtime_ipv6
-
     return {
         "primaryIp": primary_ip or "127.0.0.1",
-        "primary_ip": primary_ip or "127.0.0.1",
         "primaryIpv6": primary_ipv6,
-        "primary_ipv6": primary_ipv6,
         "interfaces": interfaces
     }
 
