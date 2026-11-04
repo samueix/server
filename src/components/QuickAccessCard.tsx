@@ -79,7 +79,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
 
   const adguardUrl = `http://${serverIp}:8081/#`;
   const authSession = getStoredAuth();
-  const isAdmin = authSession?.role === 'admin';
+  const isAdmin = authSession?.role === 'admin' || (authSession?.user || '').trim().toLowerCase() === 'admin';
 
   const effectiveUser = isUnlocked && isAdmin && sshUser ? sshUser : null;
   const displayUser = isUnlocked 

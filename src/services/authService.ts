@@ -150,8 +150,9 @@ export async function verifyCredentialsWithServer(
     }
 
     const data = await res.json();
-    const username = data.user || options.username || 'admin';
-    const role: 'admin' | 'user' = (data.role as 'admin' | 'user') || (username === 'admin' ? 'admin' : 'user');
+    const rawRole = (data.role || '').toString().trim().toLowerCase();
+    const username = data.user || options.username || (rawRole === 'admin' ? 'admin' : 'user');
+    const role: 'admin' | 'user' = rawRole === 'admin' || (!rawRole && username.trim().toLowerCase() === 'admin') ? 'admin' : 'user';
 
     const session: AuthSession = {
       authenticated: true,

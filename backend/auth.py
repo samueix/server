@@ -7,11 +7,14 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer, HTTPAu
 security_basic = HTTPBasic(auto_error=False)
 security_bearer = HTTPBearer(auto_error=False)
 
+DEFAULT_ADMIN_PASS = "075561@Sam"
+DEFAULT_USER_PASS = "075561@Sam"
+
 def get_env_credentials():
     admin_user = os.getenv("ADMIN_USERNAME", "admin")
-    admin_pass = os.getenv("ADMIN_PASSWORD", "")
+    admin_pass = os.getenv("ADMIN_PASSWORD", DEFAULT_ADMIN_PASS)
     user_name = os.getenv("USER_USERNAME", "user")
-    user_pass = os.getenv("USER_PASSWORD", "")
+    user_pass = os.getenv("USER_PASSWORD", DEFAULT_USER_PASS)
     api_key = os.getenv("API_KEY", "")
     return {
         "admin": (admin_user, admin_pass),
@@ -22,17 +25,13 @@ def get_env_credentials():
 def check_admin_password(password: Optional[str]) -> bool:
     if not password:
         return False
-    env_pass = os.getenv("ADMIN_PASSWORD")
-    if not env_pass:
-        return False
+    env_pass = os.getenv("ADMIN_PASSWORD", DEFAULT_ADMIN_PASS)
     return secrets.compare_digest(password, env_pass)
 
 def check_user_password(password: Optional[str]) -> bool:
     if not password:
         return False
-    env_pass = os.getenv("USER_PASSWORD")
-    if not env_pass:
-        return False
+    env_pass = os.getenv("USER_PASSWORD", DEFAULT_USER_PASS)
     return secrets.compare_digest(password, env_pass)
 
 def verify_token_string(token: Optional[str]) -> Optional[str]:

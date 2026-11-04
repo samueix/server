@@ -67,7 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onLogout
 }) => {
   const isOnline = connectionStatus === 'connected';
-  const isAdmin = currentUserRole === 'admin';
+  const isAdmin = currentUserRole === 'admin' || (currentUser || '').trim().toLowerCase() === 'admin';
 
   const visibleNavItems = isAdmin 
     ? NAV_ITEMS 

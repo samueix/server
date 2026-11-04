@@ -23,7 +23,7 @@ const N8nTab = React.lazy(() => import('./components/tabs/N8nTab').then(m => ({ 
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
-import { getStoredAuth, clearAuthSession, AuthSession } from './services/authService';
+import { getStoredAuth, saveAuthSession, clearAuthSession, AuthSession } from './services/authService';
 
 import { 
   NavigationTab, 
@@ -401,9 +401,13 @@ export default function App() {
   }, [recordHistory]);
 
   // Login handler
-  const handleLoginSuccess = (user: string) => {
+  const handleLoginSuccess = (user: string, role?: 'admin' | 'user') => {
     const session = getStoredAuth();
-    setAuthSession(session);
+    if (session && role) {
+      session.role = role;
+      saveAuthSession(session);
+    }
+    setAuthSession(session || getStoredAuth());
     setLogoutNotice(null);
     setIsInitialLoad(true);
     setTimeout(() => {
@@ -501,7 +505,7 @@ export default function App() {
     ? `${statusData.uptime.dias}d ${statusData.uptime.horas}h` 
     : '';
 
-  const currentUserRole: 'admin' | 'user' = authSession?.role || (authSession?.user === 'admin' ? 'admin' : 'user');
+  const currentUserRole: 'admin' | 'user' = authSession?.role === 'admin' || (authSession?.user || '').trim().toLowerCase() === 'admin' ? 'admin' : (authSession?.role || 'user');
 
   // Se não houver sessão ativa autenticada, exibe a tela de login
   if (!authSession || !authSession.authenticated) {

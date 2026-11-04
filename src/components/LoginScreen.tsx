@@ -17,7 +17,7 @@ import { verifyCredentialsWithServer } from '../services/authService';
 import { SERVER_IPV4, SERVER_IPV6 } from '../config';
 
 interface LoginScreenProps {
-  onLoginSuccess: (user: string) => void;
+  onLoginSuccess: (user: string, role?: 'admin' | 'user') => void;
   logoutNotice?: string | null;
 }
 
@@ -77,7 +77,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       );
 
       if (result.success && result.user) {
-        onLoginSuccess(result.user);
+        onLoginSuccess(result.user, result.role);
       } else {
         setErrorMsg(result.error || 'Credenciais inválidas. Verifique os dados digitados.');
       }

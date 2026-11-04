@@ -106,7 +106,7 @@ export function getSystemdServiceStatus(serviceName: string): Partial<MonitoredS
   try {
     const stdout = execSync(
       `systemctl show ${unit} --property=ActiveState,SubState,LoadState,UnitFileState,MainPID,Description,ActiveEnterTimestamp,CPUUsageNSec,MemoryCurrent`,
-      { encoding: 'utf-8', timeout: 1500 }
+      { encoding: 'utf-8', timeout: 1500, stdio: ['pipe', 'pipe', 'ignore'] }
     );
 
     const props: Record<string, string> = {};
