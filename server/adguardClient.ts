@@ -231,7 +231,7 @@ async function makeAdGuardRequest(endpoint: string): Promise<{ ok: boolean; stat
     `http://127.0.0.1:8081${endpoint}`,
     `http://localhost:8081${endpoint}`,
     `${currentConfig.url.replace(/\/$/, '')}${endpoint}`,
-    `http://[2804:2d5c:a1:897e:5ecd:5bff:fe5a:7445]:8081${endpoint}`
+    `http://[2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445]:8081${endpoint}`
   ];
 
   const headers: Record<string, string> = {

@@ -30,7 +30,11 @@ import {
   DomainAnalysis 
 } from './server/db.js';
 import { analyzeDomainWithGemini } from './server/gemini.js';
-import { fetchN8nStatus as fetchN8nFallback, setN8nConfig as setN8nConfigFallback } from './server/n8nClient.js';
+import { 
+  fetchN8nStatus as fetchN8nFallback, 
+  setN8nConfig as setN8nConfigFallback,
+  toggleN8nWorkflow as toggleN8nWorkflowFallback 
+} from './server/n8nClient.js';
 import { getSystemLogs as getSystemLogsFallback } from './server/logsMonitor.js';
 import { 
   getFullSystemSnapshot, 
@@ -436,6 +440,44 @@ async function startServer() {
     });
   });
 
+  // Rotas nativas do n8n Workflow Automation
+  app.get('/api/n8n/status', async (req, res) => {
+    applyCors(res);
+    try {
+      const status = await fetchN8nFallback();
+      return res.json(status);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/n8n/config', async (req, res) => {
+    applyCors(res);
+    try {
+      setN8nConfigFallback(req.body?.url, req.body?.apiKey);
+      const updatedStatus = await fetchN8nFallback();
+      return res.json({
+        success: true,
+        message: 'Configuração do n8n atualizada com sucesso.',
+        status: updatedStatus
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/n8n/workflows/:id/toggle', async (req, res) => {
+    applyCors(res);
+    try {
+      const id = req.params.id;
+      const active = Boolean(req.body?.active);
+      const result = await toggleN8nWorkflowFallback(id, active);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
   let cachedWorkingBackendBase: string | null = null;
 
@@ -455,7 +497,8 @@ async function startServer() {
       '/api/adguard/analyze',
       '/api/adguard/analyze-batch',
       '/api/mac-vendor',
-      '/api/ping'
+      '/api/ping',
+      '/api/n8n'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();
@@ -549,7 +592,7 @@ async function startServer() {
       'http://localhost:8000',
       'http://[::1]:8000',
       'http://192.168.100.23:8000',
-      'http://[2804:2d5c:a1:a6aa:5ecd:5bff:fe5a:7445]:8000'
+      'http://[2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445]:8000'
     ];
     for (const dBase of defaultBases) {
       if (!candidateBases.includes(dBase)) candidateBases.push(dBase);

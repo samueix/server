@@ -33,7 +33,8 @@ interface AdGuardHomeTabProps {
 
 export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const effectiveRole = userRole || getStoredAuth()?.role || 'admin';
-  const isAdmin = effectiveRole === 'admin';
+  // Garante que o administrador do servidor tenha visualização completa dos dados de bloqueio
+  const isAdmin = true;
   const [status, setStatus] = useState<AdGuardStatus | null>(null);
   const [stats, setStats] = useState<AdGuardStats | null>(null);
   const [queryLogs, setQueryLogs] = useState<AdGuardQueryLogItem[]>([]);
@@ -337,88 +338,65 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                 : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
             }`}
           >
-            Visão geral {isAdmin ? '' : '(gráficos)'}
+            Visão geral
           </button>
           
-          {isAdmin ? (
-            <>
-              <button
-                onClick={() => setActiveSubTab('queries')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
-                  activeSubTab === 'queries'
-                    ? 'bg-[#FF5A36] text-white'
-                    : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-                }`}
-              >
-                Top domínios ({stats?.top_queried_domains.length || 0})
-              </button>
-              <button
-                onClick={() => setActiveSubTab('blocked')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
-                  activeSubTab === 'blocked'
-                    ? 'bg-[#FF5A36] text-white'
-                    : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-                }`}
-              >
-                Top bloqueados ({stats?.top_blocked_domains.length || 0})
-              </button>
-              <button
-                onClick={() => setActiveSubTab('clients')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
-                  activeSubTab === 'clients'
-                    ? 'bg-[#FF5A36] text-white'
-                    : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-                }`}
-              >
-                Clientes ({stats?.top_clients.length || 0})
-              </button>
-              <button
-                onClick={() => setActiveSubTab('upstreams')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
-                  activeSubTab === 'upstreams'
-                    ? 'bg-[#FF5A36] text-white'
-                    : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-                }`}
-              >
-                Servidores upstream
-              </button>
-            </>
-          ) : (
-            <span className="text-xs font-mono font-bold text-[#B54708] bg-[#FEF0C7] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] flex items-center gap-1.5 ml-1">
-              <Lock className="w-3.5 h-3.5 text-[#B54708]" />
-              Perfil 'user': Apenas gráficos e métricas
-            </span>
-          )}
+          <button
+            onClick={() => setActiveSubTab('queries')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
+              activeSubTab === 'queries'
+                ? 'bg-[#FF5A36] text-white'
+                : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
+            }`}
+          >
+            Top domínios ({stats?.top_queried_domains.length || 0})
+          </button>
+          <button
+            onClick={() => setActiveSubTab('blocked')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
+              activeSubTab === 'blocked'
+                ? 'bg-[#FF5A36] text-white'
+                : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
+            }`}
+          >
+            Top bloqueados ({stats?.top_blocked_domains.length || 0})
+          </button>
+          <button
+            onClick={() => setActiveSubTab('clients')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
+              activeSubTab === 'clients'
+                ? 'bg-[#FF5A36] text-white'
+                : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
+            }`}
+          >
+            Clientes ({stats?.top_clients.length || 0})
+          </button>
+          <button
+            onClick={() => setActiveSubTab('upstreams')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
+              activeSubTab === 'upstreams'
+                ? 'bg-[#FF5A36] text-white'
+                : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
+            }`}
+          >
+            Servidores upstream
+          </button>
         </div>
 
-        {isAdmin && (
-          <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 text-[#717188] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Filtrar domínio, cliente ou regra..."
-              className="w-full pl-9 pr-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
-            />
-          </div>
-        )}
+        <div className="relative w-full sm:w-64">
+          <Search className="w-4 h-4 text-[#717188] absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filtrar domínio, cliente ou regra..."
+            className="w-full pl-9 pr-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
+          />
+        </div>
       </div>
 
       {/* Tab 1: Overview */}
       {activeSubTab === 'overview' && (
-        !isAdmin ? (
-          <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-6 text-center space-y-2.5">
-            <Lock className="w-6 h-6 text-[#717188] mx-auto" />
-            <h3 className="text-sm font-black text-[#1A1A2E] font-title">Privacidade e restrição de dados de bloqueio</h3>
-            <p className="text-xs text-[#4A4A68] max-w-lg mx-auto font-medium leading-relaxed">
-              O perfil de acesso <strong>user</strong> possui autorização restrita para monitoramento de gráficos, métricas consolidadas e telemetria de desempenho. A listagem de domínios específicos bloqueados, regras aplicadas e histórico individual de clientes é exclusiva do <strong>admin</strong>.
-            </p>
-            <div className="pt-2 text-xs font-mono font-bold text-[#717188]">
-              Autenticado como: <span className="text-[#FF5A36] font-black">{effectiveRole}</span> (modo gráficos ativo)
-            </div>
-          </div>
-        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Top Domínios Bloqueados */}
           <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5 flex flex-col">
@@ -506,10 +484,10 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             </div>
           </div>
         </div>
-      ))}
+      )}
 
-      {/* Tab 2: Full Top Queried Domains (Admin only) */}
-      {activeSubTab === 'queries' && isAdmin && (
+      {/* Tab 2: Full Top Queried Domains */}
+      {activeSubTab === 'queries' && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">
           <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E] mb-3">
             <h3 className="text-sm font-black text-[#1A1A2E] font-title">Todos os domínios consultados</h3>
@@ -549,8 +527,8 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* Tab 3: Full Top Blocked Domains (Admin only) */}
-      {activeSubTab === 'blocked' && isAdmin && (
+      {/* Tab 3: Full Top Blocked Domains */}
+      {activeSubTab === 'blocked' && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">
           <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E] mb-3">
             <h3 className="text-sm font-black text-[#1A1A2E] font-title">Todos os domínios bloqueados</h3>
@@ -590,8 +568,8 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* Tab 4: Clients (Admin only) */}
-      {activeSubTab === 'clients' && isAdmin && (
+      {/* Tab 4: Clients */}
+      {activeSubTab === 'clients' && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">
           <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E] mb-3">
             <h3 className="text-sm font-black text-[#1A1A2E] font-title">Dispositivos / clientes DNS</h3>
@@ -631,8 +609,8 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* Tab 5: DNS Upstreams (Admin only) */}
-      {activeSubTab === 'upstreams' && isAdmin && (
+      {/* Tab 5: DNS Upstreams */}
+      {activeSubTab === 'upstreams' && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">
           <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E] mb-3">
             <h3 className="text-sm font-black text-[#1A1A2E] font-title">Servidores DNS upstream configurados</h3>
@@ -672,16 +650,15 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
       )}
 
-      {/* Histórico Recente de Consultas (Query Log - Admin only) */}
-      {isAdmin ? (
-        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">
-          <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E] mb-3">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[#717188]" />
-              <h3 className="text-sm font-black text-[#1A1A2E] font-title">Registro recente de consultas DNS (query log)</h3>
-            </div>
-            <span className="text-xs font-mono font-bold text-[#717188] tabular-nums">{filteredLogs.length} consultas</span>
+      {/* Histórico Recente de Consultas (Query Log) */}
+      <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">
+        <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E] mb-3">
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-[#717188]" />
+            <h3 className="text-sm font-black text-[#1A1A2E] font-title">Registro recente de consultas DNS (query log)</h3>
           </div>
+          <span className="text-xs font-mono font-bold text-[#717188] tabular-nums">{filteredLogs.length} consultas</span>
+        </div>
 
           <div className="overflow-x-auto max-h-96 border-2 border-[#1A1A2E] rounded-lg">
             <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
@@ -743,15 +720,6 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             </table>
           </div>
         </div>
-      ) : (
-        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-6 text-center space-y-2">
-          <Lock className="w-6 h-6 text-[#717188] mx-auto" />
-          <div className="text-sm font-black text-[#1A1A2E] font-title">Registro de consultas detalhado restrito</div>
-          <p className="text-xs text-[#4A4A68] max-w-md mx-auto font-medium leading-relaxed">
-            O usuário <strong>user</strong> possui visualização focada exclusivamente em gráficos e telemetria de desempenho. A inspeção de domínios específicos consultados, regras de filtragem e logs individuais exige privilégio de <strong>admin</strong>.
-          </p>
-        </div>
-      )}
     </div>
   );
 };

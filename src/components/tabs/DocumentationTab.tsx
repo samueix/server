@@ -193,7 +193,7 @@ export const DocumentationTab: React.FC = () => {
             <div>
               <strong className="text-[#1A1A2E] block mb-1">Atenção sobre o IPv6 dinâmico:</strong>
               O prefixo IPv6 é dinâmico e fornecido pela operadora (SLAAC / DHCPv6). Não fixe o IPv6 antigo 
-              (<code className="text-[#1A1A2E] font-mono font-bold">2804:2d5c:a1:897e...</code>). Para consultar o IPv6 em tempo real no servidor, execute:
+              (<code className="text-[#1A1A2E] font-mono font-bold">2804:2d5c:a2:512d...</code>). Para consultar o IPv6 em tempo real no servidor, execute:
               <code className="text-[#12B76A] bg-white px-2.5 py-1.5 rounded-md block mt-2 border-2 border-[#1A1A2E] font-mono font-bold select-all">
                 ip -6 addr show dev enp2s0 scope global
               </code>

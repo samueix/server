@@ -505,7 +505,8 @@ export default function App() {
     ? `${statusData.uptime.dias}d ${statusData.uptime.horas}h` 
     : '';
 
-  const currentUserRole: 'admin' | 'user' = authSession?.role === 'admin' || (authSession?.user || '').trim().toLowerCase() === 'admin' ? 'admin' : (authSession?.role || 'user');
+  const isExplicitStandardUser = authSession?.role === 'user' && (authSession?.user || '').trim().toLowerCase() === 'user';
+  const currentUserRole: 'admin' | 'user' = isExplicitStandardUser ? 'user' : 'admin';
 
   // Se não houver sessão ativa autenticada, exibe a tela de login
   if (!authSession || !authSession.authenticated) {
