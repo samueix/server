@@ -69,9 +69,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isOnline = connectionStatus === 'connected';
   const isAdmin = currentUserRole === 'admin' || (currentUser || '').trim().toLowerCase() === 'admin';
 
-  const visibleNavItems = isAdmin 
-    ? NAV_ITEMS 
-    : NAV_ITEMS.filter(item => !item.adminOnly);
+  // Exibe todos os módulos de gerenciamento na barra lateral
+  const visibleNavItems = NAV_ITEMS;
 
   const content = (
     <div className="flex flex-col h-full justify-between select-none text-[#1A1A2E]">

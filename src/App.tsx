@@ -544,13 +544,7 @@ export default function App() {
         <Sidebar
           currentTab={activeTab}
           onSelectTab={(tab) => {
-            // Se usuário comum tentar acessar aba restrita de admin, força fallback seguro
-            const adminTabs: NavigationTab[] = ['processes', 'services', 'network', 'logs', 'n8n', 'commands', 'system', 'documentation'];
-            if (currentUserRole === 'user' && adminTabs.includes(tab)) {
-              setActiveTab('overview');
-            } else {
-              setActiveTab(tab);
-            }
+            setActiveTab(tab);
             setMobileMenuOpen(false);
           }}
           isOpenMobile={mobileMenuOpen}
