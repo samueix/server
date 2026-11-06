@@ -15,6 +15,7 @@ if (fs.existsSync('.env')) {
 import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
+import net from 'net';
 import { 
   fetchAdGuardStatus, 
   fetchAdGuardStats, 
@@ -30,6 +31,8 @@ import {
   DomainAnalysis 
 } from './server/db.js';
 import { analyzeDomainWithGemini } from './server/gemini.js';
+import { listDirectory, readTargetFile } from './server/fileExplorer.js';
+import { runShellCommand } from './server/terminalRunner.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
   setN8nConfig as setN8nConfigFallback,
@@ -355,34 +358,54 @@ async function startServer() {
     });
   });
 
-  // Função nativa para teste de Ping/Latência TCP sem dependência de comandos ou sudo
-  const measureTcpPing = (host: string, port: number, timeoutMs = 2500): Promise<number | null> => {
+  // Função ultra-rápida e resiliente para teste de Ping/Latência TCP sem risco de crash no Node.js
+  const measureTcpPing = (host: string, port: number, timeoutMs = 800): Promise<number | null> => {
     return new Promise((resolve) => {
-      const net = require('net');
       const start = Date.now();
       const socket = new net.Socket();
+      let isSettled = false;
 
-      socket.setTimeout(timeoutMs);
+      // Handler preventivo constante para garantir que destruições de socket nunca causem 'unhandled error'
+      socket.on('error', () => {
+        if (!isSettled) {
+          isSettled = true;
+          clearTimeout(timer);
+          try {
+            socket.destroy();
+          } catch {}
+          resolve(null);
+        }
+      });
+
+      const cleanup = () => {
+        if (!isSettled) {
+          isSettled = true;
+          clearTimeout(timer);
+          try {
+            socket.destroy();
+          } catch {}
+        }
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve(null);
+      }, timeoutMs);
 
       socket.connect(port, host, () => {
         const latency = Date.now() - start;
-        socket.destroy();
+        cleanup();
         resolve(latency);
       });
 
-      socket.on('error', () => {
-        socket.destroy();
-        resolve(null);
-      });
-
       socket.on('timeout', () => {
-        socket.destroy();
+        cleanup();
         resolve(null);
       });
     });
   };
 
-  // Endpoint de Ping do servidor para a internet (sem comandos externos)
+  // Endpoint de Ping do servidor para a internet (sem comandos externos e com resposta instantânea)
   app.get('/api/ping', async (req, res) => {
     applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -391,53 +414,85 @@ async function startServer() {
       return res.status(204).end();
     }
 
-    const targets = [
-      { id: 'cloudflare', name: 'Cloudflare DNS', host: '1.1.1.1', port: 53, type: 'external' },
-      { id: 'google', name: 'Google Public DNS', host: '8.8.8.8', port: 53, type: 'external' },
-      { id: 'quad9', name: 'Quad9 DNS Seguro', host: '9.9.9.9', port: 53, type: 'external' },
-      { id: 'gateway', name: 'Gateway Local (Roteador)', host: '192.168.100.1', port: 80, type: 'local' }
-    ];
+    try {
+      const targets = [
+        { id: 'cloudflare', name: 'Cloudflare DNS', host: '1.1.1.1', port: 53, type: 'external' as const, httpProbe: 'https://1.1.1.1/cdn-cgi/trace' },
+        { id: 'google', name: 'Google Public DNS', host: '8.8.8.8', port: 53, type: 'external' as const, httpProbe: 'https://dns.google/resolve?name=example.com' },
+        { id: 'quad9', name: 'Quad9 DNS Seguro', host: '9.9.9.9', port: 53, type: 'external' as const, httpProbe: 'https://dns.quad9.net' },
+        { id: 'nicbr', name: 'NIC.br / PTT Brasil', host: '200.160.2.3', port: 53, type: 'external' as const, httpProbe: 'https://registro.br' },
+        { id: 'gateway', name: 'Gateway Local (Roteador)', host: '192.168.100.1', port: 80, type: 'local' as const, httpProbe: null }
+      ];
 
-    const results = await Promise.all(
-      targets.map(async (t) => {
-        const pingMs = await measureTcpPing(t.host, t.port, 2000);
-        let quality: 'EXCELENTE' | 'BOM' | 'MEDIO' | 'ALTO' | 'FALHA' = 'FALHA';
-        if (pingMs !== null) {
-          if (pingMs <= 20) quality = 'EXCELENTE';
-          else if (pingMs <= 50) quality = 'BOM';
-          else if (pingMs <= 100) quality = 'MEDIO';
-          else quality = 'ALTO';
-        }
+      const results = await Promise.all(
+        targets.map(async (t) => {
+          const timeout = t.type === 'local' ? 350 : 800;
+          let pingMs = await measureTcpPing(t.host, t.port, timeout);
 
-        return {
-          ...t,
-          pingMs,
-          status: pingMs !== null ? 'ONLINE' : 'OFFLINE',
-          quality
-        };
-      })
-    );
+          // Fallback HTTP instantâneo se porta 53 TCP for bloqueada por firewall/operadora
+          if (pingMs === null && t.httpProbe) {
+            try {
+              const hStart = Date.now();
+              const httpRes = await fetch(t.httpProbe, {
+                method: 'HEAD',
+                signal: AbortSignal.timeout(800)
+              });
+              if (httpRes.ok || httpRes.status < 500) {
+                pingMs = Date.now() - hStart;
+              }
+            } catch {}
+          }
 
-    const validPings = results.filter(r => r.pingMs !== null && r.type === 'external').map(r => r.pingMs as number);
-    const avgMs = validPings.length > 0 
-      ? Math.round(validPings.reduce((a, b) => a + b, 0) / validPings.length) 
-      : null;
+          let quality: 'EXCELENTE' | 'BOM' | 'MEDIO' | 'ALTO' | 'FALHA' = 'FALHA';
+          if (pingMs !== null) {
+            if (pingMs <= 20) quality = 'EXCELENTE';
+            else if (pingMs <= 50) quality = 'BOM';
+            else if (pingMs <= 100) quality = 'MEDIO';
+            else quality = 'ALTO';
+          }
 
-    let overallStatus = 'DESCONECTADO';
-    if (avgMs !== null) {
-      if (avgMs <= 25) overallStatus = 'EXCELENTE';
-      else if (avgMs <= 60) overallStatus = 'BOM';
-      else overallStatus = 'ALTO';
+          return {
+            id: t.id,
+            name: t.name,
+            host: t.host,
+            port: t.port,
+            type: t.type,
+            pingMs,
+            status: (pingMs !== null ? 'ONLINE' : 'OFFLINE') as 'ONLINE' | 'OFFLINE',
+            quality
+          };
+        })
+      );
+
+      const validPings = results.filter(r => r.pingMs !== null && r.type === 'external').map(r => r.pingMs as number);
+      const avgMs = validPings.length > 0 
+        ? Math.round(validPings.reduce((a, b) => a + b, 0) / validPings.length) 
+        : null;
+
+      let overallStatus: 'EXCELENTE' | 'BOM' | 'ALTO' | 'DESCONECTADO' = 'DESCONECTADO';
+      if (avgMs !== null) {
+        if (avgMs <= 25) overallStatus = 'EXCELENTE';
+        else if (avgMs <= 60) overallStatus = 'BOM';
+        else overallStatus = 'ALTO';
+      }
+
+      return res.json({
+        success: true,
+        timestamp: new Date().toISOString(),
+        average_ms: avgMs,
+        overall_status: overallStatus,
+        targets: results,
+        notice: 'Medição em tempo real de latência de rede nativa sem comandos shell ou bloqueio de threads.'
+      });
+    } catch (err: any) {
+      console.error('Erro no ping:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+        average_ms: null,
+        overall_status: 'DESCONECTADO',
+        targets: []
+      });
     }
-
-    return res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      average_ms: avgMs,
-      overall_status: overallStatus,
-      targets: results,
-      notice: 'Medição em tempo real de latência TCP/IP nativa do servidor para a internet (zero comandos extras).'
-    });
   });
 
   // Rotas nativas do n8n Workflow Automation
@@ -478,6 +533,47 @@ async function startServer() {
     }
   });
 
+  // Rotas do Explorador de Arquivos (Somente Leitura)
+  app.get('/api/files/list', async (req, res) => {
+    applyCors(res);
+    try {
+      const targetPath = (req.query.path as string) || '';
+      const data = await listDirectory(targetPath);
+      return res.json(data);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/files/read', async (req, res) => {
+    applyCors(res);
+    try {
+      const targetPath = req.query.path as string;
+      if (!targetPath) {
+        return res.status(400).json({ error: 'Parâmetro path é obrigatório.' });
+      }
+      const data = await readTargetFile(targetPath);
+      return res.json(data);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Rota de Execução de Comandos Shell no Terminal
+  app.post('/api/terminal/exec', async (req, res) => {
+    applyCors(res);
+    try {
+      const { command, cwd } = req.body || {};
+      if (!command || typeof command !== 'string') {
+        return res.status(400).json({ error: 'Comando não fornecido.' });
+      }
+      const result = await runShellCommand(command, cwd);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
   let cachedWorkingBackendBase: string | null = null;
 
@@ -498,7 +594,9 @@ async function startServer() {
       '/api/adguard/analyze-batch',
       '/api/mac-vendor',
       '/api/ping',
-      '/api/n8n'
+      '/api/n8n',
+      '/api/files',
+      '/api/terminal'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();
@@ -1146,23 +1244,9 @@ async function startServer() {
     }
   }
 
-  try {
-    const server = app.listen(PORT, '::', () => {
-      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (dual-stack IPv4/IPv6 [::]:${PORT})`);
-    });
-    server.on('error', (err: any) => {
-      if (err.code === 'EAFNOSUPPORT' || err.code === 'EADDRNOTAVAIL') {
-        console.warn(`[AdGuard AI NOC] IPv6 não suportado, escutando em 0.0.0.0:${PORT}`);
-        app.listen(PORT, '0.0.0.0', () => {
-          console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
-        });
-      }
-    });
-  } catch {
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
-    });
-  }
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+  });
 }
 
 startServer();

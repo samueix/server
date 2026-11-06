@@ -379,9 +379,16 @@ async def get_server_ping():
         {"id": "gateway", "name": "Gateway Local (Roteador)", "host": "192.168.100.1", "port": 80, "type": "local"}
     ]
 
+    tasks = [
+        loop.run_in_executor(None, _measure_tcp_ping, t["host"], t["port"], 0.8 if t["type"] == "external" else 0.35)
+        for t in targets
+    ]
+    raw_latencies = await asyncio.gather(*tasks, return_exceptions=True)
+
     results = []
-    for t in targets:
-        latency = await loop.run_in_executor(None, _measure_tcp_ping, t["host"], t["port"], 2.0)
+    for idx, t in enumerate(targets):
+        val = raw_latencies[idx]
+        latency = val if isinstance(val, (int, float)) else None
         quality = "FALHA"
         if latency is not None:
             if latency <= 20: quality = "EXCELENTE"

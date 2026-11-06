@@ -20,6 +20,7 @@ const DocumentationTab = React.lazy(() => import('./components/tabs/Documentatio
 const PingTab = React.lazy(() => import('./components/tabs/PingTab').then(m => ({ default: m.PingTab })));
 const LogsTab = React.lazy(() => import('./components/tabs/LogsTab').then(m => ({ default: m.LogsTab })));
 const N8nTab = React.lazy(() => import('./components/tabs/N8nTab').then(m => ({ default: m.N8nTab })));
+const FilesTab = React.lazy(() => import('./components/tabs/FilesTab').then(m => ({ default: m.FilesTab })));
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -576,6 +577,7 @@ export default function App() {
              activeTab !== 'adguard' && 
              activeTab !== 'adguard_ai' && 
              activeTab !== 'ping' &&
+             activeTab !== 'files' &&
              activeTab !== 'logs' &&
              activeTab !== 'n8n' &&
              activeTab !== 'commands' && 
@@ -634,6 +636,14 @@ export default function App() {
               <Suspense fallback={<TabLoadingFallback />}>
                 <TabErrorBoundary tabName="Ping & Latência">
                   <PingTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'files' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Arquivos">
+                  <FilesTab />
                 </TabErrorBoundary>
               </Suspense>
             )}

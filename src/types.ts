@@ -4,6 +4,7 @@ export type TransportType = 'websocket' | 'polling';
 export type NavigationTab = 
   | 'overview' 
   | 'monitoring' 
+  | 'files'
   | 'processes' 
   | 'services' 
   | 'network' 
@@ -15,6 +16,39 @@ export type NavigationTab =
   | 'commands' 
   | 'system'
   | 'documentation';
+
+export interface FileItem {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  sizeFormatted: string;
+  mtime: string;
+  permissions?: string;
+  extension?: string;
+  typeCategory: 'folder' | 'image' | 'video' | 'audio' | 'document' | 'code' | 'archive' | 'system' | 'other';
+}
+
+export interface FileExplorerResponse {
+  currentPath: string;
+  parentPath: string | null;
+  items: FileItem[];
+  totalFolders: number;
+  totalFiles: number;
+  totalSizeBytes: number;
+  totalSizeFormatted: string;
+  canWrite: boolean;
+}
+
+export interface FileReadResponse {
+  name: string;
+  path: string;
+  size: number;
+  content: string;
+  isBinary: boolean;
+  truncated: boolean;
+  mtime: string;
+}
 
 export interface AlertHistoryItem {
   id: string;
