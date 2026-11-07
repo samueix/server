@@ -53,6 +53,32 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const [clearMessage, setClearMessage] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
 
+  // Modal para sincronizar JSON real direto
+  const [showSyncModal, setShowSyncModal] = useState<boolean>(false);
+  const [rawJsonInput, setRawJsonInput] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  const handleSyncRawStats = async () => {
+    if (!rawJsonInput.trim()) return;
+    setIsSyncing(true);
+    setSyncMessage(null);
+    try {
+      const parsed = JSON.parse(rawJsonInput.trim());
+      await adguardService.syncRawStats(parsed);
+      setSyncMessage('Telemetria sincronizada com sucesso no servidor e no painel!');
+      await fetchAdGuardData(true);
+      setTimeout(() => {
+        setShowSyncModal(false);
+        setSyncMessage(null);
+      }, 1500);
+    } catch (err: any) {
+      setSyncMessage(`Erro: ${err.message || 'JSON inválido'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const openClearModal = async () => {
     setShowClearModal(true);
     setClearMessage(null);
@@ -242,6 +268,18 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             <span className="text-xs text-[#1A1A2E] font-mono font-bold tabular-nums">{lastUpdated}</span>
           </div>
           <button
+            onClick={() => {
+              setShowSyncModal(true);
+              setSyncMessage(null);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+            title="Sincronizar dados reais colando o JSON de http://192.168.100.23:8081/control/stats"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-[#00A6FB]" />
+            <span>Sincronizar JSON</span>
+          </button>
+
+          <button
             onClick={openClearModal}
             className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FEE4E2] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#F04438] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
             title="Limpar histórico de consultas e resetar estatísticas no AdGuard"
@@ -267,16 +305,16 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         <div className="bg-[#FEF3F2] border-2 border-[#F04438] shadow-[4px_4px_0px_#F04438] rounded-xl p-4 text-[#1A1A2E] text-xs flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-[#F04438] shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <div className="font-black text-[#F04438] text-sm font-title">AdGuard Home offline</div>
+            <div className="font-black text-[#F04438] text-sm font-title">AdGuard Home offline ou sem conexão</div>
             <p className="text-[#4A4A68] font-medium leading-relaxed">
               O serviço AdGuard Home não respondeu às requisições em <code className="bg-[#FFF7E8] px-1.5 py-0.5 rounded border border-[#1A1A2E] text-[#1A1A2E] font-mono font-bold">/adguard-api/</code>.
-              Verifique no terminal do servidor se o serviço está em execução com <code className="bg-[#FFF7E8] px-1.5 py-0.5 rounded border border-[#1A1A2E] text-[#1A1A2E] font-mono font-bold">sudo systemctl status AdGuardHome</code> e se o Nginx está encaminhando para a porta 8081.
+              Nenhum dado simulado é exibido. Você pode clicar em <strong className="text-[#1A1A2E]">"Sincronizar JSON"</strong> acima para carregar o snapshot de <code className="bg-[#FFF7E8] px-1.5 py-0.5 rounded border border-[#1A1A2E] text-[#1A1A2E] font-mono font-bold">/control/stats</code> ou verificar no terminal: <code className="bg-[#FFF7E8] px-1.5 py-0.5 rounded border border-[#1A1A2E] text-[#1A1A2E] font-mono font-bold">sudo systemctl status AdGuardHome</code>.
             </p>
           </div>
         </div>
       )}
 
-      {/* KPI Cards Grid */}
+      {/* KPI Cards Grid - ZERO DADOS FAKE: se offline, mostra estritamente '--' */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Status DNS */}
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 flex flex-col justify-between">
@@ -285,8 +323,8 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             <Server className="w-4 h-4 text-[#717188]" />
           </div>
           <div className="mt-3">
-            <div className="text-2xl font-black text-[#1A1A2E] tracking-tight font-title">
-              {isOnline ? 'Online' : 'N/D'}
+            <div className={`text-2xl font-black tracking-tight font-title ${isOnline ? 'text-[#12B76A]' : 'text-[#F04438]'}`}>
+              {isOnline ? 'Online' : 'Desconectado'}
             </div>
             <div className="text-xs text-[#717188] mt-1 flex items-center gap-1.5 font-mono font-bold">
               {isOnline ? (
@@ -295,7 +333,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   <span>Porta DNS {status?.dns_port || 53} | v{status?.version || 'N/D'}</span>
                 </>
               ) : (
-                <span className="text-[#F04438]">Serviço indisponível</span>
+                <span className="text-[#F04438]">Sem conexão com a porta 8081</span>
               )}
             </div>
           </div>
@@ -309,10 +347,10 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-[#1A1A2E] tracking-tight font-mono tabular-nums">
-              {isOnline && stats ? stats.num_dns_queries.toLocaleString('pt-BR') : 'N/D'}
+              {isOnline && stats ? stats.num_dns_queries.toLocaleString('pt-BR') : '--'}
             </div>
             <div className="text-xs text-[#717188] mt-1 font-mono font-medium">
-              {isOnline && stats ? 'Consultas totais processadas' : 'Sem telemetria'}
+              {isOnline && stats ? 'Consultas totais processadas' : 'Desconectado'}
             </div>
           </div>
         </div>
@@ -325,7 +363,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-[#F04438] tracking-tight flex items-baseline gap-2 font-mono">
-              <span className="tabular-nums">{isOnline && stats ? stats.num_blocked_filtering.toLocaleString('pt-BR') : 'N/D'}</span>
+              <span className="tabular-nums">{isOnline && stats ? stats.num_blocked_filtering.toLocaleString('pt-BR') : '--'}</span>
               {isOnline && stats && (
                 <span className="text-xs font-black text-[#F04438] tabular-nums">
                   ({stats.blocked_percentage}%)
@@ -333,7 +371,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
               )}
             </div>
             <div className="text-xs text-[#717188] mt-1 font-mono font-medium">
-              {isOnline && stats ? 'Filtradas por listas de segurança' : 'Sem telemetria'}
+              {isOnline && stats ? 'Filtradas por listas de segurança' : 'Desconectado'}
             </div>
           </div>
         </div>
@@ -346,10 +384,10 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </div>
           <div className="mt-3">
             <div className="text-2xl font-black text-[#1A1A2E] tracking-tight font-mono tabular-nums">
-              {isOnline && stats ? stats.top_clients.length : 'N/D'}
+              {isOnline && stats ? stats.top_clients.length : '--'}
             </div>
             <div className="text-xs text-[#717188] mt-1 font-mono font-medium">
-              {isOnline && stats ? `Latência média: ${stats.avg_processing_time_ms} ms` : 'Sem telemetria'}
+              {isOnline && stats ? `Latência média: ${stats.avg_processing_time_ms} ms` : 'Desconectado'}
             </div>
           </div>
         </div>
@@ -855,6 +893,81 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   <span className="flex items-center gap-1.5">
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Limpar Agora no Servidor</span>
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE SINCRONIZAÇÃO DIRETA DO JSON DO /control/stats */}
+      {showSyncModal && (
+        <div className="fixed inset-0 z-50 bg-[#1A1A2E]/60 flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-[#1A1A2E] shadow-[6px_6px_0px_#1A1A2E] rounded-xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#E0F2FE] border border-[#00A6FB] flex items-center justify-center text-[#00A6FB]">
+                  <RefreshCw className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1A1A2E] font-title">Sincronizar Dados Reais do AdGuard</h3>
+                  <span className="text-[11px] font-mono text-[#717188] font-bold">Cole o JSON bruto de /control/stats</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="w-7 h-7 rounded border border-[#1A1A2E] bg-[#FFF7E8] hover:bg-[#FEE4E2] flex items-center justify-center text-xs font-bold font-mono transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-[#4A4A68] leading-relaxed">
+              Abra no seu navegador o link <a href="http://192.168.100.23:8081/control/stats" target="_blank" rel="noopener noreferrer" className="text-[#00A6FB] font-mono font-bold underline">http://192.168.100.23:8081/control/stats</a>, copie todo o texto exibido e cole no campo abaixo. Os dados serão aplicados e persistidos imediatamente no painel:
+            </p>
+
+            <textarea
+              rows={6}
+              value={rawJsonInput}
+              onChange={(e) => setRawJsonInput(e.target.value)}
+              placeholder='Cole aqui: {"time_units":"hours","top_queried_domains":...}'
+              className="w-full p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E] placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#00A6FB] shadow-inner"
+            />
+
+            {syncMessage && (
+              <div className={`p-3 rounded-lg border text-xs font-mono font-bold ${
+                syncMessage.includes('Erro')
+                  ? 'bg-[#FEE4E2] border-[#F04438] text-[#F04438]'
+                  : 'bg-[#D1FADF] border-[#12B76A] text-[#12B76A]'
+              }`}>
+                {syncMessage}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t-2 border-[#1A1A2E]">
+              <button
+                onClick={() => setShowSyncModal(false)}
+                className="px-3.5 py-2 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={handleSyncRawStats}
+                disabled={isSyncing || !rawJsonInput.trim()}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#00A6FB] hover:bg-[#0095e0] disabled:opacity-50 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-white transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+              >
+                {isSyncing ? (
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Sincronizando...</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Aplicar Dados Reais</span>
                   </span>
                 )}
               </button>

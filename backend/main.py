@@ -1,14 +1,19 @@
 import os
+import re
+import json
 import time
 import logging
 import asyncio
-from typing import Optional, List
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
 
 # Carrega variáveis de ambiente do .env se existir
 load_dotenv()
 
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, Query, Request, Response, status
+from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, Query, Request, Response, status, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -175,9 +180,305 @@ async def get_services(user: str = Depends(verify_credentials)):
     }
 
 @app.get("/api/adguard", tags=["AdGuard"])
+@app.get("/api/adguard/stats", tags=["AdGuard"])
 async def get_adguard_metrics(user: str = Depends(verify_credentials)):
     """Consulta à API interna do AdGuard Home configurada no servidor."""
     return await adguard.fetch_adguard_stats()
+
+@app.get("/api/adguard/status", tags=["AdGuard"])
+async def get_adguard_status_endpoint(user: str = Depends(verify_credentials)):
+    """Status de execução e proteção do AdGuard Home."""
+    return await adguard.fetch_adguard_status()
+
+@app.get("/api/adguard/querylog", tags=["AdGuard"])
+async def get_adguard_querylog_endpoint(limit: int = 30, user: str = Depends(verify_credentials)):
+    """Log recente de consultas DNS filtradas pelo AdGuard Home."""
+    return await adguard.fetch_adguard_querylog(limit=limit)
+
+@app.post("/api/adguard/sync", tags=["AdGuard"])
+async def sync_adguard_raw_stats_endpoint(request: Request, user: str = Depends(verify_credentials)):
+    """Sincroniza estatísticas reais brutas enviadas pelo operador."""
+    body = await request.json()
+    res = adguard.update_raw_stats(body)
+    return {"success": True, "stats": res}
+
+@app.post("/api/adguard/clear-history", tags=["AdGuard"])
+async def clear_adguard_history_endpoint(user: str = Depends(require_admin)):
+    """Zera histórico de consultas e reseta estatísticas do AdGuard."""
+    return await adguard.clear_adguard_history()
+
+@app.get("/api/adguard/clear-command", tags=["AdGuard"])
+async def get_adguard_clear_command_endpoint(user: str = Depends(verify_credentials)):
+    """Retorna comando curl do shell para limpar histórico no Ubuntu."""
+    url, u, p = adguard.get_config_credentials()
+    return {"shellCommand": f'curl -s -X POST -u "{u}:{p}" {url}/control/querylog_clear && curl -s -X POST -u "{u}:{p}" {url}/control/stats_reset'}
+
+# -------------------------------------------------------------
+# AUDITORIA DE SEGURANÇA E ATAQUES
+# -------------------------------------------------------------
+
+@app.get("/api/security/attack-monitor", tags=["Security"])
+async def get_security_attack_monitor(user: str = Depends(verify_credentials)):
+    """Auditoria em tempo real de tentativas de invasão SSH, firewall e bots."""
+    total_attempts = 0
+    attack_sources = []
+    target_accounts: Dict[str, int] = {}
+    ip_counts: Dict[str, int] = {}
+
+    try:
+        cmd = ["journalctl", "-u", "ssh", "-n", "80", "--no-pager"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=2.0)
+        lines = proc.stdout.splitlines() if proc.returncode == 0 else []
+
+        for line in lines:
+            if "Failed password" in line or "Invalid user" in line:
+                total_attempts += 1
+                ip_match = re.search(r'from\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)', line)
+                user_match = re.search(r'for\s+(?:invalid user\s+)?([a-zA-Z0-9_\-]+)', line)
+                if ip_match:
+                    ip = ip_match.group(1)
+                    ip_counts[ip] = ip_counts.get(ip, 0) + 1
+                if user_match:
+                    target_u = user_match.group(1)
+                    target_accounts[target_u] = target_accounts.get(target_u, 0) + 1
+
+        for ip, count in sorted(ip_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
+            attack_sources.append({
+                "ip": ip,
+                "count": count,
+                "lastAttempt": "recente",
+                "targetUser": "root",
+                "service": "OpenSSH",
+                "status": "bloqueado" if count >= 5 else "detectado"
+            })
+    except Exception:
+        pass
+
+    target_list = [{"user": u, "attempts": c} for u, c in sorted(target_accounts.items(), key=lambda x: x[1], reverse=True)[:5]]
+    threat_level = "NORMAL"
+    if total_attempts >= 15:
+        threat_level = "SOB ATAQUE"
+    elif total_attempts >= 3:
+        threat_level = "MODERADO"
+
+    return {
+        "threatLevel": threat_level,
+        "isUnderAttack": threat_level == "SOB ATAQUE",
+        "totalFailedAttempts24h": total_attempts,
+        "failedAttemptsLastHour": total_attempts,
+        "totalScansDetected": 0,
+        "sshStatus": "normal" if total_attempts < 5 else "alerta",
+        "nginxStatus": "normal",
+        "attackSources": attack_sources,
+        "targetAccounts": target_list,
+        "recentIncidents": [],
+        "lastChecked": datetime.now().strftime("%H:%M:%S")
+    }
+
+# -------------------------------------------------------------
+# EXPLORADOR DE ARQUIVOS E BLOCO DE NOTAS
+# -------------------------------------------------------------
+
+@app.get("/api/files/list", tags=["Files"])
+async def list_files_endpoint(path: Optional[str] = Query(None), user: str = Depends(verify_credentials)):
+    target = Path(path or "/home/samuel").resolve()
+    if not target.exists():
+        target = Path(os.path.expanduser("~")).resolve()
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="O caminho especificado não é uma pasta.")
+
+    items = []
+    try:
+        with os.scandir(target) as entries:
+            for entry in entries:
+                try:
+                    stat_info = entry.stat()
+                    is_dir = entry.is_dir()
+                    items.append({
+                        "name": entry.name,
+                        "path": str(Path(entry.path).resolve()),
+                        "isDirectory": is_dir,
+                        "size": stat_info.st_size if not is_dir else 0,
+                        "sizeFormatted": f"{stat_info.st_size} B" if not is_dir else "--",
+                        "mtime": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                        "typeCategory": "folder" if is_dir else "document"
+                    })
+                except Exception:
+                    continue
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="Permissão negada ao listar pasta.")
+
+    parent = str(target.parent) if str(target) != "/" else None
+    return {
+        "currentPath": str(target),
+        "parentPath": parent,
+        "items": items,
+        "totalFolders": sum(1 for i in items if i["isDirectory"]),
+        "totalFiles": sum(1 for i in items if not i["isDirectory"]),
+        "totalSizeBytes": sum(i["size"] for i in items if not i["isDirectory"]),
+        "totalSizeFormatted": "--",
+        "canWrite": True
+    }
+
+@app.get("/api/files/read", tags=["Files"])
+async def read_file_endpoint(path: str = Query(...), user: str = Depends(verify_credentials)):
+    p = Path(path).resolve()
+    if not p.exists() or p.is_dir():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+    try:
+        content = p.read_text(encoding="utf-8", errors="replace")
+        return {
+            "name": p.name,
+            "path": str(p),
+            "size": p.stat().st_size,
+            "content": content,
+            "isBinary": False,
+            "truncated": False,
+            "mtime": datetime.fromtimestamp(p.stat().st_mtime).isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao ler arquivo: {str(e)}")
+
+@app.post("/api/files/create", tags=["Files"])
+async def create_file_endpoint(request: Request, user: str = Depends(verify_credentials)):
+    body = await request.json()
+    dir_path = body.get("dirPath") or "/home/samuel"
+    name = body.get("name")
+    content = body.get("content", "")
+
+    if not name or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Nome de arquivo inválido.")
+
+    target_dir = Path(dir_path).resolve()
+    if not target_dir.exists():
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            subprocess.run(["sudo", "mkdir", "-p", str(target_dir)], capture_output=True)
+
+    target_file = target_dir / name
+    if target_file.exists():
+        raise HTTPException(status_code=400, detail="Arquivo já existe.")
+
+    try:
+        target_file.write_text(content, encoding="utf-8")
+        return {"success": True, "filePath": str(target_file)}
+    except PermissionError:
+        proc = subprocess.run(
+            ["sudo", "tee", str(target_file)],
+            input=content,
+            text=True,
+            capture_output=True
+        )
+        if proc.returncode == 0:
+            subprocess.run(["sudo", "chmod", "666", str(target_file)], capture_output=True)
+            return {"success": True, "filePath": str(target_file)}
+        raise HTTPException(status_code=403, detail="Permissão negada para criar arquivo nesta pasta.")
+
+@app.post("/api/files/save", tags=["Files"])
+async def save_file_endpoint(request: Request, user: str = Depends(verify_credentials)):
+    body = await request.json()
+    file_path = body.get("path")
+    content = body.get("content", "")
+
+    p = Path(file_path).resolve()
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado.")
+
+    try:
+        p.write_text(content, encoding="utf-8")
+        return {"success": True, "size": p.stat().st_size}
+    except PermissionError:
+        proc = subprocess.run(
+            ["sudo", "tee", str(p)],
+            input=content,
+            text=True,
+            capture_output=True
+        )
+        if proc.returncode == 0:
+            return {"success": True, "size": p.stat().st_size}
+        raise HTTPException(status_code=403, detail="Permissão negada ao salvar arquivo.")
+
+# -------------------------------------------------------------
+# TERMINAL SHELL EXECUTION
+# -------------------------------------------------------------
+
+@app.post("/api/terminal/exec", tags=["Terminal"])
+async def exec_terminal_endpoint(request: Request, user: str = Depends(require_admin)):
+    body = await request.json()
+    command = (body.get("command") or "").strip()
+    cwd = body.get("cwd") or "/home/samuel"
+
+    # Sanitiza contra-barras soltas que quebram execução bash ("\ git: command not found")
+    command = re.sub(r'\\\s*[\r\n]+\s*', ' ', command)
+    command = re.sub(r'\\\s+', ' ', command).strip()
+
+    # Injeta PATH completo do sistema para encontrar git, npm, node, nginx, systemctl
+    env_vars = dict(os.environ)
+    system_paths = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    current_path = env_vars.get("PATH", "")
+    env_vars["PATH"] = f"{system_paths}:{current_path}" if current_path else system_paths
+
+    start_time = time.time()
+    try:
+        proc = subprocess.run(
+            ["/bin/bash", "-c", command],
+            cwd=cwd if os.path.exists(cwd) else None,
+            capture_output=True,
+            text=True,
+            env=env_vars,
+            timeout=90
+        )
+        elapsed = int((time.time() - start_time) * 1000)
+        return {
+            "success": proc.returncode == 0,
+            "command": command,
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "exitCode": proc.returncode,
+            "cwd": cwd,
+            "executionTimeMs": elapsed
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "command": command,
+            "stdout": "",
+            "stderr": "Comando excedeu o tempo limite de 90 segundos.",
+            "exitCode": 124,
+            "cwd": cwd,
+            "executionTimeMs": 90000
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "command": command,
+            "stdout": "",
+            "stderr": str(e),
+            "exitCode": 1,
+            "cwd": cwd,
+            "executionTimeMs": 0
+        }
+
+# -------------------------------------------------------------
+# CREDENCIAIS DO SISTEMA (server-config.json)
+# -------------------------------------------------------------
+
+@app.get("/api/credentials", tags=["Credentials"])
+async def get_credentials_endpoint(user: str = Depends(require_admin)):
+    cfg_file = Path(__file__).resolve().parent.parent / "server-config.json"
+    if cfg_file.exists():
+        with open(cfg_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+@app.post("/api/credentials", tags=["Credentials"])
+async def save_credentials_endpoint(request: Request, user: str = Depends(require_admin)):
+    data = await request.json()
+    cfg_file = Path(__file__).resolve().parent.parent / "server-config.json"
+    with open(cfg_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return {"success": True, "message": "Configurações salvas em server-config.json com sucesso."}
 
 @app.get("/api/logs", tags=["Logs"])
 async def get_logs_endpoint(

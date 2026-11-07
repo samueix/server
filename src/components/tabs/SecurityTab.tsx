@@ -67,6 +67,9 @@ export const SecurityTab: React.FC = () => {
         signal: AbortSignal.timeout(5000)
       });
       if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('O monitor de ataques (/api/security/attack-monitor) requer a atualização do servidor Ubuntu. Atualize o painel no servidor para ativar este endpoint.');
+        }
         throw new Error(`Falha ao obter status de segurança: HTTP ${res.status}`);
       }
       const json: SecurityStatusResponse = await res.json();
@@ -104,7 +107,9 @@ export const SecurityTab: React.FC = () => {
     <div className="space-y-4 font-sans text-[#1A1A2E]">
       {/* Banner Principal de Status de Ameaça */}
       <div className={`p-6 rounded-xl border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] transition-all ${
-        isUnderAttack 
+        error
+          ? 'bg-[#FFF7E8]'
+          : isUnderAttack 
           ? 'bg-[#FEE4E2]' 
           : isModerate 
           ? 'bg-[#FEF0C7]' 
@@ -113,13 +118,17 @@ export const SecurityTab: React.FC = () => {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-4">
             <div className={`w-14 h-14 rounded-xl border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] flex items-center justify-center shrink-0 ${
-              isUnderAttack 
+              error
+                ? 'bg-[#717188] text-white'
+                : isUnderAttack 
                 ? 'bg-[#F04438] text-white' 
                 : isModerate 
                 ? 'bg-[#F79009] text-white' 
                 : 'bg-[#12B76A] text-white'
             }`}>
-              {isUnderAttack ? (
+              {error ? (
+                <ShieldAlert className="w-8 h-8" />
+              ) : isUnderAttack ? (
                 <ShieldAlert className="w-8 h-8 animate-pulse" />
               ) : isModerate ? (
                 <AlertTriangle className="w-8 h-8" />
@@ -131,13 +140,15 @@ export const SecurityTab: React.FC = () => {
             <div>
               <div className="flex items-center gap-2.5 flex-wrap">
                 <span className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-black border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] ${
-                  isUnderAttack 
+                  error
+                    ? 'bg-[#FFF7E8] text-[#1A1A2E]'
+                    : isUnderAttack 
                     ? 'bg-[#F04438] text-white' 
                     : isModerate 
                     ? 'bg-[#F79009] text-white' 
                     : 'bg-[#12B76A] text-white'
                 }`}>
-                  {isUnderAttack ? 'SOB ATAQUE DETECTADO' : isModerate ? 'NÍVEL DE ATENÇÃO' : 'SERVIDOR SEGURO (NORMAL)'}
+                  {error ? 'AUDITORIA PENDENTE' : isUnderAttack ? 'SOB ATAQUE DETECTADO' : isModerate ? 'NÍVEL DE ATENÇÃO' : 'SERVIDOR SEGURO (NORMAL)'}
                 </span>
                 <span className="text-xs font-mono text-[#4A4A68] font-bold">
                   Última auditoria: {data?.lastChecked || '--:--:--'}
@@ -145,7 +156,9 @@ export const SecurityTab: React.FC = () => {
               </div>
 
               <h1 className="text-xl sm:text-2xl font-black font-title text-[#1A1A2E] mt-1.5">
-                {isUnderAttack
+                {error
+                  ? 'Aguardando sincronização do auditor no servidor'
+                  : isUnderAttack
                   ? 'Múltiplas tentativas de invasão e força bruta em andamento!'
                   : isModerate
                   ? 'Atividades suspeitas ou varreduras de bots detectadas'
@@ -179,9 +192,17 @@ export const SecurityTab: React.FC = () => {
       </div>
 
       {error && (
-        <div className="p-3 bg-[#FEE4E2] border-2 border-[#F04438] rounded-xl text-[#F04438] text-xs font-bold flex items-center justify-between">
-          <span>{error}</span>
-          <button onClick={() => fetchSecurityStatus(true)} className="underline text-xs">Tentar de novo</button>
+        <div className="p-4 bg-[#FEE4E2] border-2 border-[#F04438] shadow-[3px_3px_0px_#F04438] rounded-xl text-[#1A1A2E] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start sm:items-center gap-2">
+            <span className="font-mono font-bold text-[#F04438]">[Aviso]</span>
+            <span className="font-medium">{error}</span>
+          </div>
+          <button 
+            onClick={() => fetchSecurityStatus(true)} 
+            className="px-2.5 py-1 bg-white border border-[#F04438] text-[#F04438] font-mono font-bold rounded text-xs hover:bg-[#FEE4E2] self-start sm:self-auto shrink-0"
+          >
+            Tentar de novo
+          </button>
         </div>
       )}
 
@@ -191,20 +212,20 @@ export const SecurityTab: React.FC = () => {
           <span className="text-xs font-bold text-[#717188] block">Tentativas de SSH (24h)</span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-2xl font-black font-title text-[#1A1A2E]">
-              {data?.totalFailedAttempts24h ?? 0}
+              {data ? data.totalFailedAttempts24h : '--'}
             </span>
-            <span className="text-[11px] font-mono font-bold text-[#717188]">falhas</span>
+            <span className="text-[11px] font-mono font-bold text-[#717188]">{data ? 'falhas' : 'sem dados'}</span>
           </div>
-          <span className="text-[10px] text-[#717188] mt-1 block">Última hora: {data?.failedAttemptsLastHour ?? 0}</span>
+          <span className="text-[10px] text-[#717188] mt-1 block">Última hora: {data ? data.failedAttemptsLastHour : '--'}</span>
         </div>
 
         <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
           <span className="text-xs font-bold text-[#717188] block">Scans de Bots Web (Nginx)</span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-2xl font-black font-title text-[#00A6FB]">
-              {data?.totalScansDetected ?? 0}
+              {data ? data.totalScansDetected : '--'}
             </span>
-            <span className="text-[11px] font-mono font-bold text-[#717188]">probes</span>
+            <span className="text-[11px] font-mono font-bold text-[#717188]">{data ? 'probes' : 'sem dados'}</span>
           </div>
           <span className="text-[10px] text-[#717188] mt-1 block">Varreduras (.env, phpmyadmin, etc)</span>
         </div>
@@ -213,9 +234,9 @@ export const SecurityTab: React.FC = () => {
           <span className="text-xs font-bold text-[#717188] block">IPs Hostis Rastreados</span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className="text-2xl font-black font-title text-[#FF5A36]">
-              {data?.attackSources?.length ?? 0}
+              {data?.attackSources ? data.attackSources.length : '--'}
             </span>
-            <span className="text-[11px] font-mono font-bold text-[#717188]">origens</span>
+            <span className="text-[11px] font-mono font-bold text-[#717188]">{data ? 'origens' : 'sem dados'}</span>
           </div>
           <span className="text-[10px] text-[#717188] mt-1 block">Monitorados em tempo real</span>
         </div>
@@ -223,10 +244,12 @@ export const SecurityTab: React.FC = () => {
         <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
           <span className="text-xs font-bold text-[#717188] block">Status do Daemon SSH</span>
           <div className="flex items-center gap-2 mt-2">
-            <span className="w-3 h-3 rounded-full bg-[#12B76A] border border-[#1A1A2E]" />
-            <span className="text-sm font-black font-title text-[#1A1A2E]">Porta 22 Protegida</span>
+            <span className={`w-3 h-3 rounded-full border border-[#1A1A2E] ${data ? 'bg-[#12B76A]' : 'bg-[#717188]'}`} />
+            <span className="text-sm font-black font-title text-[#1A1A2E]">
+              {data ? 'Porta 22 Protegida' : 'Aguardando auditoria'}
+            </span>
           </div>
-          <span className="text-[10px] text-[#717188] mt-1 block">Fail2ban / Rate limit ativo</span>
+          <span className="text-[10px] text-[#717188] mt-1 block">Fail2ban / Rate limit</span>
         </div>
       </div>
 

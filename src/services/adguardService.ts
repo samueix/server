@@ -362,6 +362,19 @@ export const adguardService = {
     return 'curl -s -X POST -u "admin:SENHA" http://127.0.0.1:8081/control/querylog_clear && curl -s -X POST -u "admin:SENHA" http://127.0.0.1:8081/control/stats_reset';
   },
 
+  async syncRawStats(rawJson: any): Promise<any> {
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
+    const res = await fetch('/api/adguard/sync', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(rawJson)
+    });
+    if (!res.ok) {
+      throw new Error(`Falha ao sincronizar dados: HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
   async fetchFullAdGuard(signal?: AbortSignal): Promise<AdGuardFullTelemetry> {
     try {
       const [statusRes, statsRes, logsRes] = await Promise.allSettled([
