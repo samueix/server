@@ -28,3 +28,39 @@ export async function fetchFileContent(filePath: string): Promise<FileReadRespon
   }
   return res.json();
 }
+
+export async function createFile(dirPath: string, name: string, content: string = ''): Promise<{ success: boolean; filePath: string }> {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...getAuthHeaders()
+  };
+  const res = await fetch('/api/files/create', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ dirPath, name, content })
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Erro ${res.status} ao criar arquivo`);
+  }
+  return res.json();
+}
+
+export async function saveFile(filePath: string, content: string): Promise<{ success: boolean; size: number }> {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json',
+    ...getAuthHeaders()
+  };
+  const res = await fetch('/api/files/save', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ path: filePath, content })
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Erro ${res.status} ao salvar arquivo`);
+  }
+  return res.json();
+}

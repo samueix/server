@@ -26,10 +26,13 @@ import {
   Calendar,
   Layers,
   FileCode,
-  ShieldAlert
+  ShieldAlert,
+  FilePlus,
+  Edit3,
+  Save
 } from 'lucide-react';
 import { FileItem, FileExplorerResponse, FileReadResponse } from '../../types';
-import { fetchDirectory, fetchFileContent } from '../../services/fileService';
+import { fetchDirectory, fetchFileContent, createFile, saveFile } from '../../services/fileService';
 
 type SortField = 'name' | 'date' | 'size' | 'type';
 type SortDirection = 'asc' | 'desc';
@@ -46,12 +49,23 @@ export const FilesTab: React.FC = () => {
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
-  // Modal de Leitura de Arquivo
+  // Modal de Leitura / Edição de Arquivo (Bloco de Notas)
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [fileContent, setFileContent] = useState<FileReadResponse | null>(null);
   const [readingFile, setReadingFile] = useState<boolean>(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [copiedContent, setCopiedContent] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const [editedText, setEditedText] = useState<string>('');
+  const [savingEdit, setSavingEdit] = useState<boolean>(false);
+
+  // Modal de Criação de Novo Arquivo (Bloco de Notas)
+  const [isCreatingModalOpen, setIsCreatingModalOpen] = useState<boolean>(false);
+  const [newFileName, setNewFileName] = useState<string>('notas.txt');
+  const [newFileContent, setNewFileContent] = useState<string>('');
+  const [creatingFile, setCreatingFile] = useState<boolean>(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -106,6 +120,8 @@ export const FilesTab: React.FC = () => {
     try {
       const contentRes = await fetchFileContent(item.path);
       setFileContent(contentRes);
+      setEditedText(contentRes.content || '');
+      setIsEditing(false);
     } catch (err: any) {
       setFileError(err.message || 'Não foi possível ler o arquivo.');
     } finally {
@@ -114,10 +130,55 @@ export const FilesTab: React.FC = () => {
   };
 
   const handleCopyFileContent = () => {
-    if (fileContent?.content) {
-      navigator.clipboard.writeText(fileContent.content);
+    const textToCopy = isEditing ? editedText : fileContent?.content;
+    if (textToCopy) {
+      navigator.clipboard.writeText(textToCopy);
       setCopiedContent(true);
       setTimeout(() => setCopiedContent(false), 2000);
+    }
+  };
+
+  const handleStartEdit = () => {
+    if (fileContent && !fileContent.isBinary) {
+      setEditedText(fileContent.content);
+      setIsEditing(true);
+    }
+  };
+
+  const handleSaveFileEdit = async () => {
+    if (!selectedFile) return;
+    setSavingEdit(true);
+    setFileError(null);
+    try {
+      await saveFile(selectedFile.path, editedText);
+      setFileContent(prev => prev ? { ...prev, content: editedText } : null);
+      setIsEditing(false);
+      setActionNotice(`Arquivo "${selectedFile.name}" salvo com sucesso!`);
+      setTimeout(() => setActionNotice(null), 3500);
+      loadFolder(currentPath);
+    } catch (err: any) {
+      setFileError(err.message || 'Erro ao salvar alterações no arquivo.');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleCreateNewFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingFile(true);
+    setCreateError(null);
+    try {
+      await createFile(currentPath, newFileName, newFileContent);
+      setIsCreatingModalOpen(false);
+      setNewFileName('notas.txt');
+      setNewFileContent('');
+      setActionNotice(`Arquivo "${newFileName}" criado com sucesso!`);
+      setTimeout(() => setActionNotice(null), 3500);
+      loadFolder(currentPath);
+    } catch (err: any) {
+      setCreateError(err.message || 'Falha ao criar arquivo.');
+    } finally {
+      setCreatingFile(false);
     }
   };
 
@@ -344,15 +405,45 @@ export const FilesTab: React.FC = () => {
           </div>
         </div>
 
-        <button
-          onClick={() => loadFolder(currentPath)}
-          disabled={loading}
-          className="p-1.5 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFF7E8] text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0"
-          title="Atualizar pasta"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => {
+              setNewFileName('notas.txt');
+              setNewFileContent('');
+              setCreateError(null);
+              setIsCreatingModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 border-[#1A1A2E] bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+            title="Criar novo arquivo de texto / bloco de notas"
+          >
+            <FilePlus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Novo Bloco de Notas</span>
+            <span className="sm:hidden">Criar</span>
+          </button>
+
+          <button
+            onClick={() => loadFolder(currentPath)}
+            disabled={loading}
+            className="p-1.5 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFF7E8] text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0"
+            title="Atualizar pasta"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
       </div>
+
+      {/* Aviso de Ação Concluída */}
+      {actionNotice && (
+        <div className="p-3 bg-[#D1FADF] border-2 border-[#12B76A] rounded-xl text-[#12B76A] font-bold text-xs flex items-center justify-between shadow-[2px_2px_0px_#12B76A]">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-[#12B76A]" />
+            <span>{actionNotice}</span>
+          </div>
+          <button onClick={() => setActionNotice(null)} className="text-xs font-mono underline hover:text-[#1A1A2E]">
+            Fechar
+          </button>
+        </div>
+      )}
 
       {/* Filter and Controls Toolbar (Estilo idêntico ao mockup da foto: Nome, Data, Tamanho, Tipo) */}
       <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
@@ -570,8 +661,12 @@ export const FilesTab: React.FC = () => {
                     <h3 className="text-sm font-black text-[#1A1A2E] font-title truncate">
                       {selectedFile.name}
                     </h3>
-                    <span className="text-[10px] font-mono font-bold bg-[#ECFDF3] text-[#12B76A] border border-[#12B76A] px-2 py-0.5 rounded-full shrink-0">
-                      Somente Leitura
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full shrink-0 border ${
+                      isEditing 
+                        ? 'bg-[#FEF0C7] text-[#B54708] border-[#F79009]' 
+                        : 'bg-[#ECFDF3] text-[#12B76A] border-[#12B76A]'
+                    }`}>
+                      {isEditing ? 'Bloco de Notas (Editando)' : 'Somente Leitura'}
                     </span>
                   </div>
                   <span className="text-[11px] font-mono text-[#717188] block truncate">
@@ -582,17 +677,52 @@ export const FilesTab: React.FC = () => {
 
               <div className="flex items-center gap-2 shrink-0">
                 {fileContent && !fileContent.isBinary && (
-                  <button
-                    onClick={handleCopyFileContent}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-[#FFC857] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-                    title="Copiar conteúdo"
-                  >
-                    {copiedContent ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedContent ? 'Copiado!' : 'Copiar'}</span>
-                  </button>
+                  <>
+                    {isEditing ? (
+                      <>
+                        <button
+                          onClick={handleSaveFileEdit}
+                          disabled={savingEdit}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#12B76A] hover:bg-[#0E9355] text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50"
+                          title="Salvar alterações no arquivo"
+                        >
+                          <Save className={`w-3.5 h-3.5 ${savingEdit ? 'animate-spin' : ''}`} />
+                          <span>{savingEdit ? 'Salvando...' : 'Salvar Alterações'}</span>
+                        </button>
+                        <button
+                          onClick={() => setIsEditing(false)}
+                          disabled={savingEdit}
+                          className="px-2.5 py-1.5 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]"
+                        >
+                          Cancelar
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={handleStartEdit}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FF5A36] hover:bg-[#E04522] text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                        title="Editar conteúdo no bloco de notas"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Editar</span>
+                      </button>
+                    )}
+
+                    <button
+                      onClick={handleCopyFileContent}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-[#FFC857] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                      title="Copiar conteúdo"
+                    >
+                      {copiedContent ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span className="hidden sm:inline">{copiedContent ? 'Copiado!' : 'Copiar'}</span>
+                    </button>
+                  </>
                 )}
                 <button
-                  onClick={() => setSelectedFile(null)}
+                  onClick={() => {
+                    setSelectedFile(null);
+                    setIsEditing(false);
+                  }}
                   className="p-1.5 bg-white hover:bg-[#FEE4E2] border-2 border-[#1A1A2E] rounded-lg text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
                   title="Fechar visualizador"
                 >
@@ -610,13 +740,25 @@ export const FilesTab: React.FC = () => {
                 </div>
               ) : fileError ? (
                 <div className="p-4 bg-[#F04438]/20 border border-[#F04438] rounded-lg text-[#FEE4E2]">
-                  <strong className="block mb-1">Erro de leitura:</strong>
+                  <strong className="block mb-1">Erro:</strong>
                   {fileError}
                 </div>
               ) : fileContent?.isBinary ? (
                 <div className="py-12 text-center space-y-2">
                   <Info className="w-8 h-8 text-[#FFC857] mx-auto" />
                   <p className="font-bold text-white">{fileContent.content}</p>
+                </div>
+              ) : isEditing ? (
+                <div className="h-full flex flex-col space-y-2">
+                  <div className="text-[11px] text-[#FFC857] font-bold">
+                    📝 Editando no Bloco de Notas: digite abaixo e clique em "Salvar Alterações".
+                  </div>
+                  <textarea
+                    value={editedText}
+                    onChange={(e) => setEditedText(e.target.value)}
+                    className="w-full h-80 min-h-[300px] p-3 bg-black/40 border-2 border-[#FFEECB]/30 rounded-lg text-[#FFF7E8] font-mono text-xs leading-relaxed focus:outline-none focus:border-[#FF5A36] resize-y selection:bg-[#FF5A36]"
+                    placeholder="Conteúdo do arquivo..."
+                  />
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -637,6 +779,93 @@ export const FilesTab: React.FC = () => {
               <span>Tamanho: {selectedFile.sizeFormatted}</span>
               <span>Modificado em: {new Date(selectedFile.mtime).toLocaleString('pt-BR')}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Criação de Novo Arquivo (Bloco de Notas) */}
+      {isCreatingModalOpen && (
+        <div className="fixed inset-0 bg-[#1A1A2E]/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-[#1A1A2E] shadow-[6px_6px_0px_#1A1A2E] rounded-xl w-full max-w-xl flex flex-col overflow-hidden animate-in fade-in duration-150">
+            <div className="p-4 bg-[#FFF7E8] border-b-2 border-[#1A1A2E] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FilePlus className="w-5 h-5 text-[#FF5A36]" />
+                <h3 className="text-sm font-black text-[#1A1A2E] font-title">
+                  Criar Novo Arquivo (Bloco de Notas)
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsCreatingModalOpen(false)}
+                className="p-1 hover:bg-[#FEE4E2] rounded border-2 border-transparent hover:border-[#1A1A2E]"
+              >
+                <X className="w-4 h-4 text-[#1A1A2E]" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNewFile} className="p-5 space-y-4">
+              {createError && (
+                <div className="p-3 bg-[#FEE4E2] border-2 border-[#F04438] rounded-lg text-[#F04438] text-xs font-bold">
+                  {createError}
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Diretório de destino:
+                </label>
+                <input
+                  type="text"
+                  disabled
+                  value={currentPath}
+                  className="w-full p-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#717188] select-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Nome do arquivo (ex: lembrete.txt, script.sh, notas.md):
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  placeholder="anotacoes.txt"
+                  className="w-full p-2.5 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Conteúdo inicial (opcional):
+                </label>
+                <textarea
+                  rows={6}
+                  value={newFileContent}
+                  onChange={(e) => setNewFileContent(e.target.value)}
+                  placeholder="Escreva suas anotações ou script aqui..."
+                  className="w-full p-3 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E] focus:outline-none focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36] resize-y"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t-2 border-[#1A1A2E]/10">
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingModalOpen(false)}
+                  className="px-4 py-2 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingFile}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#FF5A36] hover:bg-[#E04522] text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50"
+                >
+                  <Save className={`w-3.5 h-3.5 ${creatingFile ? 'animate-spin' : ''}`} />
+                  <span>{creatingFile ? 'Criando...' : 'Criar Arquivo'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

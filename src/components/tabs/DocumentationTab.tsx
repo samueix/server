@@ -58,6 +58,7 @@ export const DocumentationTab: React.FC = () => {
           <span className="text-[#4A4A68] font-bold mr-1 text-xs">Tópicos:</span>
           {[
             { id: 'all', label: 'Todos os tópicos' },
+            { id: 'update', label: '⚡ Atualizar Painel (Script Git)' },
             { id: '1', label: '1. Identificação' },
             { id: '2', label: '2. Acesso SSH' },
             { id: '3', label: '3. Ubuntu Server' },
@@ -80,6 +81,72 @@ export const DocumentationTab: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* SCRIPT DE ATUALIZAÇÃO DO SERVIDOR */}
+      {(activeSection === 'all' || activeSection === 'update') && (
+        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
+          <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-[#FF5A36]" />
+              <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                Procedimento de Atualização do Painel no Servidor Ubuntu
+              </h2>
+            </div>
+            <button
+              onClick={() => copyToClipboard(`cd /opt/server-panel && \\\ngit pull --ff-only origin main && \\\nnpm run build && \\\nsudo rm -rf /var/www/server-panel/* && \\\nsudo cp -a dist/. /var/www/server-panel/ && \\\nsudo chown -R www-data:www-data /var/www/server-panel && \\\nsudo nginx -t && \\\nsudo systemctl reload nginx && \\\necho "================================" && \\\necho "ATUALIZAÇÃO CONCLUÍDA!" && \\\necho "================================"`, 'update-script')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono font-bold bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
+              title="Copiar comando completo"
+            >
+              {copiedKey === 'update-script' ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-white" />
+                  <span>Copiado com sucesso!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copiar Script de Atualização</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
+            Execute o script em lote abaixo diretamente no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele baixa as últimas alterações do Git, compila o build de produção, copia para o diretório raiz do Nginx (<code className="text-[#1A1A2E] font-mono font-bold">/var/www/server-panel</code>), ajusta as permissões para <code className="text-[#1A1A2E] font-mono font-bold">www-data</code> e recarrega o serviço web.
+          </p>
+
+          <div className="relative">
+            <pre className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs text-[#1A1A2E] font-mono font-bold overflow-x-auto shadow-[2px_2px_0px_#1A1A2E] leading-relaxed selection:bg-[#FFEECB]">
+{`cd /opt/server-panel && \\
+git pull --ff-only origin main && \\
+npm run build && \\
+sudo rm -rf /var/www/server-panel/* && \\
+sudo cp -a dist/. /var/www/server-panel/ && \\
+sudo chown -R www-data:www-data /var/www/server-panel && \\
+sudo nginx -t && \\
+sudo systemctl reload nginx && \\
+echo "================================" && \\
+echo "ATUALIZAÇÃO CONCLUÍDA!" && \\
+echo "================================"`}
+            </pre>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+            <div className="p-3 rounded-lg bg-[#D1FADF] border-2 border-[#12B76A] text-[#12B76A] font-bold">
+              <span>1. Git Pull & Build</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Sincroniza a branch main e compila os pacotes TypeScript/Vite.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-[#E0F2FE] border-2 border-[#00A6FB] text-[#026AA2] font-bold">
+              <span>2. Publicação Nginx</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Substitui os arquivos em /var/www/server-panel com posse www-data.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-[#FEF0C7] border-2 border-[#F79009] text-[#B54708] font-bold">
+              <span>3. Reload Sem Queda</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Valida a sintaxe e recarrega o Nginx sem derrubar conexões ativas.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 1. IDENTIFICAÇÃO DO SERVIDOR */}
       {(activeSection === 'all' || activeSection === '1') && (

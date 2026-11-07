@@ -5,6 +5,8 @@ export type NavigationTab =
   | 'overview' 
   | 'monitoring' 
   | 'files'
+  | 'security'
+  | 'credentials'
   | 'processes' 
   | 'services' 
   | 'network' 

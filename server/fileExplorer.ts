@@ -221,3 +221,43 @@ export async function readTargetFile(filePath: string): Promise<FileReadResponse
     mtime: stat.mtime.toISOString()
   };
 }
+
+export async function createTargetFile(dirPath: string, fileName: string, initialContent: string = ''): Promise<{ success: boolean; filePath: string }> {
+  const resolvedDir = path.resolve(dirPath);
+
+  if (!fs.existsSync(resolvedDir)) {
+    throw new Error(`O diretório informado não existe: ${resolvedDir}`);
+  }
+
+  const cleanName = fileName.trim();
+  if (!cleanName || cleanName.includes('/') || cleanName.includes('\\')) {
+    throw new Error('Nome de arquivo inválido. Não use barras ou caracteres especiais.');
+  }
+
+  const targetFilePath = path.join(resolvedDir, cleanName);
+
+  if (fs.existsSync(targetFilePath)) {
+    throw new Error(`Já existe um arquivo ou pasta com o nome "${cleanName}".`);
+  }
+
+  await fs.promises.writeFile(targetFilePath, initialContent, 'utf-8');
+  return { success: true, filePath: targetFilePath };
+}
+
+export async function saveTargetFile(filePath: string, content: string): Promise<{ success: boolean; size: number }> {
+  const resolvedPath = path.resolve(filePath);
+
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`Arquivo não encontrado para salvar: ${resolvedPath}`);
+  }
+
+  const stat = await fs.promises.stat(resolvedPath);
+  if (stat.isDirectory()) {
+    throw new Error('Não é possível salvar conteúdo de texto em um diretório.');
+  }
+
+  await fs.promises.writeFile(resolvedPath, content, 'utf-8');
+  const newStat = await fs.promises.stat(resolvedPath);
+
+  return { success: true, size: newStat.size };
+}

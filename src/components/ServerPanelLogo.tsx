@@ -23,6 +23,16 @@ export const ServerPanelLogo: React.FC<ServerPanelLogoProps> = ({
         </svg>
       </div>
 
+      {/* Pinguim Tux pulando */}
+      <div className="relative w-8 h-8 shrink-0 flex items-center justify-center -ml-1">
+        <img 
+          src="/download.gif" 
+          alt="Linux Tux pulando" 
+          className="w-8 h-8 object-contain pointer-events-none drop-shadow-[1px_1px_0px_#1A1A2E]" 
+          title="Tux Linux"
+        />
+      </div>
+
       {!compact && (
         <div className="flex flex-col leading-tight">
           <span className="text-sm font-bold font-title text-[#1A1A2E] tracking-tight">

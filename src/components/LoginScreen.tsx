@@ -2,15 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { 
   Lock, 
   User, 
-  Key, 
   Eye, 
   EyeOff, 
   AlertCircle, 
   CheckCircle2, 
   RefreshCw,
   ShieldCheck,
-  Server,
-  Zap,
   Globe
 } from 'lucide-react';
 import { verifyCredentialsWithServer } from '../services/authService';
@@ -25,10 +22,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   onLoginSuccess,
   logoutNotice
 }) => {
-  const [authMode, setAuthMode] = useState<'basic' | 'apikey'>('basic');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [apiKey, setApiKey] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -70,11 +65,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     setLoading(true);
 
     try {
-      const result = await verifyCredentialsWithServer(
-        authMode === 'basic'
-          ? { username: username.trim(), password }
-          : { apiKey: apiKey.trim() }
-      );
+      const result = await verifyCredentialsWithServer({
+        username: username.trim(),
+        password
+      });
 
       if (result.success && result.user) {
         onLoginSuccess(result.user, result.role);
@@ -90,20 +84,33 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
   return (
     <div className="min-h-screen bg-[#FFF7E8] text-[#1A1A2E] flex flex-col justify-center items-center p-4 sm:p-6 font-sans select-none relative overflow-hidden">
-      {/* Decorative Geometric Neo-Brutalist Background Elements */}
-      <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-[#FFC857] border-4 border-[#1A1A2E] -z-0 opacity-40 pointer-events-none" />
-      <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-3xl bg-[#00A6FB] border-4 border-[#1A1A2E] rotate-12 -z-0 opacity-20 pointer-events-none" />
+      {/* Fundo aprimorado com grade técnica limpa e formas geométricas sólidas */}
+      <div 
+        className="absolute inset-0 pointer-events-none opacity-25 -z-0"
+        style={{
+          backgroundImage: 'radial-gradient(#1A1A2E 1.2px, transparent 1.2px)',
+          backgroundSize: '24px 24px'
+        }}
+      />
+      <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-[#FFC857] border-4 border-[#1A1A2E] -z-0 opacity-50 pointer-events-none shadow-[4px_4px_0px_#1A1A2E]" />
+      <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-3xl bg-[#00A6FB] border-4 border-[#1A1A2E] rotate-12 -z-0 opacity-25 pointer-events-none shadow-[4px_4px_0px_#1A1A2E]" />
+      <div className="absolute top-1/4 -left-10 w-24 h-24 rounded-xl bg-[#FF5A36] border-2 border-[#1A1A2E] -rotate-12 -z-0 opacity-20 pointer-events-none" />
 
       <div className="w-full max-w-4xl grid grid-cols-1 md:grid-cols-12 gap-6 relative z-10 items-stretch">
-        {/* Left Side: Bold Server Identity & Telemetry Highlights (Non-generic hero) */}
-        <div className="md:col-span-5 bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl p-6 flex flex-col justify-between">
+        {/* Painel Esquerdo: Identidade do Servidor */}
+        <div className="md:col-span-5 bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl p-6 flex flex-col justify-between relative overflow-hidden">
+          {/* Marca d'água de fundo translúcido */}
+          <div className="absolute -right-4 -bottom-4 w-44 h-44 opacity-20 pointer-events-none select-none">
+            <img src="/download.gif" alt="" className="w-full h-full object-contain" />
+          </div>
+
           <div>
             <div className="inline-flex items-center gap-2 bg-white text-[#1A1A2E] px-3 py-1 rounded-full border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] font-bold text-xs mb-4">
               <span className="w-2.5 h-2.5 rounded-full bg-[#12B76A] border border-[#1A1A2E]" />
               <span>samuelserver</span>
             </div>
 
-            <div className="w-14 h-14 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] flex items-center justify-center text-[#FF5A36] mb-4 p-2.5">
+            <div className="w-14 h-14 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] flex items-center justify-center text-[#FF5A36] p-2.5 mb-4">
               <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
                 <path fill="currentColor" d="M2.273 9.53a2.273 2.273 0 1 0 0-4.546 2.273 2.273 0 0 0 0 4.547Zm9.467-4.984a2.273 2.273 0 1 0 0-4.546 2.273 2.273 0 0 0 0 4.546M7.4 13.108a5.54 5.54 0 0 1-3.775-2.88 3.27 3.27 0 0 1-1.944.24 7.4 7.4 0 0 0 5.328 4.465c.53.113 1.072.169 1.614.166a3.25 3.25 0 0 1-.666-1.9 6 6 0 0 1-.557-.091m3.828 2.285a2.273 2.273 0 1 0 0-4.546 2.273 2.273 0 0 0 0 4.546m3.163-3.108a7.44 7.44 0 0 0 .373-8.726 3.3 3.3 0 0 1-1.278 1.498 5.57 5.57 0 0 1-.183 5.535 3.26 3.26 0 0 1 1.088 1.693M2.098 3.998a3.3 3.3 0 0 1 1.897.486 5.54 5.54 0 0 1 4.464-2.388c.037-.67.277-1.313.69-1.843a7.47 7.47 0 0 0-7.051 3.745"/>
               </svg>
@@ -113,7 +120,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               Ubuntu Server Panel
             </h1>
             <p className="text-xs text-white/90 font-medium leading-relaxed mb-6">
-              Telemetria operacional em tempo real de hardware, serviços systemd, AdGuard Home e métricas de rede local.
+              Telemetria operacional em tempo real de hardware, serviços systemd, AdGuard Home, explorador de arquivos e segurança de rede.
             </p>
 
             <div className="space-y-2 font-mono text-xs">
@@ -138,16 +145,16 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </div>
         </div>
 
-        {/* Right Side: Bold Neo-Brutalist Authentication Form Card */}
+        {/* Painel Direito: Formulário de Autenticação (Apenas Usuário e Senha) */}
         <div className="md:col-span-7 bg-white border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl p-6 sm:p-7 flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-3 mb-4 border-b-2 border-[#1A1A2E]">
+            <div className="flex items-center justify-between pb-3 mb-5 border-b-2 border-[#1A1A2E]">
               <div>
                 <h2 className="text-lg font-bold font-title text-[#1A1A2E]">Acesso ao Sistema</h2>
-                <span className="text-xs text-[#4A4A68]">Autentique-se para gerenciar o servidor</span>
+                <span className="text-xs text-[#4A4A68]">Autentique-se com usuário e senha para gerenciar</span>
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono font-bold px-2.5 py-1 rounded-full bg-[#FFC857] border-2 border-[#1A1A2E]">
-                <span>Porta 8000</span>
+                <span>Ubuntu 24.04</span>
               </div>
             </div>
 
@@ -167,108 +174,56 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
               </div>
             )}
 
-            {/* Seletor de Modo: Basic Auth vs API Key */}
-            <div className="grid grid-cols-2 gap-2 p-1 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg mb-4 text-xs font-mono">
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('basic');
-                  setErrorMsg(null);
-                }}
-                className={`py-1.5 rounded-md font-bold transition-all text-center ${
-                  authMode === 'basic'
-                    ? 'bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]'
-                    : 'text-[#1A1A2E] hover:bg-white/60'
-                }`}
-              >
-                Usuário e senha
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setAuthMode('apikey');
-                  setErrorMsg(null);
-                }}
-                className={`py-1.5 rounded-md font-bold transition-all text-center ${
-                  authMode === 'apikey'
-                    ? 'bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]'
-                    : 'text-[#1A1A2E] hover:bg-white/60'
-                }`}
-              >
-                Chave de API
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-3.5">
-              {authMode === 'basic' ? (
-                <>
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-[#1A1A2E]">
-                      Usuário
-                    </label>
-                    <div className="relative">
-                      <User className="w-4 h-4 text-[#4A4A68] absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        placeholder="admin ou user"
-                        required
-                        autoComplete="username"
-                        className="w-full pl-9 pr-3 py-2 rounded-md bg-[#FFF7E8]/40 border-2 border-[#1A1A2E] text-[#1A1A2E] placeholder-[#4A4A68]/60 text-xs font-mono focus:outline-none focus:bg-white focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36] transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-[#1A1A2E]">
-                      Senha
-                    </label>
-                    <div className="relative">
-                      <Lock className="w-4 h-4 text-[#4A4A68] absolute left-3 top-1/2 -translate-y-1/2" />
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••"
-                        required
-                        autoComplete="current-password"
-                        className="w-full pl-9 pr-10 py-2 rounded-md bg-[#FFF7E8]/40 border-2 border-[#1A1A2E] text-[#1A1A2E] placeholder-[#4A4A68]/60 text-xs font-mono focus:outline-none focus:bg-white focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36] transition-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(prev => !prev)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-[#4A4A68] hover:text-[#1A1A2E] transition"
-                        tabIndex={-1}
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-[#1A1A2E]">
-                    Chave de API
-                  </label>
-                  <div className="relative">
-                    <Key className="w-4 h-4 text-[#4A4A68] absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="password"
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="Chave secreta configurada no .env"
-                      required
-                      className="w-full pl-9 pr-3 py-2 rounded-md bg-[#FFF7E8]/40 border-2 border-[#1A1A2E] text-[#1A1A2E] placeholder-[#4A4A68]/60 text-xs font-mono focus:outline-none focus:bg-white focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36] transition-all"
-                    />
-                  </div>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#1A1A2E]">
+                  Usuário
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-[#4A4A68] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="admin ou user"
+                    required
+                    autoComplete="username"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] text-[#1A1A2E] placeholder-[#4A4A68]/60 text-xs font-mono focus:outline-none focus:bg-white focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36] transition-all"
+                  />
                 </div>
-              )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#1A1A2E]">
+                  Senha
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-[#4A4A68] absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    autoComplete="current-password"
+                    className="w-full pl-9 pr-10 py-2.5 rounded-lg bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] text-[#1A1A2E] placeholder-[#4A4A68]/60 text-xs font-mono focus:outline-none focus:bg-white focus:border-[#FF5A36] focus:shadow-[2px_2px_0px_#FF5A36] transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(prev => !prev)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#4A4A68] hover:text-[#1A1A2E] transition p-1"
+                    tabIndex={-1}
+                    title={showPassword ? 'Ocultar senha' : 'Ver senha'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 rounded-md bg-[#FF5A36] hover:bg-[#E04522] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-4 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                className="w-full py-3 rounded-lg bg-[#FF5A36] hover:bg-[#E04522] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-6 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
               >
                 {loading ? (
                   <>
@@ -278,11 +233,19 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 ) : (
                   <>
                     <ShieldCheck className="w-4 h-4" />
-                    <span>Entrar</span>
+                    <span>Entrar no Painel</span>
                   </>
                 )}
               </button>
             </form>
+          </div>
+
+          <div className="pt-4 mt-4 border-t-2 border-[#1A1A2E]/10 flex items-center justify-between text-[11px] font-mono text-[#4A4A68]">
+            <span>samuelserver • Ubuntu 24.04 LTS</span>
+            <div className="flex items-center gap-1.5 font-bold text-[#12B76A]">
+              <span className="w-2 h-2 rounded-full bg-[#12B76A]" />
+              <span>Seguro</span>
+            </div>
           </div>
         </div>
       </div>

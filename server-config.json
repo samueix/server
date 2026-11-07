@@ -1,0 +1,46 @@
+{
+  "ubuntu": {
+    "user": "samuel",
+    "password": "",
+    "sshPort": 22,
+    "description": "Usuário padrão do sistema operacional Ubuntu Server"
+  },
+  "adguard": {
+    "url": "http://127.0.0.1:8081",
+    "username": "admin",
+    "password": "",
+    "description": "Configuração da API local do AdGuard Home DNS"
+  },
+  "auth": {
+    "adminUser": "admin",
+    "adminPass": "075561@Sam",
+    "userUser": "user",
+    "userPass": "075561@Sam",
+    "description": "Credenciais de acesso ao Server Panel (sem necessidade de .env)"
+  },
+  "n8n": {
+    "url": "http://127.0.0.1:5678",
+    "apiKey": "",
+    "description": "Chave de API e endpoint do n8n Workflow Automation"
+  },
+  "customVariables": [
+    {
+      "id": "var_1",
+      "key": "PORTA_FASTAPI",
+      "value": "8000",
+      "description": "Porta do serviço Python FastAPI local"
+    },
+    {
+      "id": "var_2",
+      "key": "IP_LOCAL_PADRAO",
+      "value": "192.168.100.23",
+      "description": "IP fixo do servidor na rede local"
+    },
+    {
+      "id": "var_3",
+      "key": "GATEWAY_ROUTER",
+      "value": "192.168.100.1",
+      "description": "IP do roteador gateway da rede local"
+    }
+  ]
+}

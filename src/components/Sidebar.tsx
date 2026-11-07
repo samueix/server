@@ -15,7 +15,9 @@ import {
   Radio,
   ScrollText,
   GitBranch,
-  Folder
+  Folder,
+  ShieldAlert,
+  Key
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 
@@ -47,6 +49,8 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'adguard', label: 'AdGuard Home', icon: Shield },
   { id: 'ping', label: 'Ping / Latência', icon: Radio },
   { id: 'files', label: 'Arquivos', icon: Folder, adminOnly: true },
+  { id: 'security', label: 'Segurança & Ataques', icon: ShieldAlert, badge: 'Auditor', adminOnly: true },
+  { id: 'credentials', label: 'Credenciais & APIs', icon: Key, badge: 'Config', adminOnly: true },
   { id: 'processes', label: 'Processos', icon: Cpu, adminOnly: true },
   { id: 'services', label: 'Serviços', icon: ShieldCheck, adminOnly: true },
   { id: 'network', label: 'Rede & MAC', icon: Network, adminOnly: true },
@@ -131,8 +135,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
+      {/* Pinguim Tux pulando dentro do painel */}
+      <div className="mt-2 p-2 rounded-lg bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-md bg-[#FFF7E8] border border-[#1A1A2E] flex items-center justify-center p-0.5 shrink-0">
+          <img src="/download.gif" alt="Tux" className="w-7 h-7 object-contain" />
+        </div>
+        <div className="leading-tight min-w-0">
+          <span className="text-[11px] font-black font-title text-[#1A1A2E] block truncate">Ubuntu Tux</span>
+          <span className="text-[10px] font-mono font-bold text-[#12B76A] block">Sistema Ativo</span>
+        </div>
+      </div>
+
       {/* Flat Status Footer in sidebar */}
-      <div className="mt-3 p-3 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs font-mono text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2">
+      <div className="mt-2 p-3 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs font-mono text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-[#4A4A68] font-sans font-medium">API FastAPI</span>
           <span className={`flex items-center gap-1.5 font-bold ${isOnline ? 'text-[#12B76A]' : 'text-[#F04438]'}`}>

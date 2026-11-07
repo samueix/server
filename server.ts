@@ -31,8 +31,10 @@ import {
   DomainAnalysis 
 } from './server/db.js';
 import { analyzeDomainWithGemini } from './server/gemini.js';
-import { listDirectory, readTargetFile } from './server/fileExplorer.js';
+import { listDirectory, readTargetFile, createTargetFile, saveTargetFile } from './server/fileExplorer.js';
 import { runShellCommand } from './server/terminalRunner.js';
+import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
+import { getSecurityAttackStatus, recordPanelFailedLogin } from './server/securityMonitor.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
   setN8nConfig as setN8nConfigFallback,
@@ -133,13 +135,15 @@ async function startServer() {
 
   function checkAdminPass(pass?: string): boolean {
     if (!pass) return false;
-    const expected = process.env.ADMIN_PASSWORD || defaultAdminPass;
+    const config = getServerConfig();
+    const expected = config.auth?.adminPass || process.env.ADMIN_PASSWORD || defaultAdminPass;
     return timingSafeCompare(pass, expected);
   }
 
   function checkUserPass(pass?: string): boolean {
     if (!pass) return false;
-    const expected = process.env.USER_PASSWORD || defaultUserPass;
+    const config = getServerConfig();
+    const expected = config.auth?.userPass || process.env.USER_PASSWORD || defaultUserPass;
     return timingSafeCompare(pass, expected);
   }
 
@@ -150,15 +154,16 @@ async function startServer() {
 
   function verifyUserPass(user?: string, pass?: string): { authenticated: boolean; role?: 'admin' | 'user'; username?: string } {
     if (!user || !pass) return { authenticated: false };
-    const validAdminUser = (process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
-    const validStandardUser = (process.env.USER_USERNAME || 'user').trim().toLowerCase();
+    const config = getServerConfig();
+    const validAdminUser = (config.auth?.adminUser || process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
+    const validStandardUser = (config.auth?.userUser || process.env.USER_USERNAME || 'user').trim().toLowerCase();
     const uClean = user.trim().toLowerCase();
 
     if (uClean === validAdminUser && checkAdminPass(pass)) {
-      return { authenticated: true, role: 'admin', username: process.env.ADMIN_USERNAME || 'admin' };
+      return { authenticated: true, role: 'admin', username: config.auth?.adminUser || 'admin' };
     }
     if (uClean === validStandardUser && checkUserPass(pass)) {
-      return { authenticated: true, role: 'user', username: process.env.USER_USERNAME || 'user' };
+      return { authenticated: true, role: 'user', username: config.auth?.userUser || 'user' };
     }
     return { authenticated: false };
   }
@@ -245,6 +250,7 @@ async function startServer() {
     }
 
     // Falha: incrementa contador de tentativas com janela de 5 minutos
+    recordPanelFailedLogin(clientIp, 'tentativa_web');
     if (!rateLimit || now > rateLimit.resetAt) {
       failedLoginAttempts.set(clientIp, { count: 1, resetAt: now + 300000 });
     } else {
@@ -559,6 +565,64 @@ async function startServer() {
     }
   });
 
+  // Criar novo arquivo de texto (Bloco de Notas)
+  app.post('/api/files/create', async (req, res) => {
+    applyCors(res);
+    try {
+      const { dirPath, name, content } = req.body || {};
+      if (!dirPath || !name) {
+        return res.status(400).json({ error: 'dirPath e name são obrigatórios.' });
+      }
+      const result = await createTargetFile(dirPath, name, content || '');
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Salvar edições em arquivo de texto (Bloco de Notas)
+  app.post('/api/files/save', async (req, res) => {
+    applyCors(res);
+    try {
+      const { path: filePath, content } = req.body || {};
+      if (!filePath || content === undefined) {
+        return res.status(400).json({ error: 'path e content são obrigatórios.' });
+      }
+      const result = await saveTargetFile(filePath, content);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Rotas de Credenciais e Variáveis de Sistema (sem .env)
+  app.get('/api/credentials', (req, res) => {
+    applyCors(res);
+    const config = getServerConfig();
+    return res.json(config);
+  });
+
+  app.post('/api/credentials', (req, res) => {
+    applyCors(res);
+    try {
+      const updated = saveServerConfig(req.body);
+      return res.json({ success: true, message: 'Configurações salvas em server-config.json com sucesso.', config: updated });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Rota de Auditoria e Detecção de Ataques / Tentativas de Invasão
+  app.get('/api/security/attack-monitor', async (req, res) => {
+    applyCors(res);
+    try {
+      const status = await getSecurityAttackStatus();
+      return res.json(status);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   // Rota de Execução de Comandos Shell no Terminal
   app.post('/api/terminal/exec', async (req, res) => {
     applyCors(res);
@@ -596,7 +660,9 @@ async function startServer() {
       '/api/ping',
       '/api/n8n',
       '/api/files',
-      '/api/terminal'
+      '/api/terminal',
+      '/api/credentials',
+      '/api/security'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();

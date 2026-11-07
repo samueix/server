@@ -21,6 +21,8 @@ const PingTab = React.lazy(() => import('./components/tabs/PingTab').then(m => (
 const LogsTab = React.lazy(() => import('./components/tabs/LogsTab').then(m => ({ default: m.LogsTab })));
 const N8nTab = React.lazy(() => import('./components/tabs/N8nTab').then(m => ({ default: m.N8nTab })));
 const FilesTab = React.lazy(() => import('./components/tabs/FilesTab').then(m => ({ default: m.FilesTab })));
+const SecurityTab = React.lazy(() => import('./components/tabs/SecurityTab').then(m => ({ default: m.SecurityTab })));
+const CredentialsTab = React.lazy(() => import('./components/tabs/CredentialsTab').then(m => ({ default: m.CredentialsTab })));
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -644,6 +646,22 @@ export default function App() {
               <Suspense fallback={<TabLoadingFallback />}>
                 <TabErrorBoundary tabName="Arquivos">
                   <FilesTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'security' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Segurança & Ataques">
+                  <SecurityTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'credentials' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Credenciais & Variáveis">
+                  <CredentialsTab />
                 </TabErrorBoundary>
               </Suspense>
             )}

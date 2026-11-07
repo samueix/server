@@ -91,9 +91,10 @@ export const LogsTab: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [autoScroll, setAutoScroll] = useState<boolean>(true);
+  const [autoScroll, setAutoScroll] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
 
+  const terminalContainerRef = useRef<HTMLDivElement | null>(null);
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isFetchingRef = useRef<boolean>(false);
@@ -174,10 +175,10 @@ export const LogsTab: React.FC = () => {
     };
   }, [isStreaming, streamInterval, loadLogs]);
 
-  // Auto-scroll
+  // Auto-scroll contido exclusivamente dentro do container do terminal (sem rolar a página inteira)
   useEffect(() => {
-    if (autoScroll && terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (autoScroll && terminalContainerRef.current) {
+      terminalContainerRef.current.scrollTop = terminalContainerRef.current.scrollHeight;
     }
   }, [logsData, autoScroll]);
 
@@ -569,7 +570,7 @@ export const LogsTab: React.FC = () => {
         )}
 
         {/* Terminal Body */}
-        <div className="p-4 overflow-x-auto max-h-[560px] min-h-[380px] font-mono text-xs leading-relaxed selection:bg-[#FFEECB] bg-white text-[#1A1A2E]">
+        <div ref={terminalContainerRef} className="p-4 overflow-y-auto overflow-x-auto max-h-[560px] min-h-[380px] font-mono text-xs leading-relaxed selection:bg-[#FFEECB] bg-white text-[#1A1A2E]">
           {isLoading && !logsData ? (
             <div className="flex flex-col items-center justify-center py-20 text-[#717188] gap-3">
               <RefreshCw className="w-6 h-6 animate-spin text-[#FF5A36]" />
