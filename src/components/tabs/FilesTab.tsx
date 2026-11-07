@@ -63,6 +63,7 @@ export const FilesTab: React.FC = () => {
   const [isCreatingModalOpen, setIsCreatingModalOpen] = useState<boolean>(false);
   const [newFileName, setNewFileName] = useState<string>('notas.txt');
   const [newFileContent, setNewFileContent] = useState<string>('');
+  const [targetCreateDir, setTargetCreateDir] = useState<string>('/home/samuel');
   const [creatingFile, setCreatingFile] = useState<boolean>(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
@@ -167,16 +168,18 @@ export const FilesTab: React.FC = () => {
     e.preventDefault();
     setCreatingFile(true);
     setCreateError(null);
+    const destination = (targetCreateDir || currentPath || '/home/samuel').trim();
     try {
-      await createFile(currentPath, newFileName, newFileContent);
+      await createFile(destination, newFileName.trim(), newFileContent);
       setIsCreatingModalOpen(false);
+      const createdName = newFileName.trim();
       setNewFileName('notas.txt');
       setNewFileContent('');
-      setActionNotice(`Arquivo "${newFileName}" criado com sucesso!`);
+      setActionNotice(`Arquivo "${createdName}" criado com sucesso em ${destination}!`);
       setTimeout(() => setActionNotice(null), 3500);
-      loadFolder(currentPath);
+      loadFolder(destination);
     } catch (err: any) {
-      setCreateError(err.message || 'Falha ao criar arquivo.');
+      setCreateError(err.message || 'Falha ao criar arquivo no servidor.');
     } finally {
       setCreatingFile(false);
     }
@@ -809,21 +812,43 @@ export const FilesTab: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-1">
-                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
-                  Diretório de destino:
-                </label>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                    Pasta onde salvar:
+                  </label>
+                  <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                    <button
+                      type="button"
+                      onClick={() => setTargetCreateDir(currentPath)}
+                      className="px-2 py-0.5 rounded bg-[#FFF7E8] hover:bg-[#FFEECB] border border-[#1A1A2E] text-[#1A1A2E] font-bold"
+                      title="Usar pasta atual"
+                    >
+                      Pasta Atual
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTargetCreateDir('/home/samuel')}
+                      className="px-2 py-0.5 rounded bg-[#FFF7E8] hover:bg-[#FFEECB] border border-[#1A1A2E] text-[#1A1A2E] font-bold"
+                      title="Salvar na pasta do usuário samuel"
+                    >
+                      /home/samuel
+                    </button>
+                  </div>
+                </div>
                 <input
                   type="text"
-                  disabled
-                  value={currentPath}
-                  className="w-full p-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#717188] select-none"
+                  required
+                  value={targetCreateDir}
+                  onChange={(e) => setTargetCreateDir(e.target.value)}
+                  placeholder="/home/samuel"
+                  className="w-full p-2 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:border-[#FF5A36]"
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
-                  Nome do arquivo (ex: lembrete.txt, script.sh, notas.md):
+                  Nome do arquivo (ex: notas.txt, script.sh, dados.json):
                 </label>
                 <input
                   type="text"

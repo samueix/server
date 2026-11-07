@@ -92,42 +92,34 @@ export const DocumentationTab: React.FC = () => {
                 Procedimento de Atualização do Painel no Servidor Ubuntu
               </h2>
             </div>
-            <button
-              onClick={() => copyToClipboard(`cd /opt/server-panel && \\\ngit pull --ff-only origin main && \\\nnpm run build && \\\nsudo rm -rf /var/www/server-panel/* && \\\nsudo cp -a dist/. /var/www/server-panel/ && \\\nsudo chown -R www-data:www-data /var/www/server-panel && \\\nsudo nginx -t && \\\nsudo systemctl reload nginx && \\\necho "================================" && \\\necho "ATUALIZAÇÃO CONCLUÍDA!" && \\\necho "================================"`, 'update-script')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono font-bold bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
-              title="Copiar comando completo"
-            >
-              {copiedKey === 'update-script' ? (
-                <>
-                  <Check className="w-3.5 h-3.5 text-white" />
-                  <span>Copiado com sucesso!</span>
-                </>
-              ) : (
-                <>
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>Copiar Script de Atualização</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => copyToClipboard(`cd /opt/server-panel && git pull --ff-only origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`, 'update-script')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono font-bold bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
+                title="Copiar comando em linha única para o shell"
+              >
+                {copiedKey === 'update-script' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-white" />
+                    <span>Copiado em Linha Única!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copiar Comando em Linha Única</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            Execute o script em lote abaixo diretamente no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele baixa as últimas alterações do Git, compila o build de produção, copia para o diretório raiz do Nginx (<code className="text-[#1A1A2E] font-mono font-bold">/var/www/server-panel</code>), ajusta as permissões para <code className="text-[#1A1A2E] font-mono font-bold">www-data</code> e recarrega o serviço web.
+            Execute o script em linha única abaixo diretamente no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele baixa as últimas alterações do Git, compila o build de produção, copia para o diretório raiz do Nginx (<code className="text-[#1A1A2E] font-mono font-bold">/var/www/server-panel</code>), ajusta as permissões para <code className="text-[#1A1A2E] font-mono font-bold">www-data</code> e recarrega o serviço web.
           </p>
 
           <div className="relative">
             <pre className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs text-[#1A1A2E] font-mono font-bold overflow-x-auto shadow-[2px_2px_0px_#1A1A2E] leading-relaxed selection:bg-[#FFEECB]">
-{`cd /opt/server-panel && \\
-git pull --ff-only origin main && \\
-npm run build && \\
-sudo rm -rf /var/www/server-panel/* && \\
-sudo cp -a dist/. /var/www/server-panel/ && \\
-sudo chown -R www-data:www-data /var/www/server-panel && \\
-sudo nginx -t && \\
-sudo systemctl reload nginx && \\
-echo "================================" && \\
-echo "ATUALIZAÇÃO CONCLUÍDA!" && \\
-echo "================================"`}
+{`cd /opt/server-panel && git pull --ff-only origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`}
             </pre>
           </div>
 
@@ -490,45 +482,125 @@ echo "================================"`}
         </div>
       )}
 
-      {/* 7. PREPARAÇÃO PARA O N8N */}
+      {/* 7. GUIA COMPLETO DO N8N NO UBUNTU */}
       {(activeSection === 'all' || activeSection === '7') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Workflow className="w-4 h-4 text-[#FF5A36]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              7. Planejamento de instalação futura: n8n Workflow Automation
-            </h2>
+          <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Workflow className="w-4 h-4 text-[#FF5A36]" />
+              <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                7. Guia Oficial de Instalação e Configuração do n8n no Ubuntu
+              </h2>
+            </div>
+            <span className="text-[11px] font-mono font-bold bg-[#ECFDF3] text-[#12B76A] border border-[#12B76A] px-2 py-0.5 rounded">
+              Porta Padrão: 5678
+            </span>
           </div>
 
-          <div className="p-4 rounded-lg bg-[#FEF0C7] border-2 border-[#1A1A2E] text-xs text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-            <strong className="text-[#B54708]">Status de instalação:</strong> O n8n é o próximo serviço que será adicionado ao servidor.
-            Ele <em>não</em> está instalado no momento. O painel e o Nginx já estão estruturalmente preparados para sua recepção futura.
-          </div>
+          <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
+            O <strong>n8n</strong> é a plataforma de automação e orquestração de fluxos (workflows) para integrar seu Ubuntu Server com Telegram, WhatsApp, APIs externas e bancos de dados. Abaixo estão os dois métodos oficiais para instalá-lo no Ubuntu 24.04/22.04.
+          </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2 shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#1A1A2E] font-bold block">Especificações planejadas:</span>
-              <ul className="space-y-1 text-[#4A4A68] text-xs font-medium">
-                <li><strong className="text-[#1A1A2E]">Porta padrão:</strong> 5678 (HTTP / Webhooks)</li>
-                <li><strong className="text-[#1A1A2E]">Tipo de execução:</strong> Contêiner Docker ou Serviço systemd Node.js</li>
-                <li><strong className="text-[#1A1A2E]">Diretório de persistência:</strong> <code className="text-[#1A1A2E] font-mono font-bold">/home/samuel/.n8n</code></li>
-                <li><strong className="text-[#1A1A2E]">Banco de dados:</strong> SQLite local ou PostgreSQL</li>
-              </ul>
+          {/* Método 1: Docker (Recomendado) */}
+          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                Método 1: Instalação via Docker (Recomendado)
+              </span>
+              <button
+                onClick={() => copyToClipboard(`docker run -d --name n8n --restart always -p 5678:5678 -v ~/.n8n:/home/node/.n8n -e N8N_HOST="192.168.100.23" -e WEBHOOK_URL="http://192.168.100.23:5678/" n8nio/n8n`, 'docker-n8n')}
+                className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
+              >
+                {copiedKey === 'docker-n8n' ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
+                <span>{copiedKey === 'docker-n8n' ? 'Copiado!' : 'Copiar comando Docker'}</span>
+              </button>
             </div>
 
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2 shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#1A1A2E] font-bold block">Roteamento Nginx planejado:</span>
-              <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-                Quando o n8n for ativado, bastará incluir o bloco de proxy no Nginx:
-              </p>
-              <pre className="p-3 rounded-md bg-white border-2 border-[#1A1A2E] text-xs text-[#1A1A2E] font-mono font-bold overflow-x-auto shadow-sm">
+            <pre className="p-3 rounded bg-[#1A1A2E] text-[#ECFDF3] text-xs font-mono font-bold overflow-x-auto leading-relaxed">
+{`docker run -d \\
+  --name n8n \\
+  --restart always \\
+  -p 5678:5678 \\
+  -v ~/.n8n:/home/node/.n8n \\
+  -e N8N_HOST="192.168.100.23" \\
+  -e WEBHOOK_URL="http://192.168.100.23:5678/" \\
+  n8nio/n8n`}
+            </pre>
+          </div>
+
+          {/* Método 2: Instalação Nativa via npm & systemd */}
+          <div className="p-4 rounded-lg bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                Método 2: Instalação Nativa via npm (Node.js) & systemd
+              </span>
+              <button
+                onClick={() => copyToClipboard(`sudo npm install -g n8n && n8n`, 'npm-n8n')}
+                className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
+              >
+                {copiedKey === 'npm-n8n' ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
+                <span>{copiedKey === 'npm-n8n' ? 'Copiado!' : 'Copiar comando npm'}</span>
+              </button>
+            </div>
+
+            <pre className="p-3 rounded bg-[#1A1A2E] text-[#ECFDF3] text-xs font-mono font-bold overflow-x-auto leading-relaxed">
+{`# 1. Instalar o n8n globalmente com Node.js 18+ ou 20+
+sudo npm install -g n8n
+
+# 2. Criar serviço systemd para inicialização automática (/etc/systemd/system/n8n.service):
+[Unit]
+Description=n8n Workflow Automation
+After=network.target
+
+[Service]
+Type=simple
+User=samuel
+ExecStart=/usr/bin/n8n
+Restart=on-failure
+Environment="N8N_PORT=5678"
+Environment="N8N_HOST=192.168.100.23"
+
+[Install]
+WantedBy=multi-user.target
+
+# 3. Ativar e iniciar o serviço
+sudo systemctl daemon-reload && sudo systemctl enable --now n8n`}
+            </pre>
+          </div>
+
+          {/* Proxy Reverso Nginx com WebSockets para n8n */}
+          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                Configuração do Proxy Reverso Nginx (/etc/nginx/sites-available/default)
+              </span>
+              <button
+                onClick={() => copyToClipboard(`location /n8n/ {\n    proxy_pass http://127.0.0.1:5678/;\n    proxy_http_version 1.1;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;\n    proxy_buffering off;\n    proxy_cache off;\n}`, 'nginx-n8n')}
+                className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
+              >
+                {copiedKey === 'nginx-n8n' ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
+                <span>{copiedKey === 'nginx-n8n' ? 'Copiado!' : 'Copiar bloco Nginx'}</span>
+              </button>
+            </div>
+
+            <p className="text-xs text-[#4A4A68] leading-relaxed">
+              O n8n requer suporte obrigatório a WebSockets (<code className="font-mono font-bold text-[#1A1A2E]">Upgrade $http_upgrade</code>) para que a interface de criação de nós e nós de trigger em tempo real funcionem perfeitamente.
+            </p>
+
+            <pre className="p-3 rounded bg-[#1A1A2E] text-[#ECFDF3] text-xs font-mono font-bold overflow-x-auto leading-relaxed">
 {`location /n8n/ {
     proxy_pass http://127.0.0.1:5678/;
+    proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_cache off;
 }`}
-              </pre>
-            </div>
+            </pre>
           </div>
         </div>
       )}

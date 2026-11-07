@@ -55,13 +55,25 @@ export function runShellCommand(commandString: string, requestedCwd?: string): P
 
     const startTime = Date.now();
 
+    // Normaliza contra-barras que causam comando inválido no bash quando coladas em linha única (ex: "\ git" -> "git")
+    const sanitizedCommand = trimmed
+      .replace(/\\\s*[\r\n]+\s*/g, ' ')
+      .replace(/\\\s+/g, ' ')
+      .trim();
+
     exec(
-      trimmed,
+      sanitizedCommand,
       {
         cwd: targetCwd,
         shell: '/bin/bash',
-        timeout: 20000, // 20s timeout
-        maxBuffer: 1024 * 1024 * 3 // 3MB max buffer
+        timeout: 90000, // 90s timeout para suportar git pull e npm run build
+        maxBuffer: 1024 * 1024 * 10, // 10MB max buffer
+        env: {
+          ...process.env,
+          PATH: process.env.PATH 
+            ? `${process.env.PATH}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`
+            : '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+        }
       },
       (error, stdout, stderr) => {
         const executionTimeMs = Date.now() - startTime;

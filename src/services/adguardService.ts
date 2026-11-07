@@ -344,6 +344,24 @@ export const adguardService = {
   getAdGuardStats,
   getAdGuardQueryLog,
 
+  async clearAdGuardHistory(): Promise<{ success: boolean; message: string; shellCommand: string }> {
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
+    const res = await fetch('/api/adguard/clear-history', { method: 'POST', headers });
+    if (!res.ok) {
+      throw new Error('Falha ao zerar histórico do AdGuard no servidor');
+    }
+    return res.json();
+  },
+
+  async getClearCommand(): Promise<string> {
+    const res = await fetch('/api/adguard/clear-command');
+    if (res.ok) {
+      const data = await res.json();
+      return data.shellCommand;
+    }
+    return 'curl -s -X POST -u "admin:SENHA" http://127.0.0.1:8081/control/querylog_clear && curl -s -X POST -u "admin:SENHA" http://127.0.0.1:8081/control/stats_reset';
+  },
+
   async fetchFullAdGuard(signal?: AbortSignal): Promise<AdGuardFullTelemetry> {
     try {
       const [statusRes, statsRes, logsRes] = await Promise.allSettled([

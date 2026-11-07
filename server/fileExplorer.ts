@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
 
 export interface FileItem {
   name: string;
@@ -240,8 +241,33 @@ export async function createTargetFile(dirPath: string, fileName: string, initia
     throw new Error(`Já existe um arquivo ou pasta com o nome "${cleanName}".`);
   }
 
-  await fs.promises.writeFile(targetFilePath, initialContent, 'utf-8');
-  return { success: true, filePath: targetFilePath };
+  try {
+    await fs.promises.writeFile(targetFilePath, initialContent, 'utf-8');
+    return { success: true, filePath: targetFilePath };
+  } catch (writeErr: any) {
+    // Fallback: se o Node (ex: www-data) não tiver permissão direta na pasta, cria com elevação no Ubuntu
+    if (writeErr.code === 'EACCES' || writeErr.code === 'EPERM') {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const escapedPath = targetFilePath.replace(/'/g, "'\\''");
+          exec(
+            `printf "%s" "$INITIAL_CONTENT" | sudo tee '${escapedPath}' > /dev/null && sudo chmod 666 '${escapedPath}'`,
+            {
+              env: { ...process.env, INITIAL_CONTENT: initialContent }
+            },
+            (sudoErr) => {
+              if (sudoErr) return reject(sudoErr);
+              resolve();
+            }
+          );
+        });
+        return { success: true, filePath: targetFilePath };
+      } catch (fallbackErr: any) {
+        throw new Error(`Permissão negada para criar arquivo em "${resolvedDir}". Tente criar em uma pasta como /home/samuel.`);
+      }
+    }
+    throw writeErr;
+  }
 }
 
 export async function saveTargetFile(filePath: string, content: string): Promise<{ success: boolean; size: number }> {
@@ -256,8 +282,32 @@ export async function saveTargetFile(filePath: string, content: string): Promise
     throw new Error('Não é possível salvar conteúdo de texto em um diretório.');
   }
 
-  await fs.promises.writeFile(resolvedPath, content, 'utf-8');
-  const newStat = await fs.promises.stat(resolvedPath);
-
-  return { success: true, size: newStat.size };
+  try {
+    await fs.promises.writeFile(resolvedPath, content, 'utf-8');
+    const newStat = await fs.promises.stat(resolvedPath);
+    return { success: true, size: newStat.size };
+  } catch (writeErr: any) {
+    if (writeErr.code === 'EACCES' || writeErr.code === 'EPERM') {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const escapedPath = resolvedPath.replace(/'/g, "'\\''");
+          exec(
+            `printf "%s" "$FILE_CONTENT" | sudo tee '${escapedPath}' > /dev/null`,
+            {
+              env: { ...process.env, FILE_CONTENT: content }
+            },
+            (sudoErr) => {
+              if (sudoErr) return reject(sudoErr);
+              resolve();
+            }
+          );
+        });
+        const newStat = await fs.promises.stat(resolvedPath);
+        return { success: true, size: newStat.size };
+      } catch (fallbackErr: any) {
+        throw new Error(`Permissão negada ao salvar arquivo em "${resolvedPath}".`);
+      }
+    }
+    throw writeErr;
+  }
 }

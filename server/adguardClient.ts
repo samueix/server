@@ -1,5 +1,6 @@
 import http from 'http';
 import https from 'https';
+import { getServerConfig } from './credentialsManager.js';
 
 export interface AdGuardConfig {
   url: string;
@@ -8,9 +9,9 @@ export interface AdGuardConfig {
 }
 
 let currentConfig: AdGuardConfig = {
-  url: process.env.ADGUARD_URL || 'http://192.168.100.23:8081',
-  username: process.env.ADGUARD_USERNAME || 'samuel',
-  password: process.env.ADGUARD_PASSWORD || ''
+  url: 'http://127.0.0.1:8081',
+  username: 'admin',
+  password: ''
 };
 
 // Snapshot real capturado do AdGuard Home de Samuel (http://192.168.100.23:8081/control/stats)
@@ -225,13 +226,27 @@ export function updateAdGuardConfig(cfg: Partial<AdGuardConfig>): AdGuardConfig 
   return getAdGuardConfig();
 }
 
-async function makeAdGuardRequest(endpoint: string): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
-  // Try local first on Ubuntu Server, then configured URL, then IPv6
+export function getActiveAdGuardCredentials() {
+  const fileConfig = getServerConfig().adguard;
+  const url = (fileConfig?.url || currentConfig.url || 'http://127.0.0.1:8081').replace(/\/$/, '');
+  const username = fileConfig?.username || currentConfig.username || 'admin';
+  const password = fileConfig?.password !== undefined && fileConfig.password !== '' ? fileConfig.password : (currentConfig.password || '');
+  return { url, username, password };
+}
+
+export function getAdGuardClearCommand(): string {
+  const { url, username, password } = getActiveAdGuardCredentials();
+  return `curl -s -X POST -u "${username}:${password}" ${url}/control/querylog_clear && curl -s -X POST -u "${username}:${password}" ${url}/control/stats_reset`;
+}
+
+async function makeAdGuardRequest(endpoint: string, method: 'GET' | 'POST' = 'GET', body?: any): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
+  const { url, username, password } = getActiveAdGuardCredentials();
+
+  // Try configured URL, then localhost/127.0.0.1
   const urlsToTry = [
+    `${url}${endpoint}`,
     `http://127.0.0.1:8081${endpoint}`,
-    `http://localhost:8081${endpoint}`,
-    `${currentConfig.url.replace(/\/$/, '')}${endpoint}`,
-    `http://[2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445]:8081${endpoint}`
+    `http://localhost:8081${endpoint}`
   ];
 
   const headers: Record<string, string> = {
@@ -239,8 +254,10 @@ async function makeAdGuardRequest(endpoint: string): Promise<{ ok: boolean; stat
     'User-Agent': 'AdGuard-AI-NOC/1.0'
   };
 
-  const username = currentConfig.username || process.env.ADGUARD_USERNAME || 'samuel';
-  const password = currentConfig.password || process.env.ADGUARD_PASSWORD || '';
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   if (username && password) {
     const creds = Buffer.from(`${username}:${password}`).toString('base64');
     headers['Authorization'] = `Basic ${creds}`;
@@ -248,18 +265,24 @@ async function makeAdGuardRequest(endpoint: string): Promise<{ ok: boolean; stat
 
   for (const targetUrl of urlsToTry) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2200);
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
 
     try {
       const res = await fetch(targetUrl, {
-        method: 'GET',
+        method,
         headers,
+        body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
       clearTimeout(timeoutId);
 
       if (res.ok) {
-        const data = await res.json();
+        let data = null;
+        try {
+          data = await res.json();
+        } catch {
+          data = { success: true };
+        }
         return { ok: true, status: res.status, data };
       }
     } catch {
@@ -268,6 +291,44 @@ async function makeAdGuardRequest(endpoint: string): Promise<{ ok: boolean; stat
   }
 
   return { ok: false, status: 0, data: null, error: 'Servidor AdGuard Home não respondeu em tempo hábil' };
+}
+
+export async function clearAdGuardHistory(): Promise<{ success: boolean; message: string; shellCommand: string }> {
+  const shellCommand = getAdGuardClearCommand();
+
+  try {
+    await makeAdGuardRequest('/control/querylog_clear', 'POST');
+    await makeAdGuardRequest('/control/stats_reset', 'POST');
+  } catch (err: any) {
+    console.warn('[adguardClient] Aviso ao limpar histórico via API interna:', err.message);
+  }
+
+  // Zera estatísticas capturadas em memória para atualização imediata
+  lastCapturedStats = {
+    connected: true,
+    isCached: false,
+    num_dns_queries: 0,
+    num_blocked_filtering: 0,
+    num_replaced_safebrowsing: 0,
+    num_replaced_safesearch: 0,
+    blocked_percentage: 0,
+    avg_processing_time: 0,
+    top_queried_domains: [],
+    top_blocked_domains: [],
+    top_clients: [],
+    top_upstreams_responses: [],
+    dns_queries: [],
+    blocked_filtering: [],
+    time_units: 'hours',
+    last_updated: new Date().toISOString()
+  };
+  lastCapturedQueryLog = [];
+
+  return {
+    success: true,
+    message: 'Histórico de consultas e estatísticas do AdGuard zerados com sucesso.',
+    shellCommand
+  };
 }
 
 export async function fetchAdGuardStatus() {

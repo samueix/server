@@ -15,7 +15,11 @@ import {
   CheckCircle2, 
   AlertCircle,
   ExternalLink,
-  Lock
+  Lock,
+  Trash2,
+  Terminal,
+  Copy,
+  Check
 } from 'lucide-react';
 import { 
   adguardService, 
@@ -43,6 +47,47 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const [lastUpdated, setLastUpdated] = useState<string>('--:--:--');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'queries' | 'blocked' | 'clients' | 'upstreams'>('overview');
+  const [showClearModal, setShowClearModal] = useState<boolean>(false);
+  const [clearShellCmd, setClearShellCmd] = useState<string>('');
+  const [isClearing, setIsClearing] = useState<boolean>(false);
+  const [clearMessage, setClearMessage] = useState<string | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
+
+  const openClearModal = async () => {
+    setShowClearModal(true);
+    setClearMessage(null);
+    try {
+      const cmd = await adguardService.getClearCommand();
+      setClearShellCmd(cmd);
+    } catch {
+      setClearShellCmd('curl -s -X POST -u "admin:SENHA" http://127.0.0.1:8081/control/querylog_clear && curl -s -X POST -u "admin:SENHA" http://127.0.0.1:8081/control/stats_reset');
+    }
+  };
+
+  const handleExecuteClear = async () => {
+    setIsClearing(true);
+    setClearMessage(null);
+    try {
+      const res = await adguardService.clearAdGuardHistory();
+      setClearMessage(res.message || 'Histórico zerado com sucesso!');
+      if (res.shellCommand) {
+        setClearShellCmd(res.shellCommand);
+      }
+      // Atualiza os dados imediatamente na tela
+      await fetchAdGuardData(true);
+    } catch (err: any) {
+      setClearMessage(`Erro ao executar limpeza: ${err.message}`);
+    } finally {
+      setIsClearing(false);
+    }
+  };
+
+  const copyClearCmd = () => {
+    if (!clearShellCmd) return;
+    navigator.clipboard.writeText(clearShellCmd);
+    setCopiedCmd(true);
+    setTimeout(() => setCopiedCmd(false), 2000);
+  };
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isPollingBusyRef = useRef<boolean>(false);
@@ -196,6 +241,15 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             <span className="text-[10px] text-[#717188] font-mono font-bold block">Atualização</span>
             <span className="text-xs text-[#1A1A2E] font-mono font-bold tabular-nums">{lastUpdated}</span>
           </div>
+          <button
+            onClick={openClearModal}
+            className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FEE4E2] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#F04438] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+            title="Limpar histórico de consultas e resetar estatísticas no AdGuard"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-[#F04438]" />
+            <span>Limpar Histórico</span>
+          </button>
+
           <button
             onClick={() => fetchAdGuardData(true)}
             disabled={isRefreshing}
@@ -720,6 +774,94 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             </table>
           </div>
         </div>
+
+      {/* MODAL DE LIMPEZA DO HISTÓRICO ADGUARD COM COMANDO SHELL GERADO */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-50 bg-[#1A1A2E]/60 flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-[#1A1A2E] shadow-[6px_6px_0px_#1A1A2E] rounded-xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-[#FEE4E2] border border-[#F04438] flex items-center justify-center text-[#F04438]">
+                  <Trash2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1A1A2E] font-title">Limpar Histórico do AdGuard</h3>
+                  <span className="text-[11px] font-mono text-[#717188] font-bold">Query Log & Estatísticas DNS</span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowClearModal(false)}
+                className="w-7 h-7 rounded border border-[#1A1A2E] bg-[#FFF7E8] hover:bg-[#FEE4E2] flex items-center justify-center text-xs font-bold font-mono transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-[#4A4A68] leading-relaxed">
+              Esta ação zera o registro de consultas (<code className="bg-[#FFF7E8] px-1 py-0.5 rounded border border-[#1A1A2E] text-[#1A1A2E] font-mono font-bold">querylog_clear</code>) e reseta o histórico de domínios bloqueados (<code className="bg-[#FFF7E8] px-1 py-0.5 rounded border border-[#1A1A2E] text-[#1A1A2E] font-mono font-bold">stats_reset</code>) no servidor Ubuntu.
+            </p>
+
+            {/* COMANDO GERADO NO SHELL */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-bold text-[#1A1A2E]">
+                <span className="flex items-center gap-1.5 font-mono text-[11px] text-[#717188]">
+                  <Terminal className="w-3.5 h-3.5 text-[#FF5A36]" />
+                  Comando Shell Gerado (Ubuntu):
+                </span>
+                <button
+                  onClick={copyClearCmd}
+                  className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
+                >
+                  {copiedCmd ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedCmd ? 'Copiado!' : 'Copiar Comando'}</span>
+                </button>
+              </div>
+
+              <div className="p-3 bg-[#1A1A2E] text-[#ECFDF3] rounded-lg border-2 border-[#1A1A2E] font-mono text-xs overflow-x-auto leading-relaxed shadow-inner">
+                {clearShellCmd || 'Carregando comando do AdGuard...'}
+              </div>
+            </div>
+
+            {clearMessage && (
+              <div className={`p-3 rounded-lg border text-xs font-mono font-bold ${
+                clearMessage.includes('Erro')
+                  ? 'bg-[#FEE4E2] border-[#F04438] text-[#F04438]'
+                  : 'bg-[#D1FADF] border-[#12B76A] text-[#12B76A]'
+              }`}>
+                {clearMessage}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t-2 border-[#1A1A2E]">
+              <button
+                onClick={() => setShowClearModal(false)}
+                className="px-3.5 py-2 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+              >
+                Fechar
+              </button>
+
+              <button
+                onClick={handleExecuteClear}
+                disabled={isClearing}
+                className="flex items-center gap-1.5 px-4 py-2 bg-[#F04438] hover:bg-[#D92D20] disabled:opacity-50 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-white transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+              >
+                {isClearing ? (
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Limpando...</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Limpar Agora no Servidor</span>
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

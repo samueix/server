@@ -22,7 +22,9 @@ import {
   fetchAdGuardQueryLog, 
   getAdGuardConfig, 
   updateAdGuardConfig,
-  updateAdGuardRawStats 
+  updateAdGuardRawStats,
+  clearAdGuardHistory,
+  getAdGuardClearCommand
 } from './server/adguardClient.js';
 import { 
   getAnalyzedDomain, 
@@ -124,6 +126,21 @@ async function startServer() {
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // Limpar histórico e estatísticas do AdGuard
+  app.post('/api/adguard/clear-history', async (req, res) => {
+    try {
+      const result = await clearAdGuardHistory();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Retornar o comando de shell para limpar histórico no Ubuntu
+  app.get('/api/adguard/clear-command', (req, res) => {
+    res.json({ shellCommand: getAdGuardClearCommand() });
   });
 
   function timingSafeCompare(a?: string, b?: string): boolean {
