@@ -55,11 +55,11 @@ class AdguardAiService {
     } catch (err: any) {
       return {
         connected: false,
-        running: true,
-        protection_enabled: true,
-        version: 'v0.107.54',
+        running: false,
+        protection_enabled: false,
+        version: directStatus.version || 'Indisponível',
         language: 'pt-br',
-        url: directStatus.endpoint || 'http://192.168.100.23:8081',
+        url: directStatus.endpoint || '/adguard-api',
         error: err.message
       };
     }
@@ -71,18 +71,12 @@ class AdguardAiService {
       return adguardDirectClient.getStats();
     }
 
-    // Tenta obter do cliente direto se tiver dados capturados
-    const directStats = adguardDirectClient.getStats();
-    if (directStats && directStats.num_dns_queries >= 1424) {
-      return directStats;
-    }
-
     try {
       const res = await fetch(`${this.getBaseUrl()}/api/adguard/stats`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    } catch (err: any) {
-      return directStats;
+    } catch {
+      return adguardDirectClient.getStats();
     }
   }
 

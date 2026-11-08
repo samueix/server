@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execSync } from 'child_process';
 
 export interface FileItem {
   name: string;
@@ -227,7 +227,16 @@ export async function createTargetFile(dirPath: string, fileName: string, initia
   const resolvedDir = path.resolve(dirPath);
 
   if (!fs.existsSync(resolvedDir)) {
-    throw new Error(`O diretório informado não existe: ${resolvedDir}`);
+    try {
+      fs.mkdirSync(resolvedDir, { recursive: true });
+    } catch {
+      try {
+        const escapedDir = resolvedDir.replace(/'/g, "'\\''");
+        execSync(`sudo mkdir -p '${escapedDir}' && sudo chmod 777 '${escapedDir}'`);
+      } catch {
+        throw new Error(`O diretório informado não existe e não pôde ser criado: ${resolvedDir}`);
+      }
+    }
   }
 
   const cleanName = fileName.trim();

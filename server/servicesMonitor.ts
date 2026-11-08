@@ -156,23 +156,45 @@ export function getSystemdServiceStatus(serviceName: string): Partial<MonitoredS
     }
   } catch {}
 
-  // Fallback para quando systemctl não estiver ativo (ex: contêiner Docker/Kubernetes)
-  // Define serviços operacionais realistas
-  const isKeyRunning = ['server-panel', 'AdGuardHome', 'nginx', 'ssh', 'systemd-resolved', 'cron'].includes(clean);
-  const status: 'ONLINE' | 'OFFLINE' | 'ERRO' = isKeyRunning ? 'ONLINE' : 'OFFLINE';
+  // Fallback seguro com ZERO dados falsos: verifica se o processo existe de verdade no sistema
+  try {
+    const pgrepOut = execSync(`pgrep -f "${clean}" | head -n 1`, {
+      encoding: 'utf-8',
+      timeout: 1000,
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
 
+    const realPid = parseInt(pgrepOut, 10);
+    if (realPid && !isNaN(realPid) && realPid > 0) {
+      return {
+        status: 'ONLINE',
+        ativo: true,
+        habilitado_boot: false,
+        installed: true,
+        sub_state: 'running',
+        pid: realPid,
+        tempo_ativo: 'Ativo',
+        ultima_inicializacao: 'N/D',
+        cpu: 'N/D',
+        memory: 'N/D',
+        uptime: 'Ativo'
+      };
+    }
+  } catch {}
+
+  // Sem processo rodando e sem systemd: estado honesto OFFLINE
   return {
-    status,
-    ativo: isKeyRunning,
-    habilitado_boot: true,
-    installed: true,
-    sub_state: isKeyRunning ? 'running' : 'inactive',
-    pid: isKeyRunning ? Math.floor(100 + Math.random() * 900) : null,
-    tempo_ativo: isKeyRunning ? 'Ativo desde a inicialização' : 'Inativo',
-    ultima_inicializacao: new Date(Date.now() - 3600000).toISOString(),
-    cpu: isKeyRunning ? '1.2s total' : 'N/D',
-    memory: isKeyRunning ? '28.4 MB' : 'N/D',
-    uptime: isKeyRunning ? 'Ativo' : 'Inativo'
+    status: 'OFFLINE',
+    ativo: false,
+    habilitado_boot: false,
+    installed: false,
+    sub_state: 'inactive',
+    pid: null,
+    tempo_ativo: 'Inativo',
+    ultima_inicializacao: 'N/D',
+    cpu: 'N/D',
+    memory: 'N/D',
+    uptime: 'Inativo'
   };
 }
 

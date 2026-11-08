@@ -59,19 +59,36 @@ export const SecurityTab: React.FC = () => {
   const fetchSecurityStatus = async (isManual = false) => {
     if (isManual) setRefreshing(true);
     try {
-      const res = await fetch('/api/security/attack-monitor', {
-        headers: {
-          'Accept': 'application/json',
-          ...getAuthHeaders()
-        },
-        signal: AbortSignal.timeout(5000)
-      });
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error('O monitor de ataques (/api/security/attack-monitor) requer a atualização do servidor Ubuntu. Atualize o painel no servidor para ativar este endpoint.');
+      const candidates = ['/api/security/attack-monitor', '/api/security', '/api/security/status'];
+      let res: Response | null = null;
+      let lastStatus: number | null = null;
+
+      for (const endpoint of candidates) {
+        try {
+          const attempt = await fetch(endpoint, {
+            headers: {
+              'Accept': 'application/json',
+              ...getAuthHeaders()
+            },
+            signal: AbortSignal.timeout(4000)
+          });
+          if (attempt.ok) {
+            res = attempt;
+            break;
+          }
+          lastStatus = attempt.status;
+        } catch {
+          // Continua tentando os outros endpoints
         }
-        throw new Error(`Falha ao obter status de segurança: HTTP ${res.status}`);
       }
+
+      if (!res) {
+        if (lastStatus === 404) {
+          throw new Error('O monitor de segurança (/api/security/attack-monitor) requer que o serviço seja reiniciado no servidor. Execute: sudo systemctl restart server-panel');
+        }
+        throw new Error(lastStatus ? `Falha ao obter status de segurança: HTTP ${lastStatus}` : 'Servidor de segurança offline ou inacessível.');
+      }
+
       const json: SecurityStatusResponse = await res.json();
       setData(json);
       setError(null);
@@ -119,21 +136,21 @@ export const SecurityTab: React.FC = () => {
           <div className="flex items-start gap-4">
             <div className={`w-14 h-14 rounded-xl border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] flex items-center justify-center shrink-0 ${
               error
-                ? 'bg-[#717188] text-white'
+                ? 'bg-[#FFF7E8] text-[#1A1A2E]'
                 : isUnderAttack 
-                ? 'bg-[#F04438] text-white' 
+                ? 'bg-[#F04438] text-[#1A1A2E]' 
                 : isModerate 
-                ? 'bg-[#F79009] text-white' 
-                : 'bg-[#12B76A] text-white'
+                ? 'bg-[#F79009] text-[#1A1A2E]' 
+                : 'bg-[#12B76A] text-[#1A1A2E]'
             }`}>
               {error ? (
-                <ShieldAlert className="w-8 h-8" />
+                <ShieldAlert className="w-8 h-8 text-[#F04438]" />
               ) : isUnderAttack ? (
-                <ShieldAlert className="w-8 h-8 animate-pulse" />
+                <ShieldAlert className="w-8 h-8 text-[#F04438] animate-pulse" />
               ) : isModerate ? (
-                <AlertTriangle className="w-8 h-8" />
+                <AlertTriangle className="w-8 h-8 text-[#1A1A2E]" />
               ) : (
-                <ShieldCheck className="w-8 h-8" />
+                <ShieldCheck className="w-8 h-8 text-[#1A1A2E]" />
               )}
             </div>
 
@@ -143,10 +160,10 @@ export const SecurityTab: React.FC = () => {
                   error
                     ? 'bg-[#FFF7E8] text-[#1A1A2E]'
                     : isUnderAttack 
-                    ? 'bg-[#F04438] text-white' 
+                    ? 'bg-[#F04438] text-[#1A1A2E]' 
                     : isModerate 
-                    ? 'bg-[#F79009] text-white' 
-                    : 'bg-[#12B76A] text-white'
+                    ? 'bg-[#F79009] text-[#1A1A2E]' 
+                    : 'bg-[#12B76A] text-[#1A1A2E]'
                 }`}>
                   {error ? 'AUDITORIA PENDENTE' : isUnderAttack ? 'SOB ATAQUE DETECTADO' : isModerate ? 'NÍVEL DE ATENÇÃO' : 'SERVIDOR SEGURO (NORMAL)'}
                 </span>
@@ -182,7 +199,7 @@ export const SecurityTab: React.FC = () => {
             <button
               onClick={() => fetchSecurityStatus(true)}
               disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-2 bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-2 bg-[#FF5A36] hover:bg-[#E04522] text-[#1A1A2E] text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               <span>Verificar Agora</span>

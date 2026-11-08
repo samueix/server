@@ -153,7 +153,7 @@ export const AdGuardStatsCard: React.FC = () => {
           <button
             onClick={() => setActiveTab('blocked')}
             className={`px-3 py-1 rounded-md text-xs font-bold transition border-2 border-[#1A1A2E] ${
-              activeTab === 'blocked' ? 'bg-[#FF5A36] text-white shadow-[2px_2px_0px_#1A1A2E]' : 'bg-white text-[#1A1A2E] hover:bg-[#FFF7E8]'
+              activeTab === 'blocked' ? 'bg-[#FF5A36] text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]' : 'bg-white text-[#1A1A2E] hover:bg-[#FFF7E8]'
             }`}
           >
             Mais bloqueados ({stats?.top_blocked_domains.length || 0})
@@ -161,7 +161,7 @@ export const AdGuardStatsCard: React.FC = () => {
           <button
             onClick={() => setActiveTab('queried')}
             className={`px-3 py-1 rounded-md text-xs font-bold transition border-2 border-[#1A1A2E] ${
-              activeTab === 'queried' ? 'bg-[#00A6FB] text-white shadow-[2px_2px_0px_#1A1A2E]' : 'bg-white text-[#1A1A2E] hover:bg-[#FFF7E8]'
+              activeTab === 'queried' ? 'bg-[#00A6FB] text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]' : 'bg-white text-[#1A1A2E] hover:bg-[#FFF7E8]'
             }`}
           >
             Mais consultados ({stats?.top_queried_domains.length || 0})

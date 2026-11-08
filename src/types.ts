@@ -461,7 +461,7 @@ export interface TelemetryData {
   temperature: TemperatureInfo;
 }
 
-export type AdGuardConnectionState = 'CONNECTED' | 'CONNECTING' | 'OFFLINE';
+export type AdGuardConnectionState = 'CONNECTED' | 'CONNECTING' | 'OFFLINE' | 'DISCONNECTED';
 
 export type AdGuardDiagnosticIssue = 
   | 'NONE'
@@ -469,7 +469,8 @@ export type AdGuardDiagnosticIssue =
   | 'CORS'
   | 'AUTH_REQUIRED'
   | 'NETWORK_ERROR'
-  | 'TIMEOUT';
+  | 'TIMEOUT'
+  | 'CANNOT_REACH';
 
 export interface AdGuardDirectStatus {
   state: AdGuardConnectionState;

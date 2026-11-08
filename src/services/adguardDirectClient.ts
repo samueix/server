@@ -6,61 +6,50 @@ import {
   DomainAnalysisResult
 } from '../types';
 import { AdGuardStatsResponse, AdGuardStatusResponse } from './adguardAiApi';
-import { apiFetch } from './api';
-
-const DEFAULT_ADGUARD_ENDPOINT = 'http://192.168.100.23:8081';
-const STORAGE_ENDPOINT_KEY = 'adguard_direct_endpoint';
-const STORAGE_AUTH_USER_KEY = 'adguard_direct_auth_user';
-const STORAGE_AUTH_PASS_KEY = 'adguard_direct_auth_pass';
-const STORAGE_LAST_STATS_KEY = 'adguard_last_real_stats';
-const STORAGE_LAST_LOGS_KEY = 'adguard_last_real_logs';
 
 export type DirectClientListener = (status: AdGuardDirectStatus) => void;
 export type StatsListener = (stats: AdGuardStatsResponse) => void;
 export type QueryLogListener = (logs: AdGuardQueryItem[]) => void;
 
-// Pool de domínios e clientes reais do AdGuard de Samuel para o feed contínuo
-const REAL_DOMAINS_POOL = [
-  { domain: 'youtubei.googleapis.com', client: '192.168.100.22', type: 'A', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 118.6 },
-  { domain: 'www.youtube.com', client: '192.168.100.22', type: 'HTTPS', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 42.1 },
-  { domain: 'googleads.g.doubleclick.net', client: '192.168.100.22', type: 'HTTPS', status: 'BLOCKED', reason: 'AdGuard DNS filter', rule: '||doubleclick.net^', latency: 0.8 },
-  { domain: 'i.ytimg.com', client: '192.168.100.22', type: 'A', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 36.4 },
-  { domain: 'ad.doubleclick.net', client: '192.168.100.21', type: 'A', status: 'BLOCKED', reason: 'AdGuard DNS filter', rule: '||doubleclick.net^', latency: 0.5 },
-  { domain: 's.youtube.com', client: '192.168.100.22', type: 'A', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 29.8 },
-  { domain: 'tpc.googlesyndication.com', client: '192.168.100.21', type: 'A', status: 'BLOCKED', reason: 'AdGuard DNS filter', rule: '||googlesyndication.com^', latency: 0.6 },
-  { domain: 'www.google.com', client: '192.168.100.23', type: 'A', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 18.2 },
-  { domain: 'gateway.icloud.com', client: '192.168.100.21', type: 'HTTPS', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 82.3 },
-  { domain: 'sb.scorecardresearch.com', client: '192.168.100.22', type: 'A', status: 'BLOCKED', reason: 'AdGuard DNS filter', rule: '||scorecardresearch.com^', latency: 0.9 },
-  { domain: 'rr4---sn-bg07dner.googlevideo.com', client: '192.168.100.22', type: 'A', status: 'PROCESSED', reason: 'NotFilteredNotFound', latency: 25.1 },
-  { domain: 'clienttracing-pa.googleapis.com', client: '192.168.100.22', type: 'HTTPS', status: 'BLOCKED', reason: 'AdGuard DNS filter', rule: '||googleapis.com^$badfilter', latency: 1.1 }
-];
-
 class AdGuardDirectClient {
-  private endpoint: string;
-  private state: AdGuardConnectionState = 'CONNECTED';
+  private endpoint: string = '/adguard-api';
+  private state: AdGuardConnectionState = 'DISCONNECTED';
   private diagnostic: AdGuardDiagnosticIssue = 'NONE';
-  private diagnosticMessage: string = 'Dados sendo recebidos em tempo real via telemetria ativa do AdGuard (:8081).';
-  private pollingIntervalMs: number = 1800; // ~1.8s para fluxo contínuo fluido
+  private diagnosticMessage: string = 'Aguardando sincronização com o serviço AdGuard Home.';
+  private pollingIntervalMs: number = 3000; // Polling honesto a cada 3s
   private pollingTimer: any = null;
   private isPollingActive: boolean = false;
-  private isChecking: boolean = false;
-  private isDirectSocketConnected: boolean = false;
+  private isCycleRunning: boolean = false;
+  private lastUpdateTimestamp: number = 0;
 
   private listeners: Set<DirectClientListener> = new Set();
   private statsListeners: Set<StatsListener> = new Set();
   private queryLogListeners: Set<QueryLogListener> = new Set();
 
-  private lastCapturedStats: AdGuardStatsResponse;
+  private lastCapturedStats: AdGuardStatsResponse = {
+    connected: false,
+    num_dns_queries: 0,
+    num_blocked_filtering: 0,
+    num_replaced_safebrowsing: 0,
+    num_replaced_safesearch: 0,
+    blocked_percentage: 0,
+    avg_processing_time: 0,
+    top_queried_domains: [],
+    top_blocked_domains: [],
+    top_clients: [],
+    top_upstreams_responses: [],
+    dns_queries: [],
+    blocked_filtering: [],
+    time_units: 'hours',
+    last_updated: '--:--:--'
+  };
+
   private lastCapturedLogs: AdGuardQueryItem[] = [];
   private lastCapturedStatus: AdGuardStatusResponse | null = null;
   private domainCache: Map<string, DomainAnalysisResult> = new Map();
-  private poolIndex: number = 0;
 
   constructor() {
-    this.endpoint = this.loadEndpoint();
-    this.lastCapturedStats = this.loadInitialStats();
-    this.lastCapturedLogs = this.loadInitialLogs();
-    this.state = 'CONNECTED';
+    this.endpoint = '/adguard-api';
   }
 
   public getEndpoint(): string {
@@ -69,368 +58,222 @@ class AdGuardDirectClient {
 
   public setEndpoint(url: string): void {
     const clean = url.trim().replace(/\/+$/, '');
-    if (!clean) return;
-    this.endpoint = clean;
-    try {
-      localStorage.setItem(STORAGE_ENDPOINT_KEY, clean);
-    } catch {}
+    this.endpoint = clean || '/adguard-api';
     this.reconnect();
   }
 
-  public setCredentials(username?: string, password?: string): void {
-    try {
-      if (username) sessionStorage.setItem(STORAGE_AUTH_USER_KEY, username);
-      else sessionStorage.removeItem(STORAGE_AUTH_USER_KEY);
-
-      if (password) sessionStorage.setItem(STORAGE_AUTH_PASS_KEY, password);
-      else sessionStorage.removeItem(STORAGE_AUTH_PASS_KEY);
-
-      // Limpeza de qualquer resquício legado em localStorage
-      localStorage.removeItem(STORAGE_AUTH_USER_KEY);
-      localStorage.removeItem(STORAGE_AUTH_PASS_KEY);
-    } catch {}
+  public setCredentials(_username?: string, _password?: string): void {
     this.reconnect();
   }
 
   public getSavedUsername(): string {
-    try {
-      return sessionStorage.getItem(STORAGE_AUTH_USER_KEY) || '';
-    } catch {
-      return '';
-    }
+    return '';
   }
 
   public clearCredentials(): void {
-    try {
-      sessionStorage.removeItem(STORAGE_AUTH_USER_KEY);
-      sessionStorage.removeItem(STORAGE_AUTH_PASS_KEY);
-      localStorage.removeItem(STORAGE_AUTH_USER_KEY);
-      localStorage.removeItem(STORAGE_AUTH_PASS_KEY);
-    } catch {}
     this.reconnect();
   }
 
-  private loadEndpoint(): string {
-    try {
-      const saved = localStorage.getItem(STORAGE_ENDPOINT_KEY);
-      if (saved && saved.startsWith('http')) return saved.trim().replace(/\/+$/, '');
-    } catch {}
-    return DEFAULT_ADGUARD_ENDPOINT;
-  }
-
-  private getAuthHeader(): string | null {
-    try {
-      const user = sessionStorage.getItem(STORAGE_AUTH_USER_KEY);
-      const pass = sessionStorage.getItem(STORAGE_AUTH_PASS_KEY);
-      if (user && pass) {
-        return 'Basic ' + btoa(`${user}:${pass}`);
-      }
-    } catch {}
-    return null;
-  }
-
-  private loadInitialStats(): AdGuardStatsResponse {
-    try {
-      const saved = localStorage.getItem(STORAGE_LAST_STATS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed) return parsed;
-      }
-    } catch {}
-
+  public getLastRealUpdate(): { timestamp: number; formatted: string; ageSeconds: number } {
+    const ageSeconds = this.lastUpdateTimestamp > 0 
+      ? Math.floor((Date.now() - this.lastUpdateTimestamp) / 1000) 
+      : -1;
     return {
-      connected: false,
-      num_dns_queries: 0,
-      num_blocked_filtering: 0,
-      num_replaced_safebrowsing: 0,
-      num_replaced_safesearch: 0,
-      blocked_percentage: 0,
-      avg_processing_time: 0,
-      top_queried_domains: [],
-      top_blocked_domains: [],
-      top_clients: [],
-      top_upstreams_responses: [],
-      dns_queries: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      blocked_filtering: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      time_units: 'hours',
-      last_updated: '--:--:--'
+      timestamp: this.lastUpdateTimestamp,
+      formatted: this.lastCapturedStats.last_updated,
+      ageSeconds
     };
   }
 
-  private loadInitialLogs(): AdGuardQueryItem[] {
-    try {
-      const saved = localStorage.getItem(STORAGE_LAST_LOGS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
-      }
-    } catch {}
-    return [];
-  }
-
   /**
-   * Tenta requisição direta sem acionar preflight OPTIONS desnecessário
+   * Executa requisição com timeout e retorno estruturado
    */
-  private async tryDirectFetch(path: string): Promise<Response> {
-    const url = `${this.endpoint}${path.startsWith('/') ? path : '/' + path}`;
+  private async safeFetch(path: string, timeoutMs = 3000): Promise<{ ok: boolean; status: number; data?: any; error?: string }> {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    const headers: Record<string, string> = {
-      'Accept': 'application/json'
-    };
+    // Tenta primeiro /adguard-api, depois /adguard-api/control, depois /api/adguard
+    const candidateUrls = [
+      `/adguard-api${path}`,
+      `/adguard-api/control${path}`,
+      `/api/adguard${path}`
+    ];
 
-    const auth = this.getAuthHeader();
-    if (auth) {
-      headers['Authorization'] = auth;
+    for (const url of candidateUrls) {
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: controller.signal
+        });
+
+        if (res.ok) {
+          clearTimeout(timer);
+          const data = await res.json();
+          return { ok: true, status: res.status, data };
+        }
+
+        if (res.status === 401 || res.status === 403) {
+          clearTimeout(timer);
+          return { ok: false, status: res.status, error: 'Autenticação necessária no AdGuard Home (401)' };
+        }
+      } catch {
+        // Tenta o próximo candidato
+      }
     }
 
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      return res;
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      throw err;
-    }
+    clearTimeout(timer);
+    return { ok: false, status: 502, error: 'Serviço AdGuard Home inacessível' };
   }
 
   /**
-   * Verifica a conexão. Se a conexão direta com o IP local estiver ativa, usa-a.
-   * Se o navegador restringir mixed content, mantém a telemetria sincronizada ativa.
+   * Checagem de integridade e status de conexão
    */
   public async checkConnection(): Promise<AdGuardDirectStatus> {
-    if (this.isChecking) return this.getStatus();
-    this.isChecking = true;
+    const statusRes = await this.safeFetch('/status', 2500);
 
-    // 0. Tenta primeiro via Reverse Proxy seguro Nginx (/adguard-api/)
-    try {
-      const urlsToTry = [
-        '/adguard-api/status',
-        'http://192.168.100.23/adguard-api/status'
-      ];
-      for (const target of urlsToTry) {
-        try {
-          const res = await fetch(target, { method: 'GET', signal: AbortSignal.timeout(1800) });
-          if (res.ok) {
-            const data = await res.json();
-            this.isDirectSocketConnected = true;
-            this.state = 'CONNECTED';
-            this.diagnostic = 'NONE';
-            this.diagnosticMessage = 'Conectado via Proxy Reverso Nginx (/adguard-api/) com credenciais injetadas.';
-            this.lastCapturedStatus = {
-              connected: true,
-              running: data.running ?? true,
-              protection_enabled: data.protection_enabled ?? true,
-              version: data.version || 'v0.107.54',
-              language: data.language || 'pt-br',
-              url: target
-            };
-            this.notifyStatus();
-            this.isChecking = false;
-            return this.getStatus();
-          }
-        } catch {}
+    if (statusRes.ok && statusRes.data) {
+      const data = statusRes.data;
+      this.state = 'CONNECTED';
+      this.diagnostic = 'NONE';
+      this.diagnosticMessage = 'Conectado em tempo real ao AdGuard Home.';
+      this.lastCapturedStatus = {
+        connected: true,
+        running: data.running ?? true,
+        protection_enabled: data.protection_enabled ?? true,
+        version: data.version || 'v0.107.x',
+        language: data.language || 'pt-br',
+        url: '/adguard-api'
+      };
+    } else {
+      this.state = 'DISCONNECTED';
+      if (statusRes.status === 401 || statusRes.status === 403) {
+        this.diagnostic = 'AUTH_REQUIRED';
+        this.diagnosticMessage = 'Credenciais de acesso necessárias no servidor para o AdGuard Home (401).';
+      } else {
+        this.diagnostic = 'CANNOT_REACH';
+        this.diagnosticMessage = 'AdGuard Home ou proxy Nginx inacessível (502/timeout).';
       }
-    } catch {}
-
-    // 1. Tenta direto na porta :8081
-    try {
-      const res = await this.tryDirectFetch('/control/status');
-      if (res.ok) {
-        const data = await res.json();
-        this.isDirectSocketConnected = true;
-        this.state = 'CONNECTED';
-        this.diagnostic = 'NONE';
-        this.diagnosticMessage = 'Conexão direta estabelecida com a porta :8081 do AdGuard Home.';
-        this.lastCapturedStatus = {
-          connected: true,
-          running: data.running ?? true,
-          protection_enabled: data.protection_enabled ?? true,
-          version: data.version || 'v0.107.54',
-          language: data.language || 'pt-br',
-          url: this.endpoint
-        };
-        this.notifyStatus();
-        this.isChecking = false;
-        return this.getStatus();
-      }
-    } catch {
-      // Falha de CORS na porta 8081 nativa
     }
-
-    // 2. Se a porta 8081 nativa tiver CORS bloqueado, conecta via /api/adguard da porta :8000 do Ubuntu (que tem CORS aberto)
-    try {
-      const py = await apiFetch<any>('/api/adguard');
-      if (py && (py.available || py.status === 'ONLINE' || py.dns_queries > 0)) {
-        this.isDirectSocketConnected = true;
-        this.state = 'CONNECTED';
-        this.diagnostic = 'NONE';
-        this.diagnosticMessage = 'Conectado ao AdGuard Home através da telemetria do Ubuntu Server (:8000).';
-        this.lastCapturedStatus = {
-          connected: true,
-          running: py.status === 'ONLINE',
-          protection_enabled: py.protection_enabled !== false,
-          version: py.version || 'v0.107.54',
-          language: 'pt-br',
-          url: 'http://192.168.100.23:8000/api/adguard'
-        };
-        this.notifyStatus();
-        this.isChecking = false;
-        return this.getStatus();
-      }
-    } catch {
-      // Modo de telemetria contínua
-    }
-
-    this.isDirectSocketConnected = false;
-    this.state = 'CONNECTED';
-    this.diagnostic = 'NONE';
-    this.diagnosticMessage = 'Dados sendo recebidos em tempo real via telemetria ativa do AdGuard (:8081).';
 
     this.notifyStatus();
-    this.isChecking = false;
     return this.getStatus();
   }
 
   /**
-   * Ciclo contínuo de atualização de consultas em tempo real:
-   * 1424 queries -> 1425 -> 1426 -> 1427
+   * Ciclo de telemetria 100% real (Zero dados fakes):
+   * 1. /stats
+   * 2. /querylog?limit=40
+   * 3. /status
    */
   public async fetchRealtimeCycle(): Promise<void> {
-    // 0. Tenta buscar via Reverse Proxy Nginx (/adguard-api/stats)
+    if (this.isCycleRunning) return;
+    this.isCycleRunning = true;
+
     try {
-      const proxyUrls = ['/adguard-api/stats', 'http://192.168.100.23/adguard-api/stats'];
-      for (const pUrl of proxyUrls) {
-        try {
-          const res = await fetch(pUrl, { method: 'GET', signal: AbortSignal.timeout(1800) });
-          if (res.ok) {
-            const raw = await res.json();
-            const nDns = Number(raw.num_dns_queries || this.lastCapturedStats.num_dns_queries);
-            const nBlk = Number(raw.num_blocked_filtering || this.lastCapturedStats.num_blocked_filtering);
-            const pct = nDns > 0 ? Number(((nBlk / nDns) * 100).toFixed(1)) : 6.25;
+      // 1. Busca estatísticas reais
+      const statsRes = await this.safeFetch('/stats', 3000);
+      if (statsRes.ok && statsRes.data) {
+        const raw = statsRes.data;
+        const totalQueries = Number(raw.num_dns_queries ?? raw.total_queries ?? 0);
+        const totalBlocked = Number(raw.num_blocked_filtering ?? 0);
+        const blockRate = totalQueries > 0 
+          ? Number(((totalBlocked / totalQueries) * 100).toFixed(1)) 
+          : 0;
 
-            const updated: AdGuardStatsResponse = {
-              ...this.lastCapturedStats,
-              connected: true,
-              num_dns_queries: nDns,
-              num_blocked_filtering: nBlk,
-              blocked_percentage: pct,
-              last_updated: new Date().toISOString()
-            };
+        const updatedStats: AdGuardStatsResponse = {
+          connected: true,
+          num_dns_queries: totalQueries,
+          num_blocked_filtering: totalBlocked,
+          num_replaced_safebrowsing: Number(raw.num_replaced_safebrowsing || 0),
+          num_replaced_safesearch: Number(raw.num_replaced_safesearch || 0),
+          blocked_percentage: blockRate,
+          avg_processing_time: Number(raw.avg_processing_time || 0),
+          top_queried_domains: Array.isArray(raw.top_queried_domains) ? raw.top_queried_domains : [],
+          top_blocked_domains: Array.isArray(raw.top_blocked_domains) ? raw.top_blocked_domains : [],
+          top_clients: Array.isArray(raw.top_clients) ? raw.top_clients : [],
+          top_upstreams_responses: Array.isArray(raw.top_upstreams_responses) ? raw.top_upstreams_responses : [],
+          dns_queries: Array.isArray(raw.dns_queries) ? raw.dns_queries : [],
+          blocked_filtering: Array.isArray(raw.blocked_filtering) ? raw.blocked_filtering : [],
+          time_units: raw.time_units || 'hours',
+          last_updated: new Date().toLocaleTimeString('pt-BR')
+        };
 
-            this.lastCapturedStats = updated;
-            this.isDirectSocketConnected = true;
-            this.notifyStats(updated);
-            return;
-          }
-        } catch {}
+        this.lastCapturedStats = updatedStats;
+        this.lastUpdateTimestamp = Date.now();
+        this.state = 'CONNECTED';
+        this.diagnostic = 'NONE';
+        this.diagnosticMessage = 'Dados recebidos em tempo real via telemetria ativa do AdGuard.';
+
+        this.notifyStats(updatedStats);
+      } else {
+        // Falha na busca de stats: atualiza estado de erro
+        this.state = 'DISCONNECTED';
+        if (statsRes.status === 401 || statsRes.status === 403) {
+          this.diagnostic = 'AUTH_REQUIRED';
+          this.diagnosticMessage = 'Credenciais de acesso do AdGuard rejeitadas pelo servidor (401).';
+        } else {
+          this.diagnostic = 'CANNOT_REACH';
+          this.diagnosticMessage = 'AdGuard Home ou proxy Nginx inacessível (502/timeout).';
+        }
       }
-    } catch {}
 
-    // 1. Tenta buscar da API direta se o raw socket responder
-    if (this.isDirectSocketConnected) {
-      try {
-        const statsRes = await this.tryDirectFetch('/control/stats');
-        if (statsRes.ok) {
-          const raw = await statsRes.json();
-          const nDns = Number(raw.num_dns_queries || this.lastCapturedStats.num_dns_queries);
-          const nBlk = Number(raw.num_blocked_filtering || this.lastCapturedStats.num_blocked_filtering);
-          const pct = nDns > 0 ? Number(((nBlk / nDns) * 100).toFixed(1)) : 6.25;
+      // 2. Busca consultas recentes reais (querylog)
+      const queryRes = await this.safeFetch('/querylog?limit=40', 3000);
+      if (queryRes.ok && queryRes.data) {
+        const rawList = Array.isArray(queryRes.data?.data) 
+          ? queryRes.data.data 
+          : (Array.isArray(queryRes.data) ? queryRes.data : []);
 
-          const updated: AdGuardStatsResponse = {
-            ...this.lastCapturedStats,
-            connected: true,
-            num_dns_queries: nDns,
-            num_blocked_filtering: nBlk,
-            blocked_percentage: pct,
-            last_updated: new Date().toISOString()
+        const parsedLogs: AdGuardQueryItem[] = rawList.map((item: any) => {
+          const isBlocked = item.reason && item.reason !== 'NotFilteredNotFound';
+          const domain = item.question?.name || item.domain || 'desconhecido';
+          const client = item.client || '--';
+          const time = item.time || new Date().toISOString();
+          const elapsed = typeof item.elapsed_ms === 'number' 
+            ? item.elapsed_ms 
+            : parseFloat(item.elapsed_ms || '0') || 0;
+
+          return {
+            domain,
+            client,
+            time,
+            elapsed_ms: Number(elapsed.toFixed(1)),
+            status: isBlocked ? 'BLOCKED' : 'PROCESSED',
+            reason: item.reason || (isBlocked ? 'Bloqueado por filtro' : 'Processado normalmente'),
+            rule: item.rule || '',
+            dns_type: item.question?.type || item.dns_type || 'A',
+            analysis: this.domainCache.get(domain.toLowerCase())
           };
+        });
 
-          this.lastCapturedStats = updated;
-          this.notifyStats(updated);
-          return;
-        }
-      } catch {
-        // Tenta pela API do Ubuntu Server (:8000)
-        try {
-          const py = await apiFetch<any>('/api/adguard');
-          if (py && py.dns_queries > 0) {
-            const nDns = Number(py.dns_queries);
-            const nBlk = Number(py.blocked_queries || 0);
-            const pct = Number(py.blocked_percentage || 0);
+        this.lastCapturedLogs = parsedLogs;
+        this.notifyLogs(parsedLogs);
+      }
 
-            const updated: AdGuardStatsResponse = {
-              ...this.lastCapturedStats,
-              connected: true,
-              num_dns_queries: nDns,
-              num_blocked_filtering: nBlk,
-              blocked_percentage: pct,
-              last_updated: new Date().toISOString()
-            };
-
-            this.lastCapturedStats = updated;
-            this.notifyStats(updated);
-            return;
-          }
-        } catch {
-          this.isDirectSocketConnected = false;
+      // 3. Atualiza status operacional se estiver conectado
+      if (this.state === 'CONNECTED') {
+        const statusRes = await this.safeFetch('/status', 2000);
+        if (statusRes.ok && statusRes.data) {
+          const sData = statusRes.data;
+          this.lastCapturedStatus = {
+            connected: true,
+            running: sData.running ?? true,
+            protection_enabled: sData.protection_enabled ?? true,
+            version: sData.version || 'v0.107.x',
+            language: sData.language || 'pt-br',
+            url: '/adguard-api'
+          };
         }
       }
+    } catch (err: any) {
+      this.state = 'DISCONNECTED';
+      this.diagnostic = 'CANNOT_REACH';
+      this.diagnosticMessage = err?.message || 'Falha de comunicação com o AdGuard Home.';
+    } finally {
+      this.isCycleRunning = false;
+      this.notifyStatus();
     }
-
-    // 2. Fluxo contínuo em tempo real (1424 -> 1425 -> 1426 -> 1427)
-    // Captura evento do pool real da rede de Samuel
-    const itemTemplate = REAL_DOMAINS_POOL[this.poolIndex % REAL_DOMAINS_POOL.length];
-    this.poolIndex++;
-
-    const isBlocked = itemTemplate.status === 'BLOCKED';
-    const newTotalQueries = this.lastCapturedStats.num_dns_queries + 1;
-    const newBlockedQueries = isBlocked 
-      ? this.lastCapturedStats.num_blocked_filtering + 1 
-      : this.lastCapturedStats.num_blocked_filtering;
-    const newBlockRate = Number(((newBlockedQueries / newTotalQueries) * 100).toFixed(1));
-
-    const newQueryItem: AdGuardQueryItem = {
-      domain: itemTemplate.domain,
-      client: itemTemplate.client,
-      time: new Date().toISOString(),
-      elapsed_ms: itemTemplate.latency,
-      status: itemTemplate.status as 'BLOCKED' | 'PROCESSED',
-      reason: itemTemplate.reason,
-      rule: itemTemplate.rule || '',
-      dns_type: itemTemplate.type,
-      analysis: this.domainCache.get(itemTemplate.domain.toLowerCase())
-    };
-
-    // Atualiza estatísticas
-    const updatedStats: AdGuardStatsResponse = {
-      ...this.lastCapturedStats,
-      connected: true,
-      num_dns_queries: newTotalQueries,
-      num_blocked_filtering: newBlockedQueries,
-      blocked_percentage: newBlockRate,
-      last_updated: new Date().toISOString()
-    };
-
-    this.lastCapturedStats = updatedStats;
-    this.lastCapturedLogs = [newQueryItem, ...this.lastCapturedLogs.slice(0, 39)];
-    this.state = 'CONNECTED';
-    this.diagnostic = 'NONE';
-    this.diagnosticMessage = 'Dados sendo recebidos em tempo real via telemetria ativa do AdGuard (:8081).';
-
-    try {
-      localStorage.setItem(STORAGE_LAST_STATS_KEY, JSON.stringify(updatedStats));
-      localStorage.setItem(STORAGE_LAST_LOGS_KEY, JSON.stringify(this.lastCapturedLogs));
-    } catch {}
-
-    this.notifyStats(updatedStats);
-    this.notifyLogs(this.lastCapturedLogs);
-    this.notifyStatus();
   }
 
   public startPolling(): void {
@@ -438,9 +281,9 @@ class AdGuardDirectClient {
     this.isPollingActive = true;
 
     // Dispara checagem inicial
-    this.checkConnection();
+    this.fetchRealtimeCycle();
 
-    // Executa ciclo contínuo em tempo real a cada ~1.8s
+    // Loop com guarda de in-flight e pausa quando a aba estiver em segundo plano
     this.pollingTimer = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       this.fetchRealtimeCycle();
@@ -457,20 +300,21 @@ class AdGuardDirectClient {
 
   public reconnect(): void {
     this.stopPolling();
-    this.checkConnection().then(() => {
+    this.fetchRealtimeCycle().then(() => {
       this.startPolling();
     });
   }
 
   public getStatus(): AdGuardDirectStatus {
+    const isLive = this.state === 'CONNECTED';
     return {
       state: this.state,
       diagnostic: this.diagnostic,
       message: this.diagnosticMessage,
       endpoint: this.endpoint,
-      isRealtime: true,
-      version: this.lastCapturedStatus?.version || 'v0.107.54',
-      protectionEnabled: this.lastCapturedStatus?.protection_enabled ?? true,
+      isRealtime: isLive,
+      version: this.lastCapturedStatus?.version || (isLive ? 'v0.107.x' : 'Indisponível'),
+      protectionEnabled: this.lastCapturedStatus?.protection_enabled ?? isLive,
       queriesCount: this.lastCapturedStats.num_dns_queries,
       blockedCount: this.lastCapturedStats.num_blocked_filtering,
       lastSuccessfulSync: this.lastCapturedStats.last_updated
@@ -480,7 +324,7 @@ class AdGuardDirectClient {
   public getStats(): AdGuardStatsResponse {
     return {
       ...this.lastCapturedStats,
-      connected: true
+      connected: this.state === 'CONNECTED'
     };
   }
 

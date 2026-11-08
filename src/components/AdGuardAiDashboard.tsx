@@ -60,7 +60,7 @@ export const AdGuardAiDashboard: React.FC = () => {
   const [isAnalyzingBatch, setIsAnalyzingBatch] = useState<boolean>(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(1); // 1 segundo (polling rápido contínuo)
   const [lastUpdated, setLastUpdated] = useState<string>('--:--:--');
-  const [prevQueriesCount, setPrevQueriesCount] = useState<number>(stats?.num_dns_queries || 1424);
+  const [prevQueriesCount, setPrevQueriesCount] = useState<number>(stats?.num_dns_queries || 0);
   const [hasNewQueryPing, setHasNewQueryPing] = useState<boolean>(false);
 
   // Search & Filter states
@@ -77,7 +77,7 @@ export const AdGuardAiDashboard: React.FC = () => {
 
   // 1. Subscribe to adguardDirectClient observers for continuous live updates
   useEffect(() => {
-    // Start fast polling (~1.2s) directly from browser to http://192.168.100.23:8081
+    // Start fast polling via reverse proxy /adguard-api
     adguardDirectClient.startPolling();
 
     const unsubStatus = adguardDirectClient.subscribeStatus((st) => {
@@ -221,9 +221,11 @@ export const AdGuardAiDashboard: React.FC = () => {
   }, [domains, selectedCategory, searchQuery]);
 
   // Derived metrics from real AdGuard data
-  const totalQueries = stats?.num_dns_queries || 1424;
-  const blockedQueries = stats?.num_blocked_filtering || 89;
-  const blockRate = stats?.blocked_percentage || (totalQueries > 0 ? Number(((blockedQueries / totalQueries) * 100).toFixed(1)) : 6.3);
+  const totalQueries = stats?.num_dns_queries ?? 0;
+  const blockedQueries = stats?.num_blocked_filtering ?? 0;
+  const blockRate = totalQueries > 0
+    ? Number(((blockedQueries / totalQueries) * 100).toFixed(1))
+    : (stats?.blocked_percentage ?? 0);
   
   const trackersCount = domains.filter(d => d.tracker).length;
   const telemetryCount = domains.filter(d => d.telemetry).length;
@@ -605,20 +607,22 @@ export const AdGuardAiDashboard: React.FC = () => {
               Dispositivos mais ativos (LAN)
             </span>
             <div className="space-y-1.5">
-              {(stats?.top_clients || [
-                { '192.168.100.22': 1034 },
-                { '192.168.100.21': 341 },
-                { '192.168.100.23': 37 }
-              ]).slice(0, 3).map((item, idx) => {
-                const ip = Object.keys(item)[0];
-                const count = item[ip];
-                return (
-                  <div key={idx} className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
-                    <span className="font-mono font-bold text-[#1A1A2E]">{ip}</span>
-                    <span className="font-mono text-[#00A6FB] tabular-nums font-bold">{count} queries</span>
-                  </div>
-                );
-              })}
+              {(stats?.top_clients && stats.top_clients.length > 0) ? (
+                stats.top_clients.slice(0, 3).map((item, idx) => {
+                  const ip = Object.keys(item)[0];
+                  const count = item[ip];
+                  return (
+                    <div key={idx} className="flex items-center justify-between text-xs px-2.5 py-1.5 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]">
+                      <span className="font-mono font-bold text-[#1A1A2E]">{ip}</span>
+                      <span className="font-mono text-[#00A6FB] tabular-nums font-bold">{count} queries</span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-xs font-mono text-[#717188] py-2 text-center bg-[#FFF7E8]/50 border border-dashed border-[#1A1A2E]/30 rounded-md">
+                  Nenhum cliente registrado no período.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -917,11 +921,11 @@ export const AdGuardAiDashboard: React.FC = () => {
                   type="text"
                   value={customEndpoint}
                   onChange={(e) => setCustomEndpoint(e.target.value)}
-                  placeholder="http://192.168.100.23:8081"
+                  placeholder="/adguard-api ou http://localhost:8081"
                   className="w-full px-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-md text-[#1A1A2E] font-mono focus:outline-none focus:bg-white shadow-[2px_2px_0px_#1A1A2E]"
                 />
                 <span className="text-[10px] text-[#4A4A68] mt-1 block">
-                  Se você ativou HTTPS no AdGuard, pode mudar para https://192.168.100.23:8081
+                  Padrão recomendado: /adguard-api (proxy Nginx automático sem restrição de IP)
                 </span>
               </div>
 

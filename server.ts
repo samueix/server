@@ -629,8 +629,8 @@ async function startServer() {
     }
   });
 
-  // Rota de Auditoria e Detecção de Ataques / Tentativas de Invasão
-  app.get('/api/security/attack-monitor', async (req, res) => {
+  // Rota de Auditoria e Detecção de Ataques / Tentativas de Invasão (múltiplos aliases resilientes)
+  app.get(['/api/security/attack-monitor', '/api/security', '/api/security/status'], async (req, res) => {
     applyCors(res);
     try {
       const status = await getSecurityAttackStatus();
@@ -865,6 +865,10 @@ async function startServer() {
         servicos: services
       });
     }
+    if (subPath.startsWith('security')) {
+      const status = await getSecurityAttackStatus();
+      return res.json(status);
+    }
     if (subPath.startsWith('n8n')) {
       if (subPath === 'n8n/config' && req.method === 'POST') {
         setN8nConfigFallback(req.body?.url, req.body?.apiKey);
@@ -902,11 +906,11 @@ async function startServer() {
     const cleanSub = rawSub.replace(/^control\//, '');
     const queryStr = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
     
-    // Lista de endpoints candidatos (prioriza 127.0.0.1 quando rodando localmente no Ubuntu)
+    // Lista de endpoints candidatos agnósticos a IP (loopback IPv4 e IPv6)
     const candidateUrls = [
       `http://127.0.0.1:8081/control/${cleanSub}${queryStr}`,
-      `http://localhost:8081/control/${cleanSub}${queryStr}`,
-      `http://192.168.100.23:8081/control/${cleanSub}${queryStr}`
+      `http://[::1]:8081/control/${cleanSub}${queryStr}`,
+      `http://localhost:8081/control/${cleanSub}${queryStr}`
     ];
 
     const adgCfg = getAdGuardConfig();
@@ -937,26 +941,18 @@ async function startServer() {
           break;
         }
       } catch {
-        // Tenta o próximo candidato
+        // Tenta o próximo candidato local
       }
     }
 
     if (responded) return;
 
-    // Fallback gracioso com dados em cache
-    if (cleanSub.startsWith('stats')) {
-      const stats = await fetchAdGuardStats();
-      return res.json(stats);
-    }
-    if (cleanSub.startsWith('status')) {
-      const status = await fetchAdGuardStatus();
-      return res.json(status);
-    }
-    if (cleanSub.startsWith('querylog')) {
-      const logs = await fetchAdGuardQueryLog(30);
-      return res.json({ data: logs });
-    }
-    return res.status(502).json({ error: 'AdGuard inacessível via proxy /adguard-api/' });
+    // Erro real 502 sem dados falsos ou simulados
+    return res.status(502).json({
+      error: 'AdGuard Home inacessível na porta 8081',
+      source: 'adguard_daemon',
+      stale: false
+    });
   });
 
   // AdGuard Query Log

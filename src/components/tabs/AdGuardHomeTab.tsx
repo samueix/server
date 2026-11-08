@@ -227,7 +227,12 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         <div className="flex items-center gap-3">
           {/* Link para o painel nativo do AdGuard Home */}
           <a
-            href={`http://${typeof window !== 'undefined' ? (window.location.hostname || '192.168.100.23') : '192.168.100.23'}:8081/#`}
+            href={(() => {
+              if (typeof window === 'undefined') return ':8081/#';
+              const host = window.location.hostname || '127.0.0.1';
+              const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+              return `${window.location.protocol}//${formattedHost}:8081/#`;
+            })()}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FFEECB] text-[#1A1A2E] rounded-lg text-xs font-mono font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"

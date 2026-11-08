@@ -7,7 +7,7 @@ export interface AdGuardConfig {
 }
 
 let currentConfig: AdGuardConfig = {
-  url: 'http://192.168.100.23:8081',
+  url: 'http://127.0.0.1:8081',
   username: 'samuel',
   password: 'REDACTED_PASSWORD'
 };
@@ -33,7 +33,7 @@ export function updateAdGuardConfig(cfg: Partial<AdGuardConfig>): AdGuardConfig 
 
 export function getActiveAdGuardCredentials() {
   const fileConfig = getServerConfig().adguard;
-  const url = (fileConfig?.url || currentConfig.url || 'http://192.168.100.23:8081').replace(/\/$/, '');
+  const url = (fileConfig?.url || currentConfig.url || 'http://127.0.0.1:8081').replace(/\/$/, '');
   const username = fileConfig?.username || currentConfig.username || 'samuel';
   const password = fileConfig?.password !== undefined && fileConfig.password !== '' 
     ? fileConfig.password 
@@ -49,12 +49,12 @@ export function getAdGuardClearCommand(): string {
 async function makeAdGuardRequest(endpoint: string, method: 'GET' | 'POST' = 'GET', body?: any): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
   const { url, username, password } = getActiveAdGuardCredentials();
 
-  // Candidatos de base URL em ordem de prioridade local
+  // Candidatos de base URL agnósticos a IP: loopback IPv4 e IPv6
   const basesToTry = [
     'http://127.0.0.1:8081',
+    'http://[::1]:8081',
     'http://localhost:8081',
-    url.replace(/\/$/, ''),
-    'http://192.168.100.23:8081'
+    url.replace(/\/$/, '')
   ];
   const uniqueBases = Array.from(new Set(basesToTry));
 
@@ -192,26 +192,27 @@ export async function fetchAdGuardStatus() {
 
 export function updateAdGuardRawStats(d: any) {
   if (!d) return lastCapturedStats;
-  const numDns = d.num_dns_queries || 0;
-  const numBlocked = d.num_blocked_filtering || 0;
+  const numDns = Number(d.num_dns_queries || 0);
+  const numBlocked = Number(d.num_blocked_filtering || 0);
   const blockPct = numDns > 0 ? Number(((numBlocked / numDns) * 100).toFixed(1)) : 0;
 
   lastCapturedStats = {
     connected: true,
     online: true,
+    stale: false,
     isCached: false,
     num_dns_queries: numDns,
     num_blocked_filtering: numBlocked,
-    num_replaced_safebrowsing: d.num_replaced_safebrowsing || 0,
-    num_replaced_safesearch: d.num_replaced_safesearch || 0,
+    num_replaced_safebrowsing: Number(d.num_replaced_safebrowsing || 0),
+    num_replaced_safesearch: Number(d.num_replaced_safesearch || 0),
     blocked_percentage: blockPct,
-    avg_processing_time: d.avg_processing_time || 0.038,
-    top_queried_domains: d.top_queried_domains || [],
-    top_blocked_domains: d.top_blocked_domains || [],
-    top_clients: d.top_clients || [],
-    top_upstreams_responses: d.top_upstreams_responses || [],
-    dns_queries: d.dns_queries || [],
-    blocked_filtering: d.blocked_filtering || d.filtragem_bloqueada || [],
+    avg_processing_time: Number(d.avg_processing_time || 0),
+    top_queried_domains: Array.isArray(d.top_queried_domains) ? d.top_queried_domains : [],
+    top_blocked_domains: Array.isArray(d.top_blocked_domains) ? d.top_blocked_domains : [],
+    top_clients: Array.isArray(d.top_clients) ? d.top_clients : [],
+    top_upstreams_responses: Array.isArray(d.top_upstreams_responses) ? d.top_upstreams_responses : [],
+    dns_queries: Array.isArray(d.dns_queries) ? d.dns_queries : [],
+    blocked_filtering: Array.isArray(d.blocked_filtering) ? d.blocked_filtering : [],
     time_units: d.time_units || 'hours',
     last_updated: new Date().toISOString()
   };
@@ -224,15 +225,22 @@ export async function fetchAdGuardStats() {
     return updateAdGuardRawStats(result.data);
   }
 
-  // Se o usuário já sincronizou estatísticas reais via sync, retorna essas
+  // Se falhou mas temos dados anteriores, sinaliza que o dado é ANTIGO (stale)
   if (lastCapturedStats) {
-    return lastCapturedStats;
+    return {
+      ...lastCapturedStats,
+      connected: false,
+      online: false,
+      stale: true,
+      error: result.error || 'AdGuard Home offline ou inacessível no momento'
+    };
   }
 
-  // ZERO FAKE: Se o AdGuard estiver offline, retorna zerado com erro explícito
+  // ZERO DADOS FAKES: Estado desconectado honesto
   return {
     connected: false,
     online: false,
+    stale: true,
     isCached: false,
     num_dns_queries: 0,
     num_blocked_filtering: 0,
@@ -245,21 +253,21 @@ export async function fetchAdGuardStats() {
     dns_queries: [],
     blocked_filtering: [],
     time_units: 'hours',
-    last_updated: new Date().toISOString(),
-    error: 'AdGuard Home offline ou inacessível em :8081'
+    last_updated: '--:--:--',
+    error: result.error || 'AdGuard Home offline ou inacessível em :8081'
   };
 }
 
 export async function fetchAdGuardQueryLog(limit: number = 30) {
   const result = await makeAdGuardRequest(`/control/querylog?limit=${limit}`);
-  if (result.ok && result.data && Array.isArray(result.data.data) && result.data.data.length > 0) {
+  if (result.ok && result.data && Array.isArray(result.data.data)) {
     lastCapturedQueryLog = result.data.data.map((item: any) => {
       const isBlocked = item.reason && item.reason !== 'NotFilteredNotFound';
       return {
-        domain: item.question?.name || 'unknown',
-        client: item.client || '192.168.100.22',
+        domain: item.question?.name || item.domain || 'desconhecido',
+        client: item.client || '--',
         time: item.time || new Date().toISOString(),
-        elapsed_ms: item.elapsed_ms ? Number((item.elapsed_ms * 1000).toFixed(1)) : 12.0,
+        elapsed_ms: item.elapsed_ms ? Number((item.elapsed_ms * 1000).toFixed(1)) : 0,
         status: isBlocked ? 'BLOCKED' : 'PROCESSED',
         reason: item.reason || 'OK',
         rule: item.rule || '',
@@ -269,5 +277,5 @@ export async function fetchAdGuardQueryLog(limit: number = 30) {
     return lastCapturedQueryLog;
   }
 
-  return lastCapturedQueryLog;
+  return [];
 }

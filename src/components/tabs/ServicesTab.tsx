@@ -413,19 +413,19 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
             </button>
             <button
               onClick={() => setFilter('active')}
-              className={`px-3 py-1 rounded-md transition font-bold ${filter === 'active' ? 'bg-[#12B76A] text-white shadow-sm' : 'text-[#4A4A68] hover:text-[#12B76A]'}`}
+              className={`px-3 py-1 rounded-md transition font-bold ${filter === 'active' ? 'bg-[#12B76A] text-[#1A1A2E] shadow-sm' : 'text-[#4A4A68] hover:text-[#12B76A]'}`}
             >
               Ativos
             </button>
             <button
               onClick={() => setFilter('stopped')}
-              className={`px-3 py-1 rounded-md transition font-bold ${filter === 'stopped' ? 'bg-[#F04438] text-white shadow-sm' : 'text-[#4A4A68] hover:text-[#F04438]'}`}
+              className={`px-3 py-1 rounded-md transition font-bold ${filter === 'stopped' ? 'bg-[#F04438] text-[#1A1A2E] shadow-sm' : 'text-[#4A4A68] hover:text-[#F04438]'}`}
             >
               Parados
             </button>
             <button
               onClick={() => setFilter('enabled')}
-              className={`px-3 py-1 rounded-md transition font-bold ${filter === 'enabled' ? 'bg-[#00A6FB] text-white shadow-sm' : 'text-[#4A4A68] hover:text-[#00A6FB]'}`}
+              className={`px-3 py-1 rounded-md transition font-bold ${filter === 'enabled' ? 'bg-[#00A6FB] text-[#1A1A2E] shadow-sm' : 'text-[#4A4A68] hover:text-[#00A6FB]'}`}
             >
               Habilitados
             </button>
@@ -454,7 +454,7 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
               fetchServices();
             }}
             disabled={isRefreshing}
-            className="px-3.5 py-2 rounded-lg bg-[#FF5A36] text-white font-bold text-xs font-mono flex items-center gap-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#e04826] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition disabled:opacity-50"
+            className="px-3.5 py-2 rounded-lg bg-[#FF5A36] text-[#1A1A2E] font-black text-xs font-mono flex items-center gap-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#e04826] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition disabled:opacity-50"
             title="Atualizar status dos serviços"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
