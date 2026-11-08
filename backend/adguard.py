@@ -34,31 +34,73 @@ def update_raw_stats(data: dict):
         _latest_synced_stats["connected"] = True
     return _latest_synced_stats
 
-async def fetch_adguard_stats():
-    global _latest_synced_stats
+async def _request_adguard(endpoint: str, method: str = "GET", json_body=None):
+    """
+    Tenta acessar o AdGuard Home local em 127.0.0.1:8081/control.
+    Primeiro tenta SEM autenticação (caso o proxy ou rede local não exija).
+    Se retornar 401 Unauthorized, tenta com Basic Auth configurado.
+    """
+    clean_ep = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+    if not clean_ep.startswith("/control"):
+        clean_ep = f"/control{clean_ep}"
+
     url, username, password = get_config_credentials()
     auth = (username, password) if username and password else None
-    
-    urls_to_try = [
-        f"{url}/control/stats",
-        "http://192.168.100.23:8081/control/stats",
-        "http://127.0.0.1:8081/control/stats",
-        "http://localhost:8081/control/stats"
+
+    # Candidatos locais prioritários
+    bases_to_try = [
+        "http://127.0.0.1:8081",
+        "http://localhost:8081",
+        url.rstrip("/"),
+        "http://192.168.100.23:8081"
     ]
-    
-    for target in urls_to_try:
+    # Remove duplicatas preservando ordem
+    unique_bases = []
+    for b in bases_to_try:
+        if b and b not in unique_bases:
+            unique_bases.append(b)
+
+    for base in unique_bases:
+        target = f"{base}{clean_ep}"
+        # 1. Tenta sem autenticação
         try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                res = await client.get(target, auth=auth)
+            async with httpx.AsyncClient(timeout=2.5) as client:
+                if method == "POST":
+                    res = await client.post(target, json=json_body)
+                else:
+                    res = await client.get(target)
+
                 if res.status_code == 200:
-                    data = res.json()
-                    data["connected"] = True
-                    _latest_synced_stats = data
-                    return data
+                    try:
+                        return res.json()
+                    except Exception:
+                        return {"success": True}
+
+                # Se retornar 401 Unauthorized e temos credenciais, tenta com auth
+                if res.status_code == 401 and auth:
+                    if method == "POST":
+                        res_auth = await client.post(target, auth=auth, json=json_body)
+                    else:
+                        res_auth = await client.get(target, auth=auth)
+                    if res_auth.status_code == 200:
+                        try:
+                            return res_auth.json()
+                        except Exception:
+                            return {"success": True}
         except Exception:
             continue
 
-    # Se já temos stats reais sincronizadas pelo usuário, usa-as
+    return None
+
+async def fetch_adguard_stats():
+    global _latest_synced_stats
+    data = await _request_adguard("/stats")
+    if data and isinstance(data, dict):
+        data["connected"] = True
+        _latest_synced_stats = data
+        return data
+
+    # Se já temos dados válidos sincronizados em memória
     if _latest_synced_stats:
         return _latest_synced_stats
 
@@ -79,26 +121,10 @@ async def fetch_adguard_stats():
     }
 
 async def fetch_adguard_status():
-    url, username, password = get_config_credentials()
-    auth = (username, password) if username and password else None
-    
-    urls_to_try = [
-        f"{url}/control/status",
-        "http://192.168.100.23:8081/control/status",
-        "http://127.0.0.1:8081/control/status",
-        "http://localhost:8081/control/status"
-    ]
-    
-    for target in urls_to_try:
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                res = await client.get(target, auth=auth)
-                if res.status_code == 200:
-                    data = res.json()
-                    data["online"] = True
-                    return data
-        except Exception:
-            continue
+    data = await _request_adguard("/status")
+    if data and isinstance(data, dict):
+        data["online"] = True
+        return data
 
     return {
         "online": False,
@@ -109,41 +135,20 @@ async def fetch_adguard_status():
     }
 
 async def fetch_adguard_querylog(limit: int = 30):
-    url, username, password = get_config_credentials()
-    auth = (username, password) if username and password else None
-    
-    urls_to_try = [
-        f"{url}/control/querylog?limit={limit}",
-        f"http://192.168.100.23:8081/control/querylog?limit={limit}",
-        f"http://127.0.0.1:8081/control/querylog?limit={limit}"
-    ]
-    
-    for target in urls_to_try:
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                res = await client.get(target, auth=auth)
-                if res.status_code == 200:
-                    return res.json().get("data", [])
-        except Exception:
-            continue
+    data = await _request_adguard(f"/querylog?limit={limit}")
+    if data:
+        if isinstance(data, dict) and "data" in data:
+            return data.get("data", [])
+        if isinstance(data, list):
+            return data
     return []
 
 async def clear_adguard_history():
     global _latest_synced_stats
     url, username, password = get_config_credentials()
-    auth = (username, password) if username and password else None
-    
-    urls = [
-        ("querylog", f"{url}/control/querylog_clear"),
-        ("stats", f"{url}/control/stats_reset")
-    ]
-    
-    for _, target in urls:
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                await client.post(target, auth=auth)
-        except Exception:
-            pass
+
+    await _request_adguard("/querylog_clear", method="POST")
+    await _request_adguard("/stats_reset", method="POST")
 
     _latest_synced_stats = {
         "connected": True,
@@ -158,9 +163,9 @@ async def clear_adguard_history():
         "top_clients": [],
         "top_upstreams_responses": []
     }
-    
+
     return {
         "success": True,
         "message": "Histórico do AdGuard zerado com sucesso.",
-        "shellCommand": f'curl -s -X POST -u "{username}:{password}" {url}/control/querylog_clear && curl -s -X POST -u "{username}:{password}" {url}/control/stats_reset'
+        "shellCommand": f'curl -s -X POST {url}/control/querylog_clear && curl -s -X POST {url}/control/stats_reset'
     }

@@ -72,16 +72,41 @@ export interface AdGuardFullTelemetry {
 }
 
 // Prefixo detectado dinamicamente para compatibilidade com qualquer configuração Nginx
-// (/adguard-api, /adguard-api/control ou proxy interno /api/adguard)
+// Prioridade máxima: /adguard-api (proxy reverso direto Nginx em tempo real)
 let detectedPrefix: string | null = null;
+
+function isValidAdGuardPayload(data: any): boolean {
+  if (!data || typeof data !== 'object') return false;
+  // Se for resposta de erro do backend com connected: false
+  if (data.connected === false || (data.online === false && !data.version)) return false;
+  if (data.error && !data.version && data.num_dns_queries === undefined) return false;
+
+  // Status válido do AdGuard
+  if (data.version && data.version !== 'Desconectado' && data.version !== 'N/D') return true;
+  if (typeof data.running === 'boolean' || typeof data.protection_enabled === 'boolean') return true;
+
+  // Stats válidos do AdGuard
+  if (data.time_units || typeof data.num_dns_queries === 'number' || Array.isArray(data.top_queried_domains)) return true;
+
+  // Querylog válido: array direto ou { data: [...] }
+  if (Array.isArray(data) || Array.isArray(data.data)) return true;
+
+  return false;
+}
 
 async function adguardFetch<T = any>(endpoint: string, signal?: AbortSignal): Promise<T> {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
-  // Se já sabemos qual prefixo funciona, tenta direto; caso contrário testa /api/adguard e /adguard-api
+  // Prioridade: Rota direta do Nginx (/adguard-api), depois /adguard-api/control, e só por último o backend
+  const candidatePrefixes = [
+    API.adguard,              // '/adguard-api' (rota Nginx direta para :8081/control/)
+    `${API.adguard}/control`, // '/adguard-api/control' (caso a regra do Nginx não tenha /control/)
+    '/api/adguard'            // Fallback para o backend do painel
+  ];
+
   const prefixesToTry = detectedPrefix 
-    ? [detectedPrefix, '/api/adguard', API.adguard, `${API.adguard}/control`]
-    : ['/api/adguard', API.adguard, `${API.adguard}/control`];
+    ? [detectedPrefix, ...candidatePrefixes.filter(p => p !== detectedPrefix)]
+    : candidatePrefixes;
 
   let lastError: Error | null = null;
   const authHeaders = getAuthHeaders();
@@ -114,20 +139,28 @@ async function adguardFetch<T = any>(endpoint: string, signal?: AbortSignal): Pr
       if (signal) signal.removeEventListener('abort', onExternalAbort);
 
       if (response.ok) {
-        detectedPrefix = prefix;
-        return await response.json();
+        const json = await response.json();
+        // Validação estrita: só aceita e fixa o prefixo se a resposta contiver telemetria real do AdGuard
+        if (isValidAdGuardPayload(json)) {
+          detectedPrefix = prefix;
+          return json;
+        }
+        // Se retornou payload de serviço desconectado ou erro, invalida o prefixo gravado e continua
+        if (detectedPrefix === prefix) {
+          detectedPrefix = null;
+        }
       }
 
-      if (response.status === 404 && !detectedPrefix) {
-        // Tenta o próximo prefixo
-        continue;
+      if (detectedPrefix === prefix) {
+        detectedPrefix = null;
       }
-
-      throw new Error(`HTTP ${response.status}`);
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (signal) signal.removeEventListener('abort', onExternalAbort);
       lastError = err;
+      if (detectedPrefix === prefix) {
+        detectedPrefix = null;
+      }
       if (signal?.aborted) {
         throw new Error('Requisição cancelada');
       }

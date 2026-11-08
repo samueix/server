@@ -49,36 +49,38 @@ export function getAdGuardClearCommand(): string {
 async function makeAdGuardRequest(endpoint: string, method: 'GET' | 'POST' = 'GET', body?: any): Promise<{ ok: boolean; status: number; data: any; error?: string }> {
   const { url, username, password } = getActiveAdGuardCredentials();
 
-  // Candidatos de URL (IP da LAN e localhost)
-  const urlsToTry = [
-    `${url}${endpoint}`,
-    `http://192.168.100.23:8081${endpoint}`,
-    `http://127.0.0.1:8081${endpoint}`,
-    `http://localhost:8081${endpoint}`
+  // Candidatos de base URL em ordem de prioridade local
+  const basesToTry = [
+    'http://127.0.0.1:8081',
+    'http://localhost:8081',
+    url.replace(/\/$/, ''),
+    'http://192.168.100.23:8081'
   ];
+  const uniqueBases = Array.from(new Set(basesToTry));
 
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     'Accept': 'application/json',
     'User-Agent': 'AdGuard-Panel/1.0'
   };
 
   if (body) {
-    headers['Content-Type'] = 'application/json';
+    baseHeaders['Content-Type'] = 'application/json';
   }
 
-  if (username && password) {
-    const creds = Buffer.from(`${username}:${password}`).toString('base64');
-    headers['Authorization'] = `Basic ${creds}`;
-  }
+  const basicAuthHeader = (username && password)
+    ? `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
+    : undefined;
 
-  for (const targetUrl of urlsToTry) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2800);
-
+  for (const base of uniqueBases) {
+    const targetUrl = `${base}${endpoint}`;
+    
+    // 1. Tenta sem Authorization (rede local / loopback Nginx)
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(targetUrl, {
         method,
-        headers,
+        headers: baseHeaders,
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal
       });
@@ -93,8 +95,31 @@ async function makeAdGuardRequest(endpoint: string, method: 'GET' | 'POST' = 'GE
         }
         return { ok: true, status: res.status, data };
       }
+
+      // Se der 401 Unauthorized e temos credenciais, tenta com Basic Auth
+      if (res.status === 401 && basicAuthHeader) {
+        const authCtrl = new AbortController();
+        const authTimer = setTimeout(() => authCtrl.abort(), 2000);
+        const authRes = await fetch(targetUrl, {
+          method,
+          headers: { ...baseHeaders, 'Authorization': basicAuthHeader },
+          body: body ? JSON.stringify(body) : undefined,
+          signal: authCtrl.signal
+        });
+        clearTimeout(authTimer);
+
+        if (authRes.ok) {
+          let data = null;
+          try {
+            data = await authRes.json();
+          } catch {
+            data = { success: true };
+          }
+          return { ok: true, status: authRes.status, data };
+        }
+      }
     } catch {
-      clearTimeout(timeoutId);
+      // Tenta próximo base
     }
   }
 
