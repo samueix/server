@@ -844,6 +844,8 @@ export const AdGuardAiDashboard: React.FC = () => {
               <tbody className="divide-y-2 divide-[#1A1A2E]/10 font-mono">
                 {queryLogs.map((log, idx) => {
                   const isBlocked = log.status === 'BLOCKED';
+                  const isRewritten = log.status === 'REWRITTEN';
+                  const isWhitelisted = log.isWhitelisted;
                   const cachedAnalysis = log.analysis || adguardDirectClient.getDomainAnalysis(log.domain);
 
                   return (
@@ -855,6 +857,14 @@ export const AdGuardAiDashboard: React.FC = () => {
                         {isBlocked ? (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F04438]/10 text-[#F04438] border-2 border-[#F04438]">
                             Bloqueado
+                          </span>
+                        ) : isRewritten ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#F79009]/15 text-[#B54708] border-2 border-[#F79009]">
+                            Reescrito
+                          </span>
+                        ) : isWhitelisted ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#00A6FB]/15 text-[#026AA2] border-2 border-[#00A6FB]" title="Permitido por regra de exceção (Whitelist)">
+                            Whitelist
                           </span>
                         ) : (
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#12B76A]/10 text-[#12B76A] border-2 border-[#12B76A]">
@@ -878,11 +888,20 @@ export const AdGuardAiDashboard: React.FC = () => {
                       <td className="py-2 px-3 text-center text-xs text-[#4A4A68] font-bold">
                         {log.dns_type || 'A'}
                       </td>
-                      <td className="py-2 px-3 text-xs text-[#4A4A68] truncate max-w-xs font-mono">
+                      <td className="py-2 px-3 text-xs text-[#4A4A68] truncate max-w-xs font-mono" title={log.rule || log.reason || '-'}>
                         {log.rule || log.reason || '-'}
                       </td>
                       <td className="py-2 px-4 text-right text-[#1A1A2E] font-bold tabular-nums">
-                        {log.elapsed_ms}ms
+                        <div className="flex items-center justify-end gap-1.5">
+                          {log.cached && (
+                            <span className="px-1.5 py-0.2 bg-[#ECFDF3] text-[#12B76A] border border-[#12B76A] rounded text-[9px] font-mono uppercase">
+                              cache
+                            </span>
+                          )}
+                          <span title={log.upstream ? `Upstream: ${log.upstream}` : undefined}>
+                            {log.elapsed_ms}ms
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   );

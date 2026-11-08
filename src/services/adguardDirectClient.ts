@@ -6,6 +6,12 @@ import {
   DomainAnalysisResult
 } from '../types';
 import { AdGuardStatsResponse, AdGuardStatusResponse } from './adguardAiApi';
+import { 
+  classifyAdGuardReason, 
+  parseElapsedMs, 
+  parseRule, 
+  isAdGuardPayloadValidLive 
+} from './adguardClassifier';
 
 export type DirectClientListener = (status: AdGuardDirectStatus) => void;
 export type StatsListener = (stats: AdGuardStatsResponse) => void;
@@ -16,11 +22,16 @@ class AdGuardDirectClient {
   private state: AdGuardConnectionState = 'DISCONNECTED';
   private diagnostic: AdGuardDiagnosticIssue = 'NONE';
   private diagnosticMessage: string = 'Aguardando sincronização com o serviço AdGuard Home.';
-  private pollingIntervalMs: number = 3000; // Polling honesto a cada 3s
+  private pollingIntervalMs: number = 3000;
   private pollingTimer: any = null;
   private isPollingActive: boolean = false;
   private isCycleRunning: boolean = false;
   private lastUpdateTimestamp: number = 0;
+  
+  // Rastreamento estrito de desatualização (stale tracking)
+  private isStatsStale: boolean = false;
+  private isQueryLogStale: boolean = false;
+  private staleWarning: string | null = null;
 
   private listeners: Set<DirectClientListener> = new Set();
   private statsListeners: Set<StatsListener> = new Set();
@@ -86,18 +97,32 @@ class AdGuardDirectClient {
   }
 
   /**
-   * Executa requisição com timeout e retorno estruturado
+   * Executa requisição com validação estrita:
+   * Resposta com connected: false, stale: true ou campo error é considerada FALHA.
+   * CONNECTED só com dado real e atual.
    */
-  private async safeFetch(path: string, timeoutMs = 3000): Promise<{ ok: boolean; status: number; data?: any; error?: string }> {
+  public async safeFetch(path: string, timeoutMs = 3000): Promise<{ 
+    ok: boolean; 
+    status: number; 
+    data?: any; 
+    isStale?: boolean; 
+    error?: string 
+  }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-    // Tenta primeiro /adguard-api, depois /adguard-api/control, depois /api/adguard
+    // Prioridade de busca estrita:
+    // 1. /adguard-api (proxy direto Nginx)
+    // 2. /adguard-api/control
+    // 3. /api/adguard (proxy do Node)
     const candidateUrls = [
       `/adguard-api${path}`,
       `/adguard-api/control${path}`,
       `/api/adguard${path}`
     ];
+
+    let hadStaleResponse = false;
+    let staleData: any = null;
 
     for (const url of candidateUrls) {
       try {
@@ -107,22 +132,44 @@ class AdGuardDirectClient {
           signal: controller.signal
         });
 
-        if (res.ok) {
-          clearTimeout(timer);
-          const data = await res.json();
-          return { ok: true, status: res.status, data };
-        }
-
         if (res.status === 401 || res.status === 403) {
           clearTimeout(timer);
           return { ok: false, status: res.status, error: 'Autenticação necessária no AdGuard Home (401)' };
         }
+
+        if (res.ok) {
+          const data = await res.json();
+
+          // Validação estrita: se for stale ou connected: false, NÃO é sucesso de live connection
+          if (data && (data.stale === true || data.connected === false || data.error)) {
+            hadStaleResponse = true;
+            staleData = data;
+            continue; // continua tentando achar um endpoint com dados ao vivo
+          }
+
+          // Se for payload ao vivo válido
+          if (isAdGuardPayloadValidLive(data)) {
+            clearTimeout(timer);
+            return { ok: true, status: res.status, data };
+          }
+        }
       } catch {
-        // Tenta o próximo candidato
+        // tenta o próximo candidato
       }
     }
 
     clearTimeout(timer);
+
+    if (hadStaleResponse) {
+      return { 
+        ok: false, 
+        status: 200, 
+        isStale: true, 
+        data: staleData, 
+        error: 'Serviço AdGuard Home offline; dados em cache desatualizados.' 
+      };
+    }
+
     return { ok: false, status: 502, error: 'Serviço AdGuard Home inacessível' };
   }
 
@@ -137,6 +184,8 @@ class AdGuardDirectClient {
       this.state = 'CONNECTED';
       this.diagnostic = 'NONE';
       this.diagnosticMessage = 'Conectado em tempo real ao AdGuard Home.';
+      this.isStatsStale = false;
+      this.staleWarning = null;
       this.lastCapturedStatus = {
         connected: true,
         running: data.running ?? true,
@@ -147,7 +196,13 @@ class AdGuardDirectClient {
       };
     } else {
       this.state = 'DISCONNECTED';
-      if (statusRes.status === 401 || statusRes.status === 403) {
+      if (statusRes.isStale) {
+        const age = this.getLastRealUpdate().ageSeconds;
+        this.diagnostic = 'CANNOT_REACH';
+        this.diagnosticMessage = `AdGuard Home offline. Exibindo dados antigos (${age >= 0 ? `${age}s atrás` : 'horário anterior'}).`;
+        this.isStatsStale = true;
+        this.staleWarning = `Dados antigos salvos. AdGuard offline há ${age >= 0 ? `${age}s` : 'algum tempo'}.`;
+      } else if (statusRes.status === 401 || statusRes.status === 403) {
         this.diagnostic = 'AUTH_REQUIRED';
         this.diagnosticMessage = 'Credenciais de acesso necessárias no servidor para o AdGuard Home (401).';
       } else {
@@ -204,17 +259,25 @@ class AdGuardDirectClient {
         this.state = 'CONNECTED';
         this.diagnostic = 'NONE';
         this.diagnosticMessage = 'Dados recebidos em tempo real via telemetria ativa do AdGuard.';
+        this.isStatsStale = false;
+        this.staleWarning = null;
 
         this.notifyStats(updatedStats);
       } else {
-        // Falha na busca de stats: atualiza estado de erro
+        // Falha na busca de stats: atualiza estado de erro e marca como stale se tiver dados prévios
         this.state = 'DISCONNECTED';
+        this.isStatsStale = true;
+        const age = this.getLastRealUpdate().ageSeconds;
+        this.staleWarning = `Dados antigos (${age >= 0 ? `${age}s atrás` : 'horário anterior'}). Conexão em tempo real indisponível.`;
+
         if (statsRes.status === 401 || statsRes.status === 403) {
           this.diagnostic = 'AUTH_REQUIRED';
           this.diagnosticMessage = 'Credenciais de acesso do AdGuard rejeitadas pelo servidor (401).';
         } else {
           this.diagnostic = 'CANNOT_REACH';
-          this.diagnosticMessage = 'AdGuard Home ou proxy Nginx inacessível (502/timeout).';
+          this.diagnosticMessage = statsRes.isStale 
+            ? `AdGuard Home offline no momento. Exibindo dados salvos de ${this.lastCapturedStats.last_updated}.`
+            : 'AdGuard Home ou proxy Nginx inacessível (502/timeout).';
         }
       }
 
@@ -226,29 +289,39 @@ class AdGuardDirectClient {
           : (Array.isArray(queryRes.data) ? queryRes.data : []);
 
         const parsedLogs: AdGuardQueryItem[] = rawList.map((item: any) => {
-          const isBlocked = item.reason && item.reason !== 'NotFilteredNotFound';
+          const reasonInfo = classifyAdGuardReason(item.reason);
           const domain = item.question?.name || item.domain || 'desconhecido';
           const client = item.client || '--';
           const time = item.time || new Date().toISOString();
-          const elapsed = typeof item.elapsed_ms === 'number' 
-            ? item.elapsed_ms 
-            : parseFloat(item.elapsed_ms || '0') || 0;
+          const elapsed = parseElapsedMs(item);
+          const rule = parseRule(item);
+          const upstream = item.upstream || '';
+          const cached = Boolean(item.cached);
 
           return {
             domain,
             client,
             time,
-            elapsed_ms: Number(elapsed.toFixed(1)),
-            status: isBlocked ? 'BLOCKED' : 'PROCESSED',
-            reason: item.reason || (isBlocked ? 'Bloqueado por filtro' : 'Processado normalmente'),
-            rule: item.rule || '',
+            elapsed_ms: elapsed,
+            status: reasonInfo.status,
+            category: reasonInfo.category,
+            isWhitelisted: reasonInfo.isWhitelisted,
+            reason: item.reason || reasonInfo.label,
+            rule,
             dns_type: item.question?.type || item.dns_type || 'A',
+            upstream,
+            cached,
             analysis: this.domainCache.get(domain.toLowerCase())
           };
         });
 
         this.lastCapturedLogs = parsedLogs;
+        this.isQueryLogStale = false;
         this.notifyLogs(parsedLogs);
+      } else {
+        // Falha no querylog: mantém lista existente marcada como desatualizada com aviso visível
+        this.isQueryLogStale = true;
+        this.notifyStatus();
       }
 
       // 3. Atualiza status operacional se estiver conectado
@@ -269,6 +342,8 @@ class AdGuardDirectClient {
     } catch (err: any) {
       this.state = 'DISCONNECTED';
       this.diagnostic = 'CANNOT_REACH';
+      this.isStatsStale = true;
+      this.isQueryLogStale = true;
       this.diagnosticMessage = err?.message || 'Falha de comunicação com o AdGuard Home.';
     } finally {
       this.isCycleRunning = false;
@@ -280,10 +355,8 @@ class AdGuardDirectClient {
     if (this.isPollingActive) return;
     this.isPollingActive = true;
 
-    // Dispara checagem inicial
     this.fetchRealtimeCycle();
 
-    // Loop com guarda de in-flight e pausa quando a aba estiver em segundo plano
     this.pollingTimer = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       this.fetchRealtimeCycle();
@@ -307,12 +380,18 @@ class AdGuardDirectClient {
 
   public getStatus(): AdGuardDirectStatus {
     const isLive = this.state === 'CONNECTED';
+    const age = this.getLastRealUpdate().ageSeconds;
+
     return {
       state: this.state,
       diagnostic: this.diagnostic,
       message: this.diagnosticMessage,
       endpoint: this.endpoint,
       isRealtime: isLive,
+      isStale: this.isStatsStale || (!isLive && this.lastUpdateTimestamp > 0),
+      staleAgeSeconds: age,
+      isQueryLogStale: this.isQueryLogStale,
+      staleWarning: this.staleWarning || (this.isQueryLogStale ? 'Log de consultas desatualizado (falha na sincronização)' : undefined),
       version: this.lastCapturedStatus?.version || (isLive ? 'v0.107.x' : 'Indisponível'),
       protectionEnabled: this.lastCapturedStatus?.protection_enabled ?? isLive,
       queriesCount: this.lastCapturedStats.num_dns_queries,

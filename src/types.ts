@@ -90,10 +90,14 @@ export interface AdGuardQueryItem {
   client: string;
   time: string;
   elapsed_ms: number;
-  status: 'BLOCKED' | 'PROCESSED';
+  status: 'BLOCKED' | 'PROCESSED' | 'REWRITTEN';
+  category?: 'BLOQUEADO' | 'PERMITIDO' | 'REESCRITO';
   reason: string;
   rule?: string;
   dns_type?: string;
+  upstream?: string;
+  cached?: boolean;
+  isWhitelisted?: boolean;
   analysis?: DomainAnalysisResult;
 }
 
@@ -478,6 +482,10 @@ export interface AdGuardDirectStatus {
   message: string;
   endpoint: string;
   isRealtime: boolean;
+  isStale?: boolean;
+  staleAgeSeconds?: number;
+  isQueryLogStale?: boolean;
+  staleWarning?: string;
   version?: string;
   protectionEnabled?: boolean;
   queriesCount?: number;

@@ -1,5 +1,10 @@
-import { API } from '../config';
 import { getAuthHeaders } from './authService';
+import { adguardDirectClient } from './adguardDirectClient';
+import { 
+  classifyAdGuardReason, 
+  parseElapsedMs, 
+  parseRule 
+} from './adguardClassifier';
 
 export interface AdGuardStatus {
   online: boolean;
@@ -48,6 +53,8 @@ export interface AdGuardStats {
   blocked_filtering: number[];
   time_units: string;
   last_updated: string;
+  isStale?: boolean;
+  staleAgeSeconds?: number;
   error?: string;
 }
 
@@ -56,10 +63,14 @@ export interface AdGuardQueryLogItem {
   client: string;
   time: string;
   elapsed_ms: number;
-  status: 'BLOCKED' | 'PROCESSED' | 'WHITELISTED';
+  status: 'BLOCKED' | 'PROCESSED' | 'WHITELISTED' | 'REWRITTEN';
+  category?: 'BLOQUEADO' | 'PERMITIDO' | 'REESCRITO';
   reason: string;
   rule?: string;
   dns_type?: string;
+  upstream?: string;
+  cached?: boolean;
+  isWhitelisted?: boolean;
   answer?: string[];
 }
 
@@ -68,106 +79,10 @@ export interface AdGuardFullTelemetry {
   status: AdGuardStatus | null;
   stats: AdGuardStats | null;
   queryLogs: AdGuardQueryLogItem[];
+  isStale?: boolean;
+  staleAgeSeconds?: number;
+  staleWarning?: string;
   error?: string;
-}
-
-// Prefixo detectado dinamicamente para compatibilidade com qualquer configuração Nginx
-// Prioridade máxima: /adguard-api (proxy reverso direto Nginx em tempo real)
-let detectedPrefix: string | null = null;
-
-function isValidAdGuardPayload(data: any): boolean {
-  if (!data || typeof data !== 'object') return false;
-  // Se for resposta de erro do backend com connected: false
-  if (data.connected === false || (data.online === false && !data.version)) return false;
-  if (data.error && !data.version && data.num_dns_queries === undefined) return false;
-
-  // Status válido do AdGuard
-  if (data.version && data.version !== 'Desconectado' && data.version !== 'N/D') return true;
-  if (typeof data.running === 'boolean' || typeof data.protection_enabled === 'boolean') return true;
-
-  // Stats válidos do AdGuard
-  if (data.time_units || typeof data.num_dns_queries === 'number' || Array.isArray(data.top_queried_domains)) return true;
-
-  // Querylog válido: array direto ou { data: [...] }
-  if (Array.isArray(data) || Array.isArray(data.data)) return true;
-
-  return false;
-}
-
-async function adguardFetch<T = any>(endpoint: string, signal?: AbortSignal): Promise<T> {
-  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-
-  // Prioridade: Rota direta do Nginx (/adguard-api), depois /adguard-api/control, e só por último o backend
-  const candidatePrefixes = [
-    API.adguard,              // '/adguard-api' (rota Nginx direta para :8081/control/)
-    `${API.adguard}/control`, // '/adguard-api/control' (caso a regra do Nginx não tenha /control/)
-    '/api/adguard'            // Fallback para o backend do painel
-  ];
-
-  const prefixesToTry = detectedPrefix 
-    ? [detectedPrefix, ...candidatePrefixes.filter(p => p !== detectedPrefix)]
-    : candidatePrefixes;
-
-  let lastError: Error | null = null;
-  const authHeaders = getAuthHeaders();
-
-  for (const prefix of prefixesToTry) {
-    const targetUrl = `${prefix}${cleanEndpoint}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-    const onExternalAbort = () => controller.abort();
-    if (signal) {
-      if (signal.aborted) {
-        clearTimeout(timeoutId);
-        throw new Error('Requisição cancelada');
-      }
-      signal.addEventListener('abort', onExternalAbort);
-    }
-
-    try {
-      const response = await fetch(targetUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          ...authHeaders
-        },
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-      if (signal) signal.removeEventListener('abort', onExternalAbort);
-
-      if (response.ok) {
-        const json = await response.json();
-        // Validação estrita: só aceita e fixa o prefixo se a resposta contiver telemetria real do AdGuard
-        if (isValidAdGuardPayload(json)) {
-          detectedPrefix = prefix;
-          return json;
-        }
-        // Se retornou payload de serviço desconectado ou erro, invalida o prefixo gravado e continua
-        if (detectedPrefix === prefix) {
-          detectedPrefix = null;
-        }
-      }
-
-      if (detectedPrefix === prefix) {
-        detectedPrefix = null;
-      }
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      if (signal) signal.removeEventListener('abort', onExternalAbort);
-      lastError = err;
-      if (detectedPrefix === prefix) {
-        detectedPrefix = null;
-      }
-      if (signal?.aborted) {
-        throw new Error('Requisição cancelada');
-      }
-    }
-  }
-
-  throw lastError || new Error('AdGuard Home offline');
 }
 
 /**
@@ -252,125 +167,86 @@ function parseUpstreams(responses?: any[], avgTimes?: any[]): UpstreamItem[] {
 }
 
 /**
- * GET /adguard-api/status
- * Status da proteção DNS do AdGuard Home
+ * GET /status via adguardDirectClient
  */
-export async function getAdGuardStatus(signal?: AbortSignal): Promise<AdGuardStatus> {
-  try {
-    const data = await adguardFetch<any>('/status', signal);
-    return {
-      online: true,
-      running: data.running ?? true,
-      protection_enabled: data.protection_enabled ?? true,
-      version: data.version || 'v0.107.x',
-      dns_addresses: data.dns_addresses || [],
-      dns_port: Number(data.dns_port || 53),
-      http_port: Number(data.http_port || 8081),
-      language: data.language || 'pt-br'
-    };
-  } catch (err: any) {
-    if (signal?.aborted) throw err;
-    return {
-      online: false,
-      running: false,
-      protection_enabled: false,
-      version: 'N/D',
-      error: 'AdGuard Home offline'
-    };
-  }
+export async function getAdGuardStatus(_signal?: AbortSignal): Promise<AdGuardStatus> {
+  const directStatus = adguardDirectClient.getStatus();
+  const isOnline = directStatus.state === 'CONNECTED';
+
+  return {
+    online: isOnline,
+    running: directStatus.protectionEnabled ?? isOnline,
+    protection_enabled: directStatus.protectionEnabled ?? isOnline,
+    version: directStatus.version || (isOnline ? 'v0.107.x' : 'Indisponível'),
+    dns_addresses: [],
+    dns_port: 53,
+    http_port: 8081,
+    language: 'pt-br',
+    error: isOnline ? undefined : directStatus.message
+  };
 }
 
 /**
- * GET /adguard-api/stats
- * Estatísticas reais do AdGuard Home
+ * GET /stats via adguardDirectClient
  */
-export async function getAdGuardStats(signal?: AbortSignal): Promise<AdGuardStats | null> {
-  try {
-    const raw = await adguardFetch<any>('/stats', signal);
-    const numQueries = Number(raw.num_dns_queries ?? raw.total_queries ?? 0);
-    const numBlocked = Number(raw.num_blocked_filtering ?? 0);
-    const blockedPercent = numQueries > 0 
-      ? Number(((numBlocked / numQueries) * 100).toFixed(1)) 
-      : 0;
-    const avgMs = Number(((raw.avg_processing_time || 0) * 1000).toFixed(2));
+export async function getAdGuardStats(_signal?: AbortSignal): Promise<AdGuardStats | null> {
+  const statsRes = adguardDirectClient.getStats();
+  const directStatus = adguardDirectClient.getStatus();
+  const isOnline = directStatus.state === 'CONNECTED';
+
+  return {
+    online: isOnline,
+    num_dns_queries: statsRes.num_dns_queries,
+    num_blocked_filtering: statsRes.num_blocked_filtering,
+    num_replaced_safebrowsing: statsRes.num_replaced_safebrowsing,
+    num_replaced_safesearch: statsRes.num_replaced_safesearch,
+    blocked_percentage: statsRes.blocked_percentage,
+    avg_processing_time_ms: Number((statsRes.avg_processing_time * 1000).toFixed(2)),
+    top_queried_domains: parseKeyCountArray(statsRes.top_queried_domains, statsRes.num_dns_queries),
+    top_blocked_domains: parseKeyCountArray(statsRes.top_blocked_domains, statsRes.num_blocked_filtering),
+    top_clients: parseClientsArray(statsRes.top_clients, statsRes.num_dns_queries),
+    top_upstreams: parseUpstreams(statsRes.top_upstreams_responses, []),
+    dns_queries: statsRes.dns_queries,
+    blocked_filtering: statsRes.blocked_filtering,
+    time_units: statsRes.time_units,
+    last_updated: statsRes.last_updated,
+    isStale: directStatus.isStale,
+    staleAgeSeconds: directStatus.staleAgeSeconds,
+    error: isOnline ? undefined : directStatus.message
+  };
+}
+
+/**
+ * GET /querylog via adguardDirectClient
+ */
+export async function getAdGuardQueryLog(limit = 40, _signal?: AbortSignal): Promise<AdGuardQueryLogItem[]> {
+  const logs = adguardDirectClient.getQueryLogs();
+  return logs.slice(0, limit).map(item => {
+    let statusMapped: 'BLOCKED' | 'PROCESSED' | 'WHITELISTED' | 'REWRITTEN' = 'PROCESSED';
+    if (item.status === 'BLOCKED') statusMapped = 'BLOCKED';
+    else if (item.status === 'REWRITTEN') statusMapped = 'REWRITTEN';
+    else if (item.isWhitelisted) statusMapped = 'WHITELISTED';
 
     return {
-      online: true,
-      num_dns_queries: numQueries,
-      num_blocked_filtering: numBlocked,
-      num_replaced_safebrowsing: Number(raw.num_replaced_safebrowsing || 0),
-      num_replaced_safesearch: Number(raw.num_replaced_safesearch || 0),
-      blocked_percentage: blockedPercent,
-      avg_processing_time_ms: avgMs,
-      top_queried_domains: parseKeyCountArray(raw.top_queried_domains, numQueries),
-      top_blocked_domains: parseKeyCountArray(raw.top_blocked_domains, numBlocked),
-      top_clients: parseClientsArray(raw.top_clients, numQueries),
-      top_upstreams: parseUpstreams(raw.top_upstreams_responses, raw.top_upstreams_avg_time),
-      dns_queries: Array.isArray(raw.dns_queries) ? raw.dns_queries : [],
-      blocked_filtering: Array.isArray(raw.blocked_filtering) ? raw.blocked_filtering : [],
-      time_units: raw.time_units || 'hours',
-      last_updated: new Date().toLocaleTimeString('pt-BR')
+      domain: item.domain,
+      client: item.client,
+      time: item.time,
+      elapsed_ms: item.elapsed_ms,
+      status: statusMapped,
+      category: item.category,
+      reason: item.reason,
+      rule: item.rule,
+      dns_type: item.dns_type,
+      upstream: item.upstream,
+      cached: item.cached,
+      isWhitelisted: item.isWhitelisted,
+      answer: []
     };
-  } catch (err: any) {
-    if (signal?.aborted) throw err;
-    return null;
-  }
+  });
 }
 
 /**
- * GET /adguard-api/querylog
- * Consultas recentes do AdGuard Home
- */
-export async function getAdGuardQueryLog(limit = 30, signal?: AbortSignal): Promise<AdGuardQueryLogItem[]> {
-  try {
-    const raw = await adguardFetch<any>(`/querylog?limit=${limit}`, signal);
-    const list = Array.isArray(raw?.data) ? raw.data : (Array.isArray(raw) ? raw : []);
-
-    return list.map((item: any) => {
-      const q = item.question || {};
-      const domain = q.name || item.domain || 'desconhecido';
-      const dnsType = q.type || item.dns_type || 'A';
-      const client = item.client || '--';
-      const time = item.time || new Date().toISOString();
-      const elapsed = typeof item.elapsed_ms === 'number' 
-        ? item.elapsed_ms 
-        : parseFloat(item.elapsed_ms || '0') || 0;
-
-      const reason = String(item.reason || item.status || '');
-      const isBlocked = reason.toLowerCase().includes('filter') || 
-                        reason.toLowerCase().includes('block') || 
-                        item.status === 'BLOCKED' ||
-                        item.status === 'FilteredBlackList';
-
-      const rule = Array.isArray(item.rules) && item.rules.length > 0 
-        ? item.rules[0]?.text 
-        : undefined;
-
-      const answers = Array.isArray(item.answer) 
-        ? item.answer.map((a: any) => typeof a === 'string' ? a : (a.value || JSON.stringify(a)))
-        : [];
-
-      return {
-        domain,
-        client,
-        time,
-        elapsed_ms: Number(elapsed.toFixed(1)),
-        status: isBlocked ? 'BLOCKED' : 'PROCESSED',
-        reason: reason || (isBlocked ? 'Bloqueado por filtro' : 'Processado normalmente'),
-        rule,
-        dns_type: dnsType,
-        answer: answers
-      };
-    });
-  } catch (err: any) {
-    if (signal?.aborted) throw err;
-    return [];
-  }
-}
-
-/**
- * Polling unificado e centralizado do AdGuard Home
- * Evita requests concorrentes e memory leaks
+ * Polling unificado e centralizado do AdGuard Home (Zero dados divergentes)
  */
 export const adguardService = {
   getAdGuardStatus,
@@ -383,6 +259,10 @@ export const adguardService = {
     if (!res.ok) {
       throw new Error('Falha ao zerar histórico do AdGuard no servidor');
     }
+    // Força sincronização após limpar
+    setTimeout(() => {
+      adguardDirectClient.fetchRealtimeCycle();
+    }, 500);
     return res.json();
   },
 
@@ -405,38 +285,32 @@ export const adguardService = {
     if (!res.ok) {
       throw new Error(`Falha ao sincronizar dados: HTTP ${res.status}`);
     }
+    adguardDirectClient.fetchRealtimeCycle();
     return res.json();
   },
 
-  async fetchFullAdGuard(signal?: AbortSignal): Promise<AdGuardFullTelemetry> {
-    try {
-      const [statusRes, statsRes, logsRes] = await Promise.allSettled([
-        getAdGuardStatus(signal),
-        getAdGuardStats(signal),
-        getAdGuardQueryLog(30, signal)
-      ]);
-
-      const status: AdGuardStatus | null = statusRes.status === 'fulfilled' ? statusRes.value : null;
-      const stats: AdGuardStats | null = statsRes.status === 'fulfilled' ? statsRes.value : null;
-      const logs: AdGuardQueryLogItem[] = logsRes.status === 'fulfilled' ? logsRes.value : [];
-
-      const isOnline = Boolean(status?.online || stats?.online);
-
-      return {
-        online: isOnline,
-        status,
-        stats,
-        queryLogs: logs,
-        error: isOnline ? undefined : 'AdGuard Home offline'
-      };
-    } catch (err: any) {
-      return {
-        online: false,
-        status: null,
-        stats: null,
-        queryLogs: [],
-        error: err?.message || 'AdGuard Home offline'
-      };
+  async fetchFullAdGuard(_signal?: AbortSignal): Promise<AdGuardFullTelemetry> {
+    // Garante que um ciclo recente seja disparado se o cliente estiver desatualizado
+    const lastUpdate = adguardDirectClient.getLastRealUpdate();
+    if (lastUpdate.ageSeconds < 0 || lastUpdate.ageSeconds > 4) {
+      await adguardDirectClient.fetchRealtimeCycle();
     }
+
+    const directStatus = adguardDirectClient.getStatus();
+    const isOnline = directStatus.state === 'CONNECTED';
+    const status = await getAdGuardStatus();
+    const stats = await getAdGuardStats();
+    const queryLogs = await getAdGuardQueryLog(40);
+
+    return {
+      online: isOnline,
+      status,
+      stats,
+      queryLogs,
+      isStale: directStatus.isStale,
+      staleAgeSeconds: directStatus.staleAgeSeconds,
+      staleWarning: directStatus.staleWarning,
+      error: isOnline ? undefined : directStatus.message
+    };
   }
 };

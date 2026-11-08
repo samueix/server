@@ -281,6 +281,21 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
       )}
 
+      {/* Stale Data Warning Banner */}
+      {stats?.isStale && (
+        <div className="bg-[#FEF0C7] border-2 border-[#F79009] shadow-[4px_4px_0px_#F79009] rounded-xl p-3.5 text-[#1A1A2E] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#B54708] font-mono">[Aviso]</span>
+            <span className="font-medium text-[#1A1A2E]">
+              Dados desatualizados ({stats.staleAgeSeconds && stats.staleAgeSeconds >= 0 ? `coletados há ${stats.staleAgeSeconds}s` : 'horário anterior'}). Conexão em tempo real indisponível.
+            </span>
+          </div>
+          <span className="text-xs font-mono font-bold text-[#B54708] shrink-0">
+            Último sync: {stats.last_updated}
+          </span>
+        </div>
+      )}
+
       {/* KPI Cards Grid - ZERO DADOS FAKE: se offline, mostra estritamente '--' */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Status DNS */}
@@ -759,6 +774,14 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-[#FEE4E2] text-[#F04438] border border-[#F04438] font-mono font-bold">
                               Bloqueado
                             </span>
+                          ) : item.status === 'REWRITTEN' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-[#FEF0C7] text-[#B54708] border border-[#F79009] font-mono font-bold">
+                              Reescrito
+                            </span>
+                          ) : item.status === 'WHITELISTED' || item.isWhitelisted ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-[#E0F2FE] text-[#026AA2] border border-[#00A6FB] font-mono font-bold" title="Permitido por regra de exceção (Whitelist)">
+                              Whitelist
+                            </span>
                           ) : (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] bg-[#D1FADF] text-[#12B76A] border border-[#12B76A] font-mono font-bold">
                               Processado
@@ -769,7 +792,16 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                           {item.rule || item.reason}
                         </td>
                         <td className="py-2.5 px-3.5 text-right text-[#1A1A2E] font-mono font-bold tabular-nums">
-                          {item.elapsed_ms} ms
+                          <div className="flex items-center justify-end gap-1.5">
+                            {item.cached && (
+                              <span className="px-1.5 py-0.2 bg-[#ECFDF3] text-[#12B76A] border border-[#12B76A] rounded text-[9px] font-mono uppercase">
+                                cache
+                              </span>
+                            )}
+                            <span title={item.upstream ? `Upstream: ${item.upstream}` : undefined}>
+                              {item.elapsed_ms} ms
+                            </span>
+                          </div>
                         </td>
                       </tr>
                     );
