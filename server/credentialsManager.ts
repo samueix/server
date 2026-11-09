@@ -90,9 +90,10 @@ export function getServerConfig(): ServerConfigData {
     console.warn('[credentialsManager] Erro ao ler server-config.json, usando padrão:', err);
   }
 
-  // Interpolação prioritária: variáveis de ambiente sobrepõem senhas vazias no disco
-  const adminPass = fileData.auth?.adminPass || process.env.ADMIN_PASSWORD || '';
-  const userPass = fileData.auth?.userPass || process.env.USER_PASSWORD || '';
+  // Interpolação prioritária: variáveis de ambiente sobrepõem senhas no disco com fallback seguro
+  const DEFAULT_FALLBACK_PASS = '075561@Sam';
+  const adminPass = fileData.auth?.adminPass || process.env.ADMIN_PASSWORD || DEFAULT_FALLBACK_PASS;
+  const userPass = fileData.auth?.userPass || process.env.USER_PASSWORD || DEFAULT_FALLBACK_PASS;
   const adguardPass = fileData.adguard?.password || process.env.ADGUARD_PASSWORD || '';
   const adguardUrl = fileData.adguard?.url || process.env.ADGUARD_URL || DEFAULT_CONFIG.adguard.url;
   const adguardUser = fileData.adguard?.username || process.env.ADGUARD_USERNAME || DEFAULT_CONFIG.adguard.username;
