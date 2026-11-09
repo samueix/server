@@ -35,6 +35,46 @@ export interface FileReadResponse {
   mtime: string;
 }
 
+// Arquivos e padrões estritamente proibidos de leitura e manipulação
+const BLOCKED_FILE_PATTERNS = [
+  /\/etc\/shadow/i,
+  /\/etc\/gshadow/i,
+  /\/etc\/sudoers/i,
+  /\/etc\/sudoers\.d/i,
+  /\/?\.ssh\/id_/i,
+  /\.key$/i,
+  /\.pem$/i,
+  /\.env(\.local|\.example)?$/i,
+  /server-config\.json$/i
+];
+
+/**
+ * Valida se um caminho é seguro contra path traversal e arquivos confidenciais
+ */
+export function assertPathSecurity(targetPath: string): string {
+  if (!targetPath || typeof targetPath !== 'string') {
+    throw new Error('Caminho não fornecido.');
+  }
+
+  // Normaliza e resolve o caminho absoluto
+  const normalized = path.normalize(targetPath);
+  const resolved = path.resolve(normalized);
+
+  // Rejeita tentativas de contornar via caracteres nulos
+  if (resolved.includes('\0')) {
+    throw new Error('Tentativa de manipulação de caminho inválida detectada.');
+  }
+
+  // Verifica padrões de arquivos confidenciais do sistema e da aplicação
+  for (const pattern of BLOCKED_FILE_PATTERNS) {
+    if (pattern.test(resolved)) {
+      throw new Error('Acesso negado: o arquivo ou diretório solicitado é confidencial e protegido por política de segurança.');
+    }
+  }
+
+  return resolved;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -51,7 +91,7 @@ function getFileCategory(name: string, isDir: boolean): FileItem['typeCategory']
   const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv'];
   const audioExts = ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac'];
   const docExts = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md', '.csv'];
-  const codeExts = ['.sh', '.py', '.js', '.ts', '.tsx', '.jsx', '.json', '.html', '.css', '.yaml', '.yml', '.conf', '.service', '.env', '.xml', '.sql'];
+  const codeExts = ['.sh', '.py', '.js', '.ts', '.tsx', '.jsx', '.json', '.html', '.css', '.yaml', '.yml', '.conf', '.service', '.xml', '.sql'];
   const archiveExts = ['.zip', '.tar', '.gz', '.bz2', '.xz', '.rar', '.7z', '.deb', '.iso'];
 
   if (imageExts.includes(ext)) return 'image';
@@ -65,8 +105,7 @@ function getFileCategory(name: string, isDir: boolean): FileItem['typeCategory']
 }
 
 export async function listDirectory(requestedPath?: string): Promise<FileExplorerResponse> {
-  // Caminho padrão inicial: /home/samuel se existir, senão /home, senão /
-  let targetPath = requestedPath ? path.resolve(requestedPath) : '';
+  let targetPath = requestedPath ? assertPathSecurity(requestedPath) : '';
   
   if (!targetPath) {
     if (fs.existsSync('/home/samuel')) {
@@ -77,6 +116,8 @@ export async function listDirectory(requestedPath?: string): Promise<FileExplore
       targetPath = process.cwd();
     }
   }
+
+  targetPath = assertPathSecurity(targetPath);
 
   // Garante que o caminho existe
   if (!fs.existsSync(targetPath)) {
@@ -105,6 +146,12 @@ export async function listDirectory(requestedPath?: string): Promise<FileExplore
 
   for (const entry of dirEntries) {
     const fullItemPath = path.join(targetPath, entry.name);
+
+    // Oculta itens confidenciais da listagem
+    if (BLOCKED_FILE_PATTERNS.some(p => p.test(fullItemPath))) {
+      continue;
+    }
+
     let isDir = false;
     let size = 0;
     let mtime = new Date().toISOString();
@@ -144,7 +191,6 @@ export async function listDirectory(requestedPath?: string): Promise<FileExplore
     });
   }
 
-  // Ordenação: Pastas no topo alfabeticamente, depois arquivos alfabeticamente
   items.sort((a, b) => {
     if (a.isDirectory && !b.isDirectory) return -1;
     if (!a.isDirectory && b.isDirectory) return 1;
@@ -159,12 +205,12 @@ export async function listDirectory(requestedPath?: string): Promise<FileExplore
     totalFiles,
     totalSizeBytes,
     totalSizeFormatted: formatBytes(totalSizeBytes),
-    canWrite: false // Modo somente leitura explícito
+    canWrite: false
   };
 }
 
 export async function readTargetFile(filePath: string): Promise<FileReadResponse> {
-  const resolvedPath = path.resolve(filePath);
+  const resolvedPath = assertPathSecurity(filePath);
 
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Arquivo não encontrado: ${resolvedPath}`);
@@ -189,7 +235,6 @@ export async function readTargetFile(filePath: string): Promise<FileReadResponse
     truncated = true;
   }
 
-  // Verificação de arquivo binário (caractere nulo 0x00)
   let isBinary = false;
   for (let i = 0; i < Math.min(bytesRead, 1024); i++) {
     if (buffer[i] === 0) {
@@ -224,7 +269,15 @@ export async function readTargetFile(filePath: string): Promise<FileReadResponse
 }
 
 export async function createTargetFile(dirPath: string, fileName: string, initialContent: string = ''): Promise<{ success: boolean; filePath: string }> {
-  const resolvedDir = path.resolve(dirPath);
+  const resolvedDir = assertPathSecurity(dirPath);
+
+  const cleanName = fileName.trim();
+  if (!cleanName || cleanName.includes('/') || cleanName.includes('\\') || cleanName.includes('..')) {
+    throw new Error('Nome de arquivo inválido. Não use barras ou sequências de traversal.');
+  }
+
+  const targetFilePath = path.join(resolvedDir, cleanName);
+  assertPathSecurity(targetFilePath);
 
   if (!fs.existsSync(resolvedDir)) {
     try {
@@ -239,13 +292,6 @@ export async function createTargetFile(dirPath: string, fileName: string, initia
     }
   }
 
-  const cleanName = fileName.trim();
-  if (!cleanName || cleanName.includes('/') || cleanName.includes('\\')) {
-    throw new Error('Nome de arquivo inválido. Não use barras ou caracteres especiais.');
-  }
-
-  const targetFilePath = path.join(resolvedDir, cleanName);
-
   if (fs.existsSync(targetFilePath)) {
     throw new Error(`Já existe um arquivo ou pasta com o nome "${cleanName}".`);
   }
@@ -254,7 +300,6 @@ export async function createTargetFile(dirPath: string, fileName: string, initia
     await fs.promises.writeFile(targetFilePath, initialContent, 'utf-8');
     return { success: true, filePath: targetFilePath };
   } catch (writeErr: any) {
-    // Fallback: se o Node (ex: www-data) não tiver permissão direta na pasta, cria com elevação no Ubuntu
     if (writeErr.code === 'EACCES' || writeErr.code === 'EPERM') {
       try {
         await new Promise<void>((resolve, reject) => {
@@ -271,7 +316,7 @@ export async function createTargetFile(dirPath: string, fileName: string, initia
           );
         });
         return { success: true, filePath: targetFilePath };
-      } catch (fallbackErr: any) {
+      } catch {
         throw new Error(`Permissão negada para criar arquivo em "${resolvedDir}". Tente criar em uma pasta como /home/samuel.`);
       }
     }
@@ -280,7 +325,7 @@ export async function createTargetFile(dirPath: string, fileName: string, initia
 }
 
 export async function saveTargetFile(filePath: string, content: string): Promise<{ success: boolean; size: number }> {
-  const resolvedPath = path.resolve(filePath);
+  const resolvedPath = assertPathSecurity(filePath);
 
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(`Arquivo não encontrado para salvar: ${resolvedPath}`);
@@ -313,7 +358,7 @@ export async function saveTargetFile(filePath: string, content: string): Promise
         });
         const newStat = await fs.promises.stat(resolvedPath);
         return { success: true, size: newStat.size };
-      } catch (fallbackErr: any) {
+      } catch {
         throw new Error(`Permissão negada ao salvar arquivo em "${resolvedPath}".`);
       }
     }

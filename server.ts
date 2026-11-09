@@ -54,16 +54,218 @@ import {
 } from './server/systemMonitor.js';
 import { getAllMonitoredServices } from './server/servicesMonitor.js';
 
-// Inicialização do servidor com fallback padrão para ambiente sem arquivo .env manual
-const defaultAdminPass = '075561@Sam';
-const defaultUserPass = '075561@Sam';
-
-// Dynamic PORT from environment (Cloud Run injects PORT), fallback to 3000
+// Configuração dinâmica de porta (Cloud Run injeta PORT), fallback para 3000
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-async function startServer() {
+function timingSafeCompare(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  try {
+    const hashA = crypto.createHash('sha256').update(a).digest();
+    const hashB = crypto.createHash('sha256').update(b).digest();
+    return crypto.timingSafeEqual(hashA, hashB);
+  } catch {
+    return false;
+  }
+}
+
+function getExpectedAdminPass(): string | null {
+  const config = getServerConfig();
+  const pass = (config.auth?.adminPass || process.env.ADMIN_PASSWORD || '').trim();
+  return pass.length > 0 ? pass : null;
+}
+
+function getExpectedUserPass(): string | null {
+  const config = getServerConfig();
+  const pass = (config.auth?.userPass || process.env.USER_PASSWORD || '').trim();
+  return pass.length > 0 ? pass : null;
+}
+
+function checkAdminPass(pass?: string): boolean {
+  if (!pass) return false;
+  const expected = getExpectedAdminPass();
+  if (!expected) return false;
+  return timingSafeCompare(pass, expected);
+}
+
+function checkUserPass(pass?: string): boolean {
+  if (!pass) return false;
+  const expected = getExpectedUserPass();
+  if (!expected) return false;
+  return timingSafeCompare(pass, expected);
+}
+
+function verifyApiKey(key?: string): boolean {
+  if (!key) return false;
+  const expected = (process.env.API_KEY || '').trim();
+  if (!expected) return false;
+  return timingSafeCompare(key, expected);
+}
+
+function verifyUserPass(user?: string, pass?: string): { authenticated: boolean; role?: 'admin' | 'user'; username?: string } {
+  if (!user || !pass) return { authenticated: false };
+  const config = getServerConfig();
+  const validAdminUser = (config.auth?.adminUser || process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
+  const validStandardUser = (config.auth?.userUser || process.env.USER_USERNAME || 'user').trim().toLowerCase();
+  const uClean = user.trim().toLowerCase();
+
+  if (uClean === validAdminUser && checkAdminPass(pass)) {
+    return { authenticated: true, role: 'admin', username: config.auth?.adminUser || 'admin' };
+  }
+  if (uClean === validStandardUser && checkUserPass(pass)) {
+    return { authenticated: true, role: 'user', username: config.auth?.userUser || 'user' };
+  }
+  return { authenticated: false };
+}
+
+function extractCaller(req: express.Request): { authenticated: boolean; role?: 'admin' | 'user'; username?: string } {
+  const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
+  if (apiKeyHeader && verifyApiKey(apiKeyHeader)) {
+    return { authenticated: true, role: 'admin', username: 'api-admin' };
+  }
+
+  const authHeader = req.headers['authorization'];
+  if (authHeader && authHeader.startsWith('Basic ')) {
+    try {
+      const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+      const colonIdx = decoded.indexOf(':');
+      const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
+      const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
+      return verifyUserPass(u, p);
+    } catch {
+      return { authenticated: false };
+    }
+  }
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (verifyApiKey(token)) {
+      return { authenticated: true, role: 'admin', username: 'bearer-admin' };
+    }
+  }
+
+  return { authenticated: false };
+}
+
+function getAllowedOrigins(): string[] {
+  const envAllowed = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+  const envCors = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const list = [...envAllowed, ...envCors].filter(origin => origin !== '*');
+  if (list.length === 0) {
+    return ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000'];
+  }
+  return list;
+}
+
+function isOriginAllowed(origin?: string): boolean {
+  if (!origin) return false;
+  const allowed = getAllowedOrigins();
+
+  try {
+    const originUrl = new URL(origin);
+    for (const item of allowed) {
+      if (item === origin) return true;
+      try {
+        const itemUrl = new URL(item);
+        if (itemUrl.protocol === originUrl.protocol && itemUrl.hostname === originUrl.hostname && itemUrl.port === originUrl.port) {
+          return true;
+        }
+      } catch {}
+    }
+    // Loopback sempre confiável em ambiente de desenvolvimento e testes
+    if (originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1' || originUrl.hostname === '[::1]') {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function applyCors(res: express.Response, req?: express.Request) {
+  const origin = req?.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+}
+
+function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  applyCors(res, req);
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  const caller = extractCaller(req);
+  if (!caller.authenticated) {
+    return res.status(401).json({
+      success: false,
+      authenticated: false,
+      error: 'Autenticação necessária. Credenciais de administrador requeridas.'
+    });
+  }
+
+  if (caller.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      authenticated: true,
+      error: 'Acesso negado: privilégios de administrador necessários para esta operação.'
+    });
+  }
+
+  (req as any).user = caller;
+  next();
+}
+
+function requireUserOrAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  applyCors(res, req);
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  const caller = extractCaller(req);
+  if (!caller.authenticated) {
+    return res.status(401).json({
+      success: false,
+      authenticated: false,
+      error: 'Autenticação necessária. Faça login para acessar este recurso.'
+    });
+  }
+
+  (req as any).user = caller;
+  next();
+}
+
+export function createApp() {
   const app = express();
   app.use(express.json());
+
+  // Middleware de Cabeçalhos de Segurança e Validação Estrita de CORS
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+
+    const origin = req.headers.origin;
+    if (origin) {
+      if (isOriginAllowed(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Vary', 'Origin');
+      }
+    }
+
+    if (req.method === 'OPTIONS') {
+      if (origin && !isOriginAllowed(origin)) {
+        return res.status(403).json({ error: 'Origem CORS não autorizada.' });
+      }
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
+      return res.status(204).end();
+    }
+
+    next();
+  });
 
   // Health check endpoints for Google Cloud Run, Docker & monitoring probes
   app.get('/api/health', (req, res) => {
@@ -87,12 +289,12 @@ async function startServer() {
     res.status(200).send('OK');
   });
 
-  // AdGuard Configuration
+  // AdGuard Configuration (GET é informativo, POST exige privilégio administrativo)
   app.get('/api/adguard/config', (req, res) => {
     res.json(getAdGuardConfig());
   });
 
-  app.post('/api/adguard/config', (req, res) => {
+  app.post('/api/adguard/config', requireAdminAuth, (req, res) => {
     const updated = updateAdGuardConfig(req.body);
     res.json({ success: true, config: updated });
   });
@@ -117,8 +319,8 @@ async function startServer() {
     }
   });
 
-  // Sincronização direta de dados reais do AdGuard (/control/stats)
-  app.post('/api/adguard/sync', (req, res) => {
+  // Sincronização direta de dados reais do AdGuard (/control/stats) - administrativo
+  app.post('/api/adguard/sync', requireAdminAuth, (req, res) => {
     try {
       const rawData = req.body;
       const updated = updateAdGuardRawStats(rawData);
@@ -128,8 +330,8 @@ async function startServer() {
     }
   });
 
-  // Limpar histórico e estatísticas do AdGuard
-  app.post('/api/adguard/clear-history', async (req, res) => {
+  // Limpar histórico e estatísticas do AdGuard - administrativo
+  app.post('/api/adguard/clear-history', requireAdminAuth, async (req, res) => {
     try {
       const result = await clearAdGuardHistory();
       res.json(result);
@@ -142,56 +344,6 @@ async function startServer() {
   app.get('/api/adguard/clear-command', (req, res) => {
     res.json({ shellCommand: getAdGuardClearCommand() });
   });
-
-  function timingSafeCompare(a?: string, b?: string): boolean {
-    if (!a || !b) return false;
-    const hashA = crypto.createHash('sha256').update(a).digest();
-    const hashB = crypto.createHash('sha256').update(b).digest();
-    return crypto.timingSafeEqual(hashA, hashB);
-  }
-
-  function checkAdminPass(pass?: string): boolean {
-    if (!pass) return false;
-    const config = getServerConfig();
-    const expected = config.auth?.adminPass || process.env.ADMIN_PASSWORD || defaultAdminPass;
-    return timingSafeCompare(pass, expected);
-  }
-
-  function checkUserPass(pass?: string): boolean {
-    if (!pass) return false;
-    const config = getServerConfig();
-    const expected = config.auth?.userPass || process.env.USER_PASSWORD || defaultUserPass;
-    return timingSafeCompare(pass, expected);
-  }
-
-  function verifyApiKey(key?: string): boolean {
-    if (!key || !process.env.API_KEY) return false;
-    return timingSafeCompare(key, process.env.API_KEY);
-  }
-
-  function verifyUserPass(user?: string, pass?: string): { authenticated: boolean; role?: 'admin' | 'user'; username?: string } {
-    if (!user || !pass) return { authenticated: false };
-    const config = getServerConfig();
-    const validAdminUser = (config.auth?.adminUser || process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase();
-    const validStandardUser = (config.auth?.userUser || process.env.USER_USERNAME || 'user').trim().toLowerCase();
-    const uClean = user.trim().toLowerCase();
-
-    if (uClean === validAdminUser && checkAdminPass(pass)) {
-      return { authenticated: true, role: 'admin', username: config.auth?.adminUser || 'admin' };
-    }
-    if (uClean === validStandardUser && checkUserPass(pass)) {
-      return { authenticated: true, role: 'user', username: config.auth?.userUser || 'user' };
-    }
-    return { authenticated: false };
-  }
-
-  // Função centralizada para CORS configurável via ALLOWED_ORIGIN (padrão: mesma origem do painel, sem cabeçalho CORS)
-  function applyCors(res: express.Response) {
-    const allowedOrigin = process.env.ALLOWED_ORIGIN?.trim();
-    if (allowedOrigin) {
-      res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
-    }
-  }
 
   // Rate limiting de tentativas de login por IP (5 tentativas incorretas em 5 minutos -> HTTP 429)
   const failedLoginAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -337,7 +489,13 @@ async function startServer() {
       });
     }
 
-    const vaultPassword = process.env.VAULT_PASSWORD || defaultAdminPass;
+    const vaultPassword = (process.env.VAULT_PASSWORD || getExpectedAdminPass() || '').trim();
+    if (!vaultPassword) {
+      return res.status(503).json({
+        ok: false,
+        error: 'Cofre desabilitado por segurança: nenhuma senha mestra configurada em VAULT_PASSWORD.'
+      });
+    }
 
     const inputPassword = req.body?.password;
     if (!inputPassword || typeof inputPassword !== 'string') {
@@ -355,7 +513,7 @@ async function startServer() {
           ok: true,
           success: true,
           sshUser: process.env.VAULT_SSH_USER || 'samuel',
-          sshPassword: process.env.VAULT_SSH_PASSWORD || defaultAdminPass
+          sshPassword: process.env.VAULT_SSH_PASSWORD || ''
         });
       } else {
         // Operador: desbloqueia o cofre mas sem credenciais de infraestrutura
@@ -529,8 +687,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/n8n/config', async (req, res) => {
-    applyCors(res);
+  app.post('/api/n8n/config', requireAdminAuth, async (req, res) => {
     try {
       setN8nConfigFallback(req.body?.url, req.body?.apiKey);
       const updatedStatus = await fetchN8nFallback();
@@ -544,8 +701,7 @@ async function startServer() {
     }
   });
 
-  app.post('/api/n8n/workflows/:id/toggle', async (req, res) => {
-    applyCors(res);
+  app.post('/api/n8n/workflows/:id/toggle', requireAdminAuth, async (req, res) => {
     try {
       const id = req.params.id;
       const active = Boolean(req.body?.active);
@@ -556,9 +712,8 @@ async function startServer() {
     }
   });
 
-  // Rotas do Explorador de Arquivos (Somente Leitura)
-  app.get('/api/files/list', async (req, res) => {
-    applyCors(res);
+  // Rotas do Explorador de Arquivos (Protegidas exclusivamente para administradores)
+  app.get('/api/files/list', requireAdminAuth, async (req, res) => {
     try {
       const targetPath = (req.query.path as string) || '';
       const data = await listDirectory(targetPath);
@@ -568,8 +723,7 @@ async function startServer() {
     }
   });
 
-  app.get('/api/files/read', async (req, res) => {
-    applyCors(res);
+  app.get('/api/files/read', requireAdminAuth, async (req, res) => {
     try {
       const targetPath = req.query.path as string;
       if (!targetPath) {
@@ -583,8 +737,7 @@ async function startServer() {
   });
 
   // Criar novo arquivo de texto (Bloco de Notas)
-  app.post('/api/files/create', async (req, res) => {
-    applyCors(res);
+  app.post('/api/files/create', requireAdminAuth, async (req, res) => {
     try {
       const { dirPath, name, content } = req.body || {};
       if (!dirPath || !name) {
@@ -598,8 +751,7 @@ async function startServer() {
   });
 
   // Salvar edições em arquivo de texto (Bloco de Notas)
-  app.post('/api/files/save', async (req, res) => {
-    applyCors(res);
+  app.post('/api/files/save', requireAdminAuth, async (req, res) => {
     try {
       const { path: filePath, content } = req.body || {};
       if (!filePath || content === undefined) {
@@ -612,15 +764,13 @@ async function startServer() {
     }
   });
 
-  // Rotas de Credenciais e Variáveis de Sistema (sem .env)
-  app.get('/api/credentials', (req, res) => {
-    applyCors(res);
+  // Rotas de Credenciais e Variáveis de Sistema (Protegidas exclusivamente para administradores)
+  app.get('/api/credentials', requireAdminAuth, (req, res) => {
     const config = getServerConfig();
     return res.json(config);
   });
 
-  app.post('/api/credentials', (req, res) => {
-    applyCors(res);
+  app.post('/api/credentials', requireAdminAuth, (req, res) => {
     try {
       const updated = saveServerConfig(req.body);
       return res.json({ success: true, message: 'Configurações salvas em server-config.json com sucesso.', config: updated });
@@ -630,8 +780,7 @@ async function startServer() {
   });
 
   // Rota de Auditoria e Detecção de Ataques / Tentativas de Invasão (múltiplos aliases resilientes)
-  app.get(['/api/security/attack-monitor', '/api/security', '/api/security/status'], async (req, res) => {
-    applyCors(res);
+  app.get(['/api/security/attack-monitor', '/api/security', '/api/security/status'], requireUserOrAdminAuth, async (req, res) => {
     try {
       const status = await getSecurityAttackStatus();
       return res.json(status);
@@ -640,15 +789,15 @@ async function startServer() {
     }
   });
 
-  // Rota de Execução de Comandos Shell no Terminal
-  app.post('/api/terminal/exec', async (req, res) => {
-    applyCors(res);
+  // Rota de Execução de Comandos Shell no Terminal (Protegida exclusivamente para administradores)
+  app.post('/api/terminal/exec', requireAdminAuth, async (req, res) => {
     try {
       const { command, cwd } = req.body || {};
       if (!command || typeof command !== 'string') {
         return res.status(400).json({ error: 'Comando não fornecido.' });
       }
-      const result = await runShellCommand(command, cwd);
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      const result = await runShellCommand(command, cwd, clientIp);
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -1292,6 +1441,12 @@ async function startServer() {
     }
   });
 
+  return app;
+}
+
+export async function startServer() {
+  const app = createApp();
+
   // Serve public static assets (favicons, icons)
   app.use(express.static(path.join(process.cwd(), 'public')));
 
@@ -1323,9 +1478,23 @@ async function startServer() {
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+  return new Promise<any>((resolve) => {
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+      resolve(server);
+    });
   });
 }
 
-startServer();
+const isDirectRun = Boolean(
+  process.argv[1] && (
+    process.argv[1].endsWith('server.ts') || 
+    process.argv[1].endsWith('server.js')
+  )
+);
+
+if (isDirectRun && process.env.NODE_ENV !== 'test') {
+  startServer();
+}
+
+

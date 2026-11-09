@@ -6,17 +6,17 @@
     "description": "Usuário padrão do sistema operacional Ubuntu Server"
   },
   "adguard": {
-    "url": "http://192.168.100.23:8081",
+    "url": "http://127.0.0.1:8081",
     "username": "samuel",
-    "password": "REDACTED_PASSWORD",
+    "password": "",
     "description": "Configuração da API local do AdGuard Home DNS"
   },
   "auth": {
     "adminUser": "admin",
-    "adminPass": "075561@Sam",
+    "adminPass": "",
     "userUser": "user",
-    "userPass": "075561@Sam",
-    "description": "Credenciais de acesso ao Server Panel (sem necessidade de .env)"
+    "userPass": "",
+    "description": "Credenciais de acesso ao Server Panel (carregadas via variáveis de ambiente para maior segurança)"
   },
   "n8n": {
     "url": "http://127.0.0.1:5678",

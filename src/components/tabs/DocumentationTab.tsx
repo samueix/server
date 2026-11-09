@@ -156,32 +156,36 @@ export const DocumentationTab: React.FC = () => {
               <span className="text-[#1A1A2E] font-black text-sm font-mono mt-0.5 block">samuelserver</span>
             </div>
             <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">IPv4 primário</span>
+              <span className="text-[#4A4A68] text-xs font-bold block">IPv4 Wi-Fi (LAN)</span>
               <span className="text-[#FF5A36] font-black text-sm font-mono tabular-nums mt-0.5 block">{SERVER_IPV4}</span>
             </div>
             <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Usuário administrativo</span>
-              <span className="text-[#00A6FB] font-black text-sm font-mono mt-0.5 block">{SSH_USER} (sudoer)</span>
+              <span className="text-[#4A4A68] text-xs font-bold block">Tailscale IP (VPN)</span>
+              <span className="text-[#00A6FB] font-black text-sm font-mono tabular-nums mt-0.5 block">100.97.208.102</span>
             </div>
             <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Arquitetura</span>
-              <span className="text-[#1A1A2E] font-black text-sm font-mono mt-0.5 block">x86_64 (64-bit Linux)</span>
+              <span className="text-[#4A4A68] text-xs font-bold block">Usuário administrativo</span>
+              <span className="text-[#12B76A] font-black text-sm font-mono mt-0.5 block">{SSH_USER} (sudoer)</span>
             </div>
           </div>
 
           <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-xs">
-            <span className="text-[#4A4A68] text-xs font-bold block mb-1">IPv6 global atual (dinâmico)</span>
+            <span className="text-[#4A4A68] text-xs font-bold block mb-1">IPv6 global atual (dinâmico via wlo1)</span>
             <span className="text-[#1A1A2E] font-mono font-bold break-all text-xs tabular-nums">{SERVER_IPV6}</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
             <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Sistema operacional</span>
-              <span className="text-[#1A1A2E] font-bold mt-0.5 block">Ubuntu 24.04 LTS (Noble Numbat)</span>
+              <span className="text-[#4A4A68] text-xs font-bold block">Processador</span>
+              <span className="text-[#1A1A2E] font-bold mt-0.5 block">Intel® Core™ i5-9500T (6C/6T @ 3.70 GHz)</span>
             </div>
             <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Versão do kernel</span>
-              <span className="text-[#1A1A2E] font-mono font-bold mt-0.5 block">Linux 6.8.0-generic</span>
+              <span className="text-[#4A4A68] text-xs font-bold block">Memória RAM & Disco</span>
+              <span className="text-[#1A1A2E] font-mono font-bold mt-0.5 block">19 GB RAM · ~190 GB SSD livres</span>
+            </div>
+            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
+              <span className="text-[#4A4A68] text-xs font-bold block">Sistema operacional</span>
+              <span className="text-[#1A1A2E] font-bold mt-0.5 block">Ubuntu 24.04 LTS (x86_64)</span>
             </div>
           </div>
         </div>
@@ -198,15 +202,37 @@ export const DocumentationTab: React.FC = () => {
           </div>
 
           <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            O servidor está configurado com OpenSSH Server escutando na porta padrão 22 para conexões em IPv4 e IPv6.
+            O servidor está configurado com OpenSSH Server na porta 22 para conexões em IPv4, IPv6 e Tailscale WireGuard.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Acesso IPv4 */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Acesso Tailscale (Recomendado) */}
+            <div className="p-4 rounded-lg bg-[#EFF8FF] border-2 border-[#00A6FB] shadow-[2px_2px_0px_#1A1A2E] space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="px-2.5 py-1 rounded-md bg-white text-[#00A6FB] border-2 border-[#00A6FB] font-mono text-xs font-bold shadow-sm">
+                  Tailscale (Global Seguro)
+                </span>
+                <button
+                  onClick={() => copyToClipboard(`ssh ${SSH_USER}@100.97.208.102`, 'ssh-ts-doc')}
+                  className="p-1.5 rounded-md text-[#1A1A2E] bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#FFEECB] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
+                  title="Copiar comando"
+                >
+                  {copiedKey === 'ssh-ts-doc' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              <code className="text-xs text-[#1A1A2E] font-mono font-bold block p-2.5 rounded-md bg-white border-2 border-[#1A1A2E] select-all">
+                ssh {SSH_USER}@100.97.208.102
+              </code>
+              <p className="text-xs text-[#4A4A68] font-medium">
+                Conexão P2P criptografada de qualquer lugar do mundo (ou <code className="text-[#00A6FB]">ssh samuel@samuelserver</code>).
+              </p>
+            </div>
+
+            {/* Acesso IPv4 Local */}
             <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="px-2.5 py-1 rounded-md bg-white text-[#FF5A36] border-2 border-[#1A1A2E] font-mono text-xs font-bold shadow-sm">
-                  Acesso SSH via IPv4
+                  Acesso LAN IPv4
                 </span>
                 <button
                   onClick={() => copyToClipboard(`ssh ${SSH_USER}@${SERVER_IPV4}`, 'ssh-ipv4-doc')}
@@ -220,15 +246,15 @@ export const DocumentationTab: React.FC = () => {
                 ssh {SSH_USER}@{SERVER_IPV4}
               </code>
               <p className="text-xs text-[#4A4A68] font-medium">
-                Acesso estável dentro da rede local (192.168.100.0/24).
+                Acesso estável dentro do Wi-Fi/Ethernet doméstico (192.168.100.x).
               </p>
             </div>
 
             {/* Acesso IPv6 */}
             <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-md bg-white text-[#00A6FB] border-2 border-[#1A1A2E] font-mono text-xs font-bold shadow-sm">
-                  Acesso SSH via IPv6 atual
+                <span className="px-2.5 py-1 rounded-md bg-white text-[#12B76A] border-2 border-[#1A1A2E] font-mono text-xs font-bold shadow-sm">
+                  Acesso IPv6 Público
                 </span>
                 <button
                   onClick={() => copyToClipboard(dynamicIpv6Ssh, 'ssh-ipv6-doc')}
@@ -242,7 +268,7 @@ export const DocumentationTab: React.FC = () => {
                 {dynamicIpv6Ssh}
               </code>
               <p className="text-xs text-[#4A4A68] font-medium">
-                Nota: No SSH para endereços IPv6, o endereço deve estar entre colchetes <code className="text-[#1A1A2E] font-mono font-bold">[ ]</code>.
+                Endereço IPv6 global entre colchetes <code className="text-[#1A1A2E] font-mono font-bold">[ ]</code>.
               </p>
             </div>
           </div>

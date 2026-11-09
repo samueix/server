@@ -58,6 +58,8 @@ export const AdGuardAiDashboard: React.FC = () => {
   // Loading & Polling states
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isAnalyzingBatch, setIsAnalyzingBatch] = useState<boolean>(false);
+  const [analyzingDomains, setAnalyzingDomains] = useState<Record<string, boolean>>({});
+  const [geminiKeyWarning, setGeminiKeyWarning] = useState<boolean>(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(1); // 1 segundo (polling rápido contínuo)
   const [lastUpdated, setLastUpdated] = useState<string>('--:--:--');
   const [prevQueriesCount, setPrevQueriesCount] = useState<number>(stats?.num_dns_queries || 0);
@@ -145,9 +147,33 @@ export const AdGuardAiDashboard: React.FC = () => {
         if (selectedDomainForDetail && selectedDomainForDetail.domain === domainName) {
           setSelectedDomainForDetail(res.analysis);
         }
+        if (res.analysis.explanation?.includes('GEMINI_API_KEY') || res.analysis.organization?.includes('API Key')) {
+          setGeminiKeyWarning(true);
+        }
       }
     } catch (err) {
       console.error('Erro ao reanalisar:', err);
+    }
+  };
+
+  // Botão direto "Analisar com IA" na tabela
+  const handleAnalyzeSingleDomain = async (domainName: string) => {
+    setAnalyzingDomains(prev => ({ ...prev, [domainName]: true }));
+    try {
+      const res = await adguardAiService.analyzeDomain(domainName, true);
+      if (res && res.analysis) {
+        setDomains(prev => prev.map(d => d.domain === domainName ? res.analysis : d));
+        if (selectedDomainForDetail && selectedDomainForDetail.domain === domainName) {
+          setSelectedDomainForDetail(res.analysis);
+        }
+        if (res.analysis.explanation?.includes('GEMINI_API_KEY') || res.analysis.organization?.includes('API Key')) {
+          setGeminiKeyWarning(true);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao analisar domínio com IA:', err);
+    } finally {
+      setAnalyzingDomains(prev => ({ ...prev, [domainName]: false }));
     }
   };
 
@@ -155,9 +181,15 @@ export const AdGuardAiDashboard: React.FC = () => {
   const handleAnalyzePendingBatch = async () => {
     try {
       setIsAnalyzingBatch(true);
-      await adguardAiService.analyzeBatch(undefined, 6);
+      const batchRes = await adguardAiService.analyzeBatch(undefined, 6);
       const domainList = await adguardAiService.getDomains();
       setDomains(domainList);
+      if (batchRes && Array.isArray(batchRes.results)) {
+        const hasMissingKey = batchRes.results.some((r: any) => 
+          r.explanation?.includes('GEMINI_API_KEY') || r.organization?.includes('API Key')
+        );
+        if (hasMissingKey) setGeminiKeyWarning(true);
+      }
     } catch (err) {
       console.error('Erro na análise em lote:', err);
     } finally {
@@ -426,6 +458,51 @@ export const AdGuardAiDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Stale Data Warning Banner */}
+      {directStatus.isStale && (
+        <div className="p-3.5 rounded-xl bg-[#FFF7E8] border-2 border-[#E5A93C] shadow-[4px_4px_0px_#1A1A2E] text-xs text-[#1A1A2E] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <Clock className="w-4 h-4 text-[#E5A93C] shrink-0" />
+            <div>
+              <span className="font-bold text-[#1A1A2E]">Dados em Cache Desatualizados (Stale Data):</span>{' '}
+              <span className="text-[#4A4A68]">
+                {directStatus.staleWarning || `Exibindo última sincronização válida de ${directStatus.lastSuccessfulSync || '--:--:--'}. O serviço AdGuard Home não respondeu na última verificação.`}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => adguardDirectClient.reconnect()}
+            className="px-3 py-1 bg-white hover:bg-[#FFC857] text-[#1A1A2E] text-xs font-mono font-bold rounded-md border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] shrink-0 transition"
+          >
+            Tentar reconectar
+          </button>
+        </div>
+      )}
+
+      {/* Aviso amigável caso a GEMINI_API_KEY não esteja configurada */}
+      {geminiKeyWarning && (
+        <div className="p-3.5 rounded-xl bg-[#EFF8FF] border-2 border-[#00A6FB] shadow-[4px_4px_0px_#1A1A2E] text-xs text-[#1A1A2E] flex items-start justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <Sparkles className="w-4 h-4 text-[#00A6FB] shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-[#00A6FB] block font-title">
+                IA Gemini 3.8 Flash · Chave de API não configurada
+              </span>
+              <p className="text-[#4A4A68] leading-relaxed">
+                A variável <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-[#00A6FB]/30 text-[#00A6FB] font-bold">GEMINI_API_KEY</code> não foi inserida no arquivo <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-[#00A6FB]/30 text-[#00A6FB] font-bold">.env</code> do seu Ubuntu Server. O painel continua funcionando perfeitamente com todas as regras locais e o cache do banco SQLite, mas para habilitar a geração de novos dossiês inteligentes com IA para domínios desconhecidos, adicione a chave no seu <code className="font-mono">.env</code>.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setGeminiKeyWarning(false)}
+            className="p-1 rounded-md text-[#4A4A68] hover:text-[#1A1A2E] hover:bg-white/80 transition"
+            title="Fechar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* KPI Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -807,15 +884,29 @@ export const AdGuardAiDashboard: React.FC = () => {
 
                         {/* Action */}
                         <td className="py-2.5 px-4 text-right">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedDomainForDetail(item);
-                            }}
-                            className="px-3 py-1 rounded-md text-xs bg-white hover:bg-[#FFC857] text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] transition font-sans font-bold"
-                          >
-                            Ver dossiê
-                          </button>
+                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAnalyzeSingleDomain(item.domain);
+                              }}
+                              disabled={analyzingDomains[item.domain]}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-[#FFF7E8] hover:bg-[#FFC857] text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] transition font-mono font-bold disabled:opacity-50"
+                              title="Analisar heurística e classificação com IA Gemini 3.8 Flash"
+                            >
+                              <Sparkles className={`w-3.5 h-3.5 text-[#FF5A36] ${analyzingDomains[item.domain] ? 'animate-spin' : ''}`} />
+                              <span>{analyzingDomains[item.domain] ? 'Analisando...' : 'Analisar com IA'}</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedDomainForDetail(item);
+                              }}
+                              className="px-2.5 py-1 rounded-md text-xs bg-white hover:bg-[#FFC857] text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] transition font-sans font-bold"
+                            >
+                              Ver dossiê
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

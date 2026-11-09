@@ -40,26 +40,26 @@ const CONFIG_PATH = path.resolve(process.cwd(), 'server-config.json');
 
 const DEFAULT_CONFIG: ServerConfigData = {
   ubuntu: {
-    user: 'samuel',
+    user: process.env.VAULT_SSH_USER || 'samuel',
     password: '',
     sshPort: 22,
     description: 'Usuário padrão do sistema operacional Ubuntu Server'
   },
   adguard: {
-    url: 'http://127.0.0.1:8081',
-    username: 'admin',
+    url: process.env.ADGUARD_URL || 'http://127.0.0.1:8081',
+    username: process.env.ADGUARD_USERNAME || 'samuel',
     password: '',
     description: 'Configuração da API local do AdGuard Home DNS'
   },
   auth: {
-    adminUser: 'admin',
-    adminPass: '075561@Sam',
-    userUser: 'user',
-    userPass: '075561@Sam',
+    adminUser: process.env.ADMIN_USERNAME || 'admin',
+    adminPass: '',
+    userUser: process.env.USER_USERNAME || 'user',
+    userPass: '',
     description: 'Credenciais de acesso ao Server Panel'
   },
   n8n: {
-    url: 'http://127.0.0.1:5678',
+    url: process.env.N8N_URL || 'http://127.0.0.1:5678',
     apiKey: '',
     description: 'Chave de API e endpoint do n8n Workflow Automation'
   },
@@ -80,24 +80,54 @@ const DEFAULT_CONFIG: ServerConfigData = {
 };
 
 export function getServerConfig(): ServerConfigData {
+  let fileData: Partial<ServerConfigData> = {};
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
-      const parsed = JSON.parse(raw);
-      return {
-        ...DEFAULT_CONFIG,
-        ...parsed,
-        ubuntu: { ...DEFAULT_CONFIG.ubuntu, ...(parsed.ubuntu || {}) },
-        adguard: { ...DEFAULT_CONFIG.adguard, ...(parsed.adguard || {}) },
-        auth: { ...DEFAULT_CONFIG.auth, ...(parsed.auth || {}) },
-        n8n: { ...DEFAULT_CONFIG.n8n, ...(parsed.n8n || {}) },
-        customVariables: Array.isArray(parsed.customVariables) ? parsed.customVariables : DEFAULT_CONFIG.customVariables
-      };
+      fileData = JSON.parse(raw);
     }
   } catch (err) {
     console.warn('[credentialsManager] Erro ao ler server-config.json, usando padrão:', err);
   }
-  return DEFAULT_CONFIG;
+
+  // Interpolação prioritária: variáveis de ambiente sobrepõem senhas vazias no disco
+  const adminPass = fileData.auth?.adminPass || process.env.ADMIN_PASSWORD || '';
+  const userPass = fileData.auth?.userPass || process.env.USER_PASSWORD || '';
+  const adguardPass = fileData.adguard?.password || process.env.ADGUARD_PASSWORD || '';
+  const adguardUrl = fileData.adguard?.url || process.env.ADGUARD_URL || DEFAULT_CONFIG.adguard.url;
+  const adguardUser = fileData.adguard?.username || process.env.ADGUARD_USERNAME || DEFAULT_CONFIG.adguard.username;
+
+  return {
+    ...DEFAULT_CONFIG,
+    ...fileData,
+    ubuntu: {
+      ...DEFAULT_CONFIG.ubuntu,
+      ...(fileData.ubuntu || {}),
+      user: fileData.ubuntu?.user || process.env.VAULT_SSH_USER || DEFAULT_CONFIG.ubuntu.user
+    },
+    adguard: {
+      ...DEFAULT_CONFIG.adguard,
+      ...(fileData.adguard || {}),
+      url: adguardUrl,
+      username: adguardUser,
+      password: adguardPass
+    },
+    auth: {
+      ...DEFAULT_CONFIG.auth,
+      ...(fileData.auth || {}),
+      adminUser: fileData.auth?.adminUser || process.env.ADMIN_USERNAME || 'admin',
+      adminPass,
+      userUser: fileData.auth?.userUser || process.env.USER_USERNAME || 'user',
+      userPass
+    },
+    n8n: {
+      ...DEFAULT_CONFIG.n8n,
+      ...(fileData.n8n || {}),
+      url: fileData.n8n?.url || process.env.N8N_URL || DEFAULT_CONFIG.n8n.url,
+      apiKey: fileData.n8n?.apiKey || process.env.N8N_API_KEY || ''
+    },
+    customVariables: Array.isArray(fileData.customVariables) ? fileData.customVariables : DEFAULT_CONFIG.customVariables
+  };
 }
 
 export function saveServerConfig(data: Partial<ServerConfigData>): ServerConfigData {

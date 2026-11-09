@@ -15,9 +15,13 @@ export const API = {
 
 export const SERVER_IPV4 = "192.168.100.23";
 export const SERVER_IPV6 = "2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445";
+export const SERVER_TAILSCALE_IP = "100.97.208.102";
+export const SERVER_MAGIC_DNS = "samuelserver";
 export const SSH_USER = "samuel";
 export const SSH_IPV4_COMMAND = `ssh ${SSH_USER}@${SERVER_IPV4}`;
 export const SSH_IPV6_COMMAND = `ssh ${SSH_USER}@[${SERVER_IPV6}]`;
+export const SSH_TAILSCALE_COMMAND = `ssh ${SSH_USER}@${SERVER_TAILSCALE_IP}`;
+export const SSH_MAGICDNS_COMMAND = `ssh ${SSH_USER}@${SERVER_MAGIC_DNS}`;
 
 /**
  * Retorna o comando SSH dinâmico baseado no IPv6 atual detectado ou fallback

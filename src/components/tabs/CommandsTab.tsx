@@ -24,7 +24,7 @@ import {
 import { executeTerminalCommand, TerminalExecResponse } from '../../services/terminalService';
 import { CommandAnatomyModal } from '../CommandAnatomyModal';
 
-export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git pull origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`;
+export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git pull origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo systemctl restart server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`;
 
 interface PracticalCommand {
   command: string;
@@ -117,7 +117,17 @@ export const CommandsTab: React.FC = () => {
   const [anatomyCommand, setAnatomyCommand] = useState<string | null>(null);
 
   const terminalEndRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-ajuste de altura da área de digitação de comandos
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollH = textareaRef.current.scrollHeight;
+      const newHeight = Math.min(Math.max(scrollH, 42), 160);
+      textareaRef.current.style.height = `${newHeight}px`;
+    }
+  }, [commandInput]);
 
   // Tecla ESC para fechar tela cheia
   useEffect(() => {
@@ -136,7 +146,6 @@ export const CommandsTab: React.FC = () => {
     // Limpa contra-barras seguidas de espaços/quebras que causam erro "\ git: command not found" no bash
     const targetCommand = raw
       .replace(/\\\s*[\r\n]+\s*/g, ' ')
-      .replace(/\\\s+/g, ' ')
       .trim();
 
     if (!targetCommand || isExecuting) return;
@@ -206,9 +215,17 @@ export const CommandsTab: React.FC = () => {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const isMultiLine = commandInput.includes('\n');
     if (e.key === 'Enter') {
-      requestExecution();
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        requestExecution();
+      } else if (!isMultiLine && !e.shiftKey) {
+        e.preventDefault();
+        requestExecution();
+      }
+      // Se for multi-linha e apenas Enter (sem Ctrl/Cmd), permite quebra de linha normal
     }
   };
 
@@ -335,30 +352,30 @@ export const CommandsTab: React.FC = () => {
       >
         <div 
           className={isFullScreen
-            ? "w-full h-full max-w-full bg-[#FFFDF9] border-2 border-[#1A1A2E] shadow-[6px_6px_0px_#1A1A2E] rounded-xl overflow-hidden flex flex-col font-mono text-[13px] md:text-[14px] leading-relaxed"
-            : "w-full h-[60vh] md:h-[70vh] md:min-h-[480px] bg-[#FFFDF9] border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl overflow-hidden flex flex-col font-mono text-[13px] md:text-[14px] leading-relaxed transition-all motion-reduce:transition-none"
+            ? "w-full h-full max-w-full bg-[#0D0D15] border-2 border-[#1A1A2E] shadow-[6px_6px_0px_#1A1A2E] rounded-xl overflow-hidden flex flex-col font-mono text-[13px] md:text-[14px] leading-relaxed"
+            : "w-full h-[60vh] md:h-[70vh] md:min-h-[480px] bg-[#0D0D15] border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl overflow-hidden flex flex-col font-mono text-[13px] md:text-[14px] leading-relaxed transition-all motion-reduce:transition-none"
           }
         >
-          {/* Terminal Titlebar Estilo Janela Clara */}
-          <div className="bg-[#FFF7E8] px-4 py-3 border-b-2 border-[#1A1A2E] flex items-center justify-between text-[#1A1A2E] shrink-0">
+          {/* Terminal Titlebar Estilo Janela Escura */}
+          <div className="bg-[#181828] px-4 py-3 border-b-2 border-[#1A1A2E] flex items-center justify-between text-[#F1F5F9] shrink-0">
             <div className="flex items-center gap-2">
               <span className="w-3 h-3 rounded-full bg-[#F04438] border border-[#1A1A2E]" />
               <span className="w-3 h-3 rounded-full bg-[#FFC857] border border-[#1A1A2E]" />
               <span className="w-3 h-3 rounded-full bg-[#12B76A] border border-[#1A1A2E]" />
-              <span className="text-xs md:text-sm font-bold text-[#1A1A2E] ml-2 truncate">
+              <span className="text-xs md:text-sm font-bold text-[#F1F5F9] ml-2 truncate">
                 samuel@samuelserver ({currentCwd})
               </span>
             </div>
 
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono font-bold text-[#717188] hidden sm:inline">
-                Bash Interativo
+              <span className="text-[11px] font-mono font-bold text-[#94A3B8] hidden sm:inline">
+                Bash Interativo Seguro
               </span>
 
               {/* Botão Expandir / Tela Cheia */}
               <button
                 onClick={() => setIsFullScreen(!isFullScreen)}
-                className="flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] rounded-md text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-[#222238] hover:bg-[#2F2F4E] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] rounded-md text-xs font-mono font-bold text-[#F1F5F9] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
                 title={isFullScreen ? "Sair da Tela Cheia (ESC)" : "Expandir Terminal (Tela Cheia)"}
               >
                 {isFullScreen ? (
@@ -376,64 +393,64 @@ export const CommandsTab: React.FC = () => {
             </div>
           </div>
 
-          {/* Terminal Output Area com rolagem interna suave e quebra de linhas */}
-          <div className="flex-1 p-4 md:p-5 overflow-y-auto space-y-4 bg-[#FFFDF9] text-[#1A1A2E] font-mono text-[13px] md:text-[14px] leading-relaxed">
+          {/* Terminal Output Area Preto com rolagem suave */}
+          <div className="flex-1 p-4 md:p-5 overflow-y-auto space-y-4 bg-[#0D0D15] text-[#E2E8F0] font-mono text-[13px] md:text-[14px] leading-relaxed">
             {history.length === 0 ? (
-              <div className="text-[#717188] py-12 text-center space-y-3">
-                <div className="w-12 h-12 mx-auto rounded-full bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-center shadow-[2px_2px_0px_#1A1A2E]">
-                  <TerminalIcon className="w-6 h-6 text-[#FF5A36]" />
+              <div className="text-[#94A3B8] py-12 text-center space-y-3">
+                <div className="w-12 h-12 mx-auto rounded-full bg-[#181828] border-2 border-[#2E2E48] flex items-center justify-center shadow-[2px_2px_0px_#1A1A2E]">
+                  <TerminalIcon className="w-6 h-6 text-[#12B76A]" />
                 </div>
-                <h4 className="text-sm font-bold text-[#1A1A2E]">Console pronto para execução</h4>
-                <p className="text-xs max-w-md mx-auto text-[#4A4A68]">
-                  Todos os comandos passam por confirmação dupla para segurança do seu servidor Ubuntu.
+                <h4 className="text-sm font-bold text-[#F1F5F9]">Terminal preto pronto para execução</h4>
+                <p className="text-xs max-w-md mx-auto text-[#94A3B8]">
+                  Console shell com dupla confirmação e política de allowlist ativa para proteção do servidor Ubuntu.
                 </p>
-                <div className="inline-block bg-[#FFF7E8] px-3.5 py-1.5 rounded-lg border-2 border-[#1A1A2E] text-xs font-mono font-bold text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-                  Dica: Digite <code className="text-[#FF5A36]">uptime</code>, <code className="text-[#FF5A36]">df -h</code> ou <code className="text-[#FF5A36]">free -h</code> e aperte Enter.
+                <div className="inline-block bg-[#181828] px-3.5 py-1.5 rounded-lg border border-[#2E2E48] text-xs font-mono font-bold text-[#FFC857] shadow-[2px_2px_0px_#1A1A2E]">
+                  Dica: Digite <code className="text-[#12B76A]">uptime</code>, <code className="text-[#12B76A]">df -h</code> ou <code className="text-[#12B76A]">free -h</code> e aperte Enter.
                 </div>
               </div>
             ) : (
               history.map((entry) => (
-                <div key={entry.id} className="space-y-2 border-b-2 border-[#1A1A2E]/10 pb-4">
+                <div key={entry.id} className="space-y-2 border-b border-[#222238] pb-4">
                   {/* Command Prompt Line */}
                   <div className="flex items-center justify-between flex-wrap gap-2 text-xs md:text-sm">
                     <div className="flex items-center gap-2 flex-wrap font-bold">
-                      <span className="text-[#FF5A36]">➜</span>
-                      <span className="text-[#00A6FB]">samuel@samuelserver</span>
-                      <span className="text-[#1A1A2E]">:</span>
-                      <span className="text-[#E07A5F]">{entry.result.cwd || '~'}</span>
-                      <span className="text-[#FF5A36]">$</span>
+                      <span className="text-[#12B76A]">➜</span>
+                      <span className="text-[#38BDF8]">samuel@samuelserver</span>
+                      <span className="text-[#94A3B8]">:</span>
+                      <span className="text-[#FFC857]">{entry.result.cwd || '~'}</span>
+                      <span className="text-[#12B76A]">$</span>
                       <span 
                         onClick={() => setAnatomyCommand(entry.command)}
-                        className="text-[#1A1A2E] font-black hover:text-[#FF5A36] hover:underline cursor-pointer break-all"
+                        className="text-[#FFFFFF] font-black hover:text-[#12B76A] hover:underline cursor-pointer break-all"
                         title="Clique para dissecar a anatomia deste comando"
                       >
                         {entry.command}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-3 text-xs text-[#717188] shrink-0 font-mono">
+                    <div className="flex items-center gap-3 text-xs text-[#94A3B8] shrink-0 font-mono">
                       <span>{entry.result.executionTimeMs}ms</span>
                       <span>{entry.timestamp}</span>
                       <button
                         onClick={() => copyToClipboard(entry.result.stdout || entry.result.stderr, entry.id)}
-                        className="p-1 hover:text-[#1A1A2E] transition rounded hover:bg-[#FFF7E8]"
+                        className="p-1 hover:text-[#FFFFFF] transition rounded hover:bg-[#181828]"
                         title="Copiar saída do comando"
                       >
-                        {copiedId === entry.id ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5 text-[#717188]" />}
+                        {copiedId === entry.id ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5 text-[#94A3B8]" />}
                       </button>
                     </div>
                   </div>
 
-                  {/* Output Text - Grafite em Fundo Claro Suave */}
+                  {/* Output Text - Terminal Preto com texto de alto contraste */}
                   {entry.result.stdout && (
-                    <pre className="text-[#1A1A2E] whitespace-pre-wrap break-words leading-relaxed pl-3.5 pr-2 py-2.5 border-l-4 border-[#12B76A] bg-[#ECFDF3]/40 rounded-r-md font-mono text-[13px] md:text-[14px] overflow-x-hidden">
+                    <pre className="text-[#E2E8F0] whitespace-pre-wrap break-words leading-relaxed pl-3.5 pr-2 py-2.5 border-l-4 border-[#12B76A] bg-[#121422] rounded-r-md font-mono text-[13px] md:text-[14px] overflow-x-hidden">
                       {entry.result.stdout}
                     </pre>
                   )}
 
-                  {/* Stderr Error Output - Vermelho Legível em Fundo Avermelhado Claro */}
+                  {/* Stderr Error Output - Vermelho Legível em fundo escuro */}
                   {entry.result.stderr && (
-                    <pre className="text-[#F04438] whitespace-pre-wrap break-words leading-relaxed pl-3.5 pr-2 py-2.5 border-l-4 border-[#F04438] bg-[#FEE4E2]/50 rounded-r-md font-mono text-[13px] md:text-[14px] font-semibold overflow-x-hidden">
+                    <pre className="text-[#FCA5A5] whitespace-pre-wrap break-words leading-relaxed pl-3.5 pr-2 py-2.5 border-l-4 border-[#F04438] bg-[#2A1518] rounded-r-md font-mono text-[13px] md:text-[14px] font-semibold overflow-x-hidden">
                       {entry.result.stderr}
                     </pre>
                   )}
@@ -446,7 +463,7 @@ export const CommandsTab: React.FC = () => {
                         Exit code: 0 (Sucesso)
                       </span>
                     ) : (
-                      <span className="text-[#F04438] flex items-center gap-1.5">
+                      <span className="text-[#F87171] flex items-center gap-1.5">
                         <AlertCircle className="w-3.5 h-3.5" />
                         Exit code: {entry.result.exitCode} (Erro)
                       </span>
@@ -458,49 +475,81 @@ export const CommandsTab: React.FC = () => {
             <div ref={terminalEndRef} />
           </div>
 
-          {/* Command Input Prompt Bar - Sempre Visível na Parte Inferior */}
-          <div className="bg-[#FFF7E8] p-3 md:p-3.5 border-t-2 border-[#1A1A2E] flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1 text-[#FF5A36] font-black text-sm md:text-base shrink-0 select-none">
-              <span>$</span>
+          {/* Command Input Prompt Bar Escuro - Sempre Visível na Parte Inferior */}
+          <div className="bg-[#181828] border-t-2 border-[#1A1A2E] shrink-0">
+            {/* Banner de Bloco Multi-Linha Detectado */}
+            {commandInput.includes('\n') && (
+              <div className="bg-[#121422] px-3.5 py-1.5 border-b border-[#2E2E48] flex items-center justify-between text-xs font-mono text-[#94A3B8]">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#12B76A] animate-pulse" />
+                  <span className="text-[#F1F5F9] font-bold">Bloco de Comandos:</span>
+                  <span className="text-[#38BDF8]">
+                    {commandInput.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} comando(s)
+                  </span>
+                  <span className="text-[#64748B] hidden sm:inline">({commandInput.split('\n').length} linhas)</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-[11px] text-[#94A3B8] hidden sm:inline">
+                    Pressione <kbd className="px-1.5 py-0.5 rounded bg-[#222238] text-[#F1F5F9] border border-[#3E3E58] text-[10px]">Ctrl+Enter</kbd> para rodar bloco
+                  </span>
+                  <button
+                    onClick={() => setCommandInput('')}
+                    className="text-[#F04438] hover:text-[#FFA5A5] text-[11px] font-bold hover:underline ml-2"
+                  >
+                    Limpar Bloco
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 md:p-3.5 flex items-start gap-2">
+              <div className="flex items-center gap-1 text-[#12B76A] font-black text-sm md:text-base shrink-0 select-none pt-2">
+                <span>$</span>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                value={commandInput}
+                onChange={(e) => setCommandInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isExecuting}
+                rows={1}
+                placeholder="Digite ou cole comandos bash (ex: uptime, df -h ou cole um bloco de comandos completo)..."
+                className="flex-1 bg-[#0D0D15] px-3 py-2 border-2 border-[#2E2E48] rounded-lg text-[#F1F5F9] text-[13px] md:text-[14px] font-mono font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#12B76A] shadow-[2px_2px_0px_#1A1A2E] placeholder-[#64748B] resize-none overflow-y-auto leading-relaxed"
+              />
+
+              <button
+                onClick={() => setAnatomyCommand(commandInput)}
+                disabled={!commandInput.trim()}
+                className="p-2.5 bg-[#222238] hover:bg-[#2F2F4E] disabled:opacity-30 text-[#F1F5F9] border-2 border-[#1A1A2E] rounded-lg shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0 focus-visible:ring-2 focus-visible:ring-[#FF5A36] mt-0.5"
+                title="Aprender sobre o comando antes de rodar"
+              >
+                <BookOpen className="w-4 h-4 text-[#FFC857]" />
+              </button>
+
+              <button
+                onClick={() => requestExecution()}
+                disabled={isExecuting || !commandInput.trim()}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-[#FF5A36] hover:bg-[#E04522] disabled:opacity-40 disabled:cursor-not-allowed text-[#1A1A2E] text-xs md:text-sm font-mono font-black rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0 focus-visible:ring-2 focus-visible:ring-[#FF5A36] mt-0.5"
+              >
+                {isExecuting ? (
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-4 h-4 animate-spin text-[#1A1A2E]" />
+                    <span>Rodando...</span>
+                  </span>
+                ) : commandInput.includes('\n') ? (
+                  <span className="flex items-center gap-1.5">
+                    <Play className="w-4 h-4 fill-[#1A1A2E]" />
+                    <span>Executar Bloco ({commandInput.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length})</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <Play className="w-4 h-4 fill-[#1A1A2E]" />
+                    <span>Executar</span>
+                  </span>
+                )}
+              </button>
             </div>
-
-            <input
-              ref={inputRef}
-              type="text"
-              value={commandInput}
-              onChange={(e) => setCommandInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={isExecuting}
-              placeholder="Digite qualquer comando bash (ex: df -h, ip a, systemctl status...)"
-              className="flex-1 bg-white px-3 py-2 border-2 border-[#1A1A2E] rounded-lg text-[#1A1A2E] text-[13px] md:text-[14px] font-mono font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5A36] shadow-[2px_2px_0px_#1A1A2E] placeholder-[#717188]"
-            />
-
-            <button
-              onClick={() => setAnatomyCommand(commandInput)}
-              disabled={!commandInput.trim()}
-              className="p-2 bg-white hover:bg-[#FFEECB] disabled:opacity-30 text-[#1A1A2E] border-2 border-[#1A1A2E] rounded-lg shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0 focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
-              title="Aprender sobre o comando antes de rodar"
-            >
-              <BookOpen className="w-4 h-4 text-[#FF5A36]" />
-            </button>
-
-            <button
-              onClick={() => requestExecution()}
-              disabled={isExecuting || !commandInput.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 bg-[#FF5A36] hover:bg-[#E04522] disabled:opacity-40 disabled:cursor-not-allowed text-[#1A1A2E] text-xs md:text-sm font-mono font-black rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0 focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
-            >
-              {isExecuting ? (
-                <span className="flex items-center gap-1.5">
-                  <RefreshCw className="w-4 h-4 animate-spin text-[#1A1A2E]" />
-                  <span>Rodando...</span>
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5">
-                  <Play className="w-4 h-4 fill-[#1A1A2E]" />
-                  <span>Executar</span>
-                </span>
-              )}
-            </button>
           </div>
         </div>
       </div>
@@ -620,10 +669,17 @@ export const CommandsTab: React.FC = () => {
 
             {/* Comando a ser executado */}
             <div className="space-y-1.5">
-              <span className="text-[11px] font-mono text-[#717188] font-bold">
-                Comando que será executado:
-              </span>
-              <div className="p-3 bg-[#FFF7E8] text-[#1A1A2E] rounded-lg border-2 border-[#1A1A2E] font-mono text-xs overflow-x-hidden break-words whitespace-pre-wrap max-h-36 shadow-inner">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono text-[#717188] font-bold">
+                  Comando que será executado:
+                </span>
+                {pendingCommand.includes('\n') && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#ECFDF3] border border-[#12B76A] text-[#12B76A]">
+                    Bloco com {pendingCommand.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} comandos ativos ({pendingCommand.split('\n').length} linhas)
+                  </span>
+                )}
+              </div>
+              <div className="p-3 bg-[#FFF7E8] text-[#1A1A2E] rounded-lg border-2 border-[#1A1A2E] font-mono text-xs overflow-x-hidden break-words whitespace-pre-wrap max-h-48 overflow-y-auto shadow-inner leading-relaxed">
                 {pendingCommand}
               </div>
             </div>

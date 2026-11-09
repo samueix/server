@@ -38,16 +38,31 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 1. Configuração de CORS Dinâmico
-cors_env = os.getenv("CORS_ORIGINS", "*").strip()
-if cors_env == "*":
-    allowed_origins = ["*"]
-else:
-    allowed_origins = [orig.strip() for orig in cors_env.split(",") if orig.strip()]
+# 1. Configuração de CORS Dinâmico e Seguro (Elimina conflito de allow_origins=["*"] com allow_credentials=True)
+cors_env = os.getenv("CORS_ORIGINS", "").strip()
+allowed_origins_list = [orig.strip() for orig in cors_env.split(",") if orig.strip() and orig.strip() != "*"]
+
+# Origens locais, LAN e Tailscale padrão confiáveis
+default_trusted_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://[::1]:3000",
+    "http://localhost:80",
+    "http://127.0.0.1:80",
+    "http://192.168.100.23",
+    "http://192.168.100.23:80",
+    "http://192.168.100.23:3000",
+    "http://100.97.208.102",
+    "http://100.97.208.102:80",
+    "http://100.97.208.102:3000"
+]
+
+all_allowed_origins = list(dict.fromkeys(allowed_origins_list + default_trusted_origins))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=all_allowed_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|\[::1\]|192\.168\.100\.\d+|100\.\d+\.\d+\.\d+|samuelserver)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
