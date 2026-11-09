@@ -29,7 +29,11 @@ import {
   ShieldAlert,
   FilePlus,
   Edit3,
-  Save
+  Save,
+  Download,
+  ZoomIn,
+  ZoomOut,
+  RotateCw
 } from 'lucide-react';
 import { FileItem, FileExplorerResponse, FileReadResponse } from '../../types';
 import { fetchDirectory, fetchFileContent, createFile, saveFile } from '../../services/fileService';
@@ -58,6 +62,8 @@ export const FilesTab: React.FC = () => {
   const [isEditing, setIsEditing] = useState<boolean>(false);
   const [editedText, setEditedText] = useState<string>('');
   const [savingEdit, setSavingEdit] = useState<boolean>(false);
+  const [imageZoom, setImageZoom] = useState<number>(1);
+  const [imageRotation, setImageRotation] = useState<number>(0);
 
   // Modal de Criação de Novo Arquivo (Bloco de Notas)
   const [isCreatingModalOpen, setIsCreatingModalOpen] = useState<boolean>(false);
@@ -117,6 +123,8 @@ export const FilesTab: React.FC = () => {
     setFileError(null);
     setFileContent(null);
     setCopiedContent(false);
+    setImageZoom(1);
+    setImageRotation(0);
 
     try {
       const contentRes = await fetchFileContent(item.path);
@@ -745,6 +753,71 @@ export const FilesTab: React.FC = () => {
                 <div className="p-4 bg-[#F04438]/20 border border-[#F04438] rounded-lg text-[#FEE4E2]">
                   <strong className="block mb-1">Erro:</strong>
                   {fileError}
+                </div>
+              ) : fileContent?.isImage && fileContent?.dataUrl ? (
+                /* Visualizador de Foto / Imagem */
+                <div className="flex flex-col items-center justify-center p-4 bg-[#0D0D15] rounded-lg space-y-4 min-h-[350px]">
+                  {/* Controles da Imagem */}
+                  <div className="flex items-center gap-2 bg-[#1A1A2E] p-2 rounded-lg border border-[#FFF7E8]/20 text-white text-xs flex-wrap justify-center">
+                    <button
+                      onClick={() => setImageZoom(z => Math.max(0.4, Number((z - 0.2).toFixed(1))))}
+                      className="p-1 hover:bg-white/20 rounded border border-transparent hover:border-white/30"
+                      title="Diminuir Zoom (-20%)"
+                    >
+                      <ZoomOut className="w-4 h-4" />
+                    </button>
+                    <span className="font-mono text-[11px] font-bold px-2">{Math.round(imageZoom * 100)}%</span>
+                    <button
+                      onClick={() => setImageZoom(z => Math.min(3.5, Number((z + 0.2).toFixed(1))))}
+                      className="p-1 hover:bg-white/20 rounded border border-transparent hover:border-white/30"
+                      title="Aumentar Zoom (+20%)"
+                    >
+                      <ZoomIn className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => setImageRotation(r => (r + 90) % 360)}
+                      className="p-1 hover:bg-white/20 rounded border border-transparent hover:border-white/30 ml-2"
+                      title="Girar 90 Graus"
+                    >
+                      <RotateCw className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => { setImageZoom(1); setImageRotation(0); }}
+                      className="px-2 py-0.5 text-[11px] font-mono hover:bg-white/20 rounded ml-1"
+                      title="Restaurar tamanho original"
+                    >
+                      Resetar
+                    </button>
+                    <a
+                      href={fileContent.dataUrl}
+                      download={selectedFile.name}
+                      className="flex items-center gap-1 px-3 py-1 bg-[#FF5A36] hover:bg-[#E04522] rounded text-white text-xs font-mono font-bold ml-2 shadow-[2px_2px_0px_#000]"
+                      title="Baixar imagem original para seu dispositivo"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Baixar Foto</span>
+                    </a>
+                  </div>
+
+                  {/* Canvas / Container da Imagem */}
+                  <div className="w-full max-h-[58vh] overflow-auto flex items-center justify-center p-3 bg-black/50 rounded-lg border border-white/10">
+                    <img
+                      src={fileContent.dataUrl}
+                      alt={selectedFile.name}
+                      style={{
+                        transform: `scale(${imageZoom}) rotate(${imageRotation}deg)`,
+                        transformOrigin: 'center center',
+                        transition: 'transform 0.15s ease-out'
+                      }}
+                      className="max-h-[50vh] max-w-full rounded border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] object-contain select-none"
+                    />
+                  </div>
+
+                  <div className="text-[11px] font-mono text-[#FFF7E8]/70 flex items-center gap-3">
+                    <span>MIME: {fileContent.mimeType || 'imagem'}</span>
+                    <span>•</span>
+                    <span>Tamanho: {selectedFile.sizeFormatted}</span>
+                  </div>
                 </div>
               ) : fileContent?.isBinary ? (
                 <div className="py-12 text-center space-y-2">

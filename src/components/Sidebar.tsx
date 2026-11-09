@@ -17,7 +17,8 @@ import {
   GitBranch,
   Folder,
   ShieldAlert,
-  Key
+  Key,
+  Bot
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 
@@ -48,6 +49,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'monitoring', label: 'Monitoramento', icon: Activity },
   { id: 'adguard', label: 'AdGuard Home', icon: Shield },
   { id: 'ping', label: 'Ping / Latência', icon: Radio },
+  { id: 'antigravity', label: 'Google Antigravity & IA', icon: Bot, badge: 'IA CLI', adminOnly: true },
   { id: 'files', label: 'Arquivos', icon: Folder, adminOnly: true },
   { id: 'security', label: 'Segurança & Ataques', icon: ShieldAlert, badge: 'Auditor', adminOnly: true },
   { id: 'credentials', label: 'Credenciais & APIs', icon: Key, badge: 'Config', adminOnly: true },

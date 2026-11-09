@@ -99,90 +99,180 @@ const CANONICAL_SERVICES = [
   }
 ];
 
-export function getSystemdServiceStatus(serviceName: string): Partial<MonitoredService> {
-  const clean = serviceName.replace(/[^a-zA-Z0-9_\-\.]/g, '');
-  const unit = clean.endsWith('.service') ? clean : `${clean}.service`;
+import fs from 'fs';
 
-  try {
-    const stdout = execSync(
-      `systemctl show ${unit} --property=ActiveState,SubState,LoadState,UnitFileState,MainPID,Description,ActiveEnterTimestamp,CPUUsageNSec,MemoryCurrent`,
-      { encoding: 'utf-8', timeout: 1500, stdio: ['pipe', 'pipe', 'ignore'] }
-    );
+export function getSystemdServiceStatus(serviceName: string, aliases: string[] = [], porta?: number | string | null): Partial<MonitoredService> {
+  const candidates = [serviceName, ...aliases];
 
-    const props: Record<string, string> = {};
-    for (const line of stdout.split('\n')) {
-      const idx = line.indexOf('=');
-      if (idx !== -1) {
-        props[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
-      }
-    }
+  // 1. Tenta systemctl show para cada alias do serviço
+  for (const name of candidates) {
+    const clean = name.replace(/[^a-zA-Z0-9_\-\.]/g, '');
+    if (!clean) continue;
+    const unit = clean.endsWith('.service') ? clean : `${clean}.service`;
 
-    const loadState = props['LoadState'] || 'not-found';
-    if (loadState !== 'not-found') {
-      const activeState = props['ActiveState'] || 'inactive';
-      const subState = props['SubState'] || 'dead';
-      const isOnline = activeState === 'active' && (subState === 'running' || subState === 'listening');
-      const isError = activeState === 'failed' || subState === 'failed';
-      const status: 'ONLINE' | 'OFFLINE' | 'ERRO' = isOnline ? 'ONLINE' : (isError ? 'ERRO' : 'OFFLINE');
-      const mainPid = parseInt(props['MainPID'] || '0', 10) || null;
+    try {
+      const stdout = execSync(
+        `systemctl show ${unit} --property=ActiveState,SubState,LoadState,UnitFileState,MainPID,Description,ActiveEnterTimestamp,CPUUsageNSec,MemoryCurrent`,
+        { encoding: 'utf-8', timeout: 1500, stdio: ['pipe', 'pipe', 'ignore'] }
+      );
 
-      let memStr = 'N/D';
-      const memBytes = parseInt(props['MemoryCurrent'] || '0', 10);
-      if (memBytes > 0 && memBytes < 1e15) {
-        memStr = memBytes > 1024 ** 3
-          ? `${(memBytes / (1024 ** 3)).toFixed(2)} GB`
-          : `${(memBytes / (1024 ** 2)).toFixed(1)} MB`;
+      const props: Record<string, string> = {};
+      for (const line of stdout.split('\n')) {
+        const idx = line.indexOf('=');
+        if (idx !== -1) {
+          props[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+        }
       }
 
-      let cpuStr = 'N/D';
-      const cpuNsec = parseInt(props['CPUUsageNSec'] || '0', 10);
-      if (cpuNsec > 0) {
-        cpuStr = `${(cpuNsec / 1e9).toFixed(1)}s total`;
+      const loadState = props['LoadState'] || 'not-found';
+      if (loadState !== 'not-found') {
+        const activeState = props['ActiveState'] || 'inactive';
+        const subState = props['SubState'] || 'dead';
+        
+        // Em serviços oneshot (como ufw), activeState é 'active' e subState é 'exited'. O serviço ESTÁ ATIVO!
+        const isOnline = activeState === 'active' && (
+          subState === 'running' || 
+          subState === 'listening' || 
+          subState === 'active' || 
+          subState === 'exited'
+        );
+        const isError = activeState === 'failed' || subState === 'failed';
+
+        if (isOnline || isError) {
+          const mainPid = parseInt(props['MainPID'] || '0', 10) || null;
+
+          let memStr = 'N/D';
+          const memBytes = parseInt(props['MemoryCurrent'] || '0', 10);
+          if (memBytes > 0 && memBytes < 1e15) {
+            memStr = memBytes > 1024 ** 3
+              ? `${(memBytes / (1024 ** 3)).toFixed(2)} GB`
+              : `${(memBytes / (1024 ** 2)).toFixed(1)} MB`;
+          }
+
+          let cpuStr = 'N/D';
+          const cpuNsec = parseInt(props['CPUUsageNSec'] || '0', 10);
+          if (cpuNsec > 0) {
+            cpuStr = `${(cpuNsec / 1e9).toFixed(1)}s total`;
+          }
+
+          return {
+            status: isOnline ? 'ONLINE' : 'ERRO',
+            ativo: isOnline,
+            habilitado_boot: props['UnitFileState'] === 'enabled',
+            installed: true,
+            sub_state: subState,
+            pid: mainPid,
+            tempo_ativo: isOnline ? 'Ativo' : 'Inativo',
+            ultima_inicializacao: props['ActiveEnterTimestamp'] || 'N/D',
+            cpu: cpuStr,
+            memory: memStr,
+            uptime: isOnline ? 'Ativo' : 'Inativo'
+          };
+        }
       }
+    } catch {}
+  }
 
-      return {
-        status,
-        ativo: isOnline,
-        habilitado_boot: props['UnitFileState'] === 'enabled',
-        installed: true,
-        sub_state: subState,
-        pid: mainPid,
-        tempo_ativo: isOnline ? 'Ativo' : 'Inativo',
-        ultima_inicializacao: props['ActiveEnterTimestamp'] || 'N/D',
-        cpu: cpuStr,
-        memory: memStr,
-        uptime: isOnline ? 'Ativo' : 'Inativo'
-      };
-    }
-  } catch {}
+  // 2. Verificação direta do Firewall UFW
+  if (serviceName.toLowerCase() === 'ufw') {
+    try {
+      const ufwOut = execSync('sudo ufw status 2>/dev/null || ufw status 2>/dev/null || true', {
+        encoding: 'utf-8',
+        timeout: 1000
+      }).trim();
+      if (ufwOut.toLowerCase().includes('status: active') || ufwOut.toLowerCase().includes('estado: ativo')) {
+        return {
+          status: 'ONLINE',
+          ativo: true,
+          habilitado_boot: true,
+          installed: true,
+          sub_state: 'active (regras ativas)',
+          pid: null,
+          tempo_ativo: 'Ativo',
+          ultima_inicializacao: 'N/D',
+          cpu: 'N/D',
+          memory: 'N/D',
+          uptime: 'Ativo'
+        };
+      }
+    } catch {}
+  }
 
-  // Fallback seguro com ZERO dados falsos: verifica se o processo existe de verdade no sistema
-  try {
-    const pgrepOut = execSync(`pgrep -f "${clean}" | head -n 1`, {
-      encoding: 'utf-8',
-      timeout: 1000,
-      stdio: ['pipe', 'pipe', 'ignore']
-    }).trim();
+  // 3. Verificação do Tailscale VPN (interface tailscale0 ou daemon)
+  if (serviceName.toLowerCase() === 'tailscaled') {
+    try {
+      if (fs.existsSync('/sys/class/net/tailscale0')) {
+        return {
+          status: 'ONLINE',
+          ativo: true,
+          habilitado_boot: true,
+          installed: true,
+          sub_state: 'running (tailscale0 ativa)',
+          pid: null,
+          tempo_ativo: 'Ativo',
+          ultima_inicializacao: 'N/D',
+          cpu: 'N/D',
+          memory: 'N/D',
+          uptime: 'Ativo'
+        };
+      }
+    } catch {}
+  }
 
-    const realPid = parseInt(pgrepOut, 10);
-    if (realPid && !isNaN(realPid) && realPid > 0) {
-      return {
-        status: 'ONLINE',
-        ativo: true,
-        habilitado_boot: false,
-        installed: true,
-        sub_state: 'running',
-        pid: realPid,
-        tempo_ativo: 'Ativo',
-        ultima_inicializacao: 'N/D',
-        cpu: 'N/D',
-        memory: 'N/D',
-        uptime: 'Ativo'
-      };
-    }
-  } catch {}
+  // 4. Verificação de portas escutando via ss -lnt
+  if (porta) {
+    try {
+      const portList = String(porta).split(',').map(p => p.trim());
+      const ssOut = execSync('ss -lnt 2>/dev/null || true', { encoding: 'utf-8', timeout: 1000 });
+      for (const p of portList) {
+        if (p && (ssOut.includes(`:${p} `) || ssOut.includes(`:${p}\n`))) {
+          return {
+            status: 'ONLINE',
+            ativo: true,
+            habilitado_boot: true,
+            installed: true,
+            sub_state: 'listening',
+            pid: null,
+            tempo_ativo: 'Ativo',
+            ultima_inicializacao: 'N/D',
+            cpu: 'N/D',
+            memory: 'N/D',
+            uptime: `Porta ${p} em escuta`
+          };
+        }
+      }
+    } catch {}
+  }
 
-  // Sem processo rodando e sem systemd: estado honesto OFFLINE
+  // 5. Fallback seguro por pgrep em todos os candidatos
+  for (const name of candidates) {
+    try {
+      const pgrepOut = execSync(`pgrep -f "${name}" 2>/dev/null | head -n 1`, {
+        encoding: 'utf-8',
+        timeout: 1000,
+        stdio: ['pipe', 'pipe', 'ignore']
+      }).trim();
+
+      const realPid = parseInt(pgrepOut, 10);
+      if (realPid && !isNaN(realPid) && realPid > 0) {
+        return {
+          status: 'ONLINE',
+          ativo: true,
+          habilitado_boot: false,
+          installed: true,
+          sub_state: 'running',
+          pid: realPid,
+          tempo_ativo: 'Ativo',
+          ultima_inicializacao: 'N/D',
+          cpu: 'N/D',
+          memory: 'N/D',
+          uptime: 'Ativo'
+        };
+      }
+    } catch {}
+  }
+
+  // Sem processo rodando e sem systemd ativo
   return {
     status: 'OFFLINE',
     ativo: false,
@@ -202,7 +292,7 @@ export function getAllMonitoredServices(): MonitoredService[] {
   const results: MonitoredService[] = [];
 
   for (const item of CANONICAL_SERVICES) {
-    const statusInfo = getSystemdServiceStatus(item.canonical);
+    const statusInfo = getSystemdServiceStatus(item.canonical, item.aliases, item.porta);
     results.push({
       name: item.name,
       nome: item.name,

@@ -341,79 +341,125 @@ export const CredentialsTab: React.FC = () => {
           </div>
         </div>
 
-        {/* 3. Server Panel (Logins e Senhas) */}
-        <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl space-y-3.5">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Lock className="w-4 h-4 text-[#FF5A36]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              3. Acesso ao Server Panel (Admin & User)
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
-                Usuário Admin
-              </label>
-              <input
-                type="text"
-                value={config?.auth.adminUser || ''}
-                onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, adminUser: e.target.value } } : null)}
-                className="w-full p-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
-                Senha Admin
-              </label>
-              <div className="relative">
-                <input
-                  type={showPass['adminPass'] ? 'text' : 'password'}
-                  value={config?.auth.adminPass || ''}
-                  onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, adminPass: e.target.value } } : null)}
-                  className="w-full pl-3 pr-9 py-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleShowPass('adminPass')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[#717188] hover:text-[#1A1A2E]"
-                >
-                  {showPass['adminPass'] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
+        {/* 3. Server Panel (Logins e Senhas do Painel Web) */}
+        <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl space-y-4 md:col-span-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b-2 border-[#1A1A2E] gap-2">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-[#FF5A36] text-white flex items-center justify-center font-bold">
+                <Lock className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                  3. Credenciais de Acesso ao Painel Web (Login & Senhas)
+                </h2>
+                <p className="text-[11px] text-[#4A4A68] font-medium">
+                  Edite aqui os usuários e senhas utilizados para autenticar na tela de login deste sistema.
+                </p>
               </div>
             </div>
+
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-[#ECFDF3] border border-[#12B76A] text-[#12B76A] self-start sm:self-auto">
+              <span className="w-2 h-2 rounded-full bg-[#12B76A]" />
+              Sincronização Ativa
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
-                Usuário Padrão
-              </label>
-              <input
-                type="text"
-                value={config?.auth.userUser || ''}
-                onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, userUser: e.target.value } } : null)}
-                className="w-full p-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
-                Senha Usuário Padrão
-              </label>
-              <div className="relative">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Conta de Administrador */}
+            <div className="p-4 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-3 shadow-[2px_2px_0px_#1A1A2E]">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black font-title uppercase text-[#FF5A36] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#FF5A36]" />
+                  Conta de Administrador (Total)
+                </span>
+                <span className="text-[10px] font-mono font-bold text-[#717188]">Acesso Completo</span>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Usuário Administrador:
+                </label>
                 <input
-                  type={showPass['userPass'] ? 'text' : 'password'}
-                  value={config?.auth.userPass || ''}
-                  onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, userPass: e.target.value } } : null)}
-                  className="w-full pl-3 pr-9 py-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
+                  type="text"
+                  required
+                  value={config?.auth.adminUser || ''}
+                  onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, adminUser: e.target.value } } : null)}
+                  placeholder="admin"
+                  className="w-full p-2.5 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:border-[#FF5A36]"
                 />
-                <button
-                  type="button"
-                  onClick={() => toggleShowPass('userPass')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[#717188] hover:text-[#1A1A2E]"
-                >
-                  {showPass['userPass'] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Senha do Administrador:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPass['adminPass'] ? 'text' : 'password'}
+                    required
+                    value={config?.auth.adminPass || ''}
+                    onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, adminPass: e.target.value } } : null)}
+                    placeholder="Senha de acesso administrador"
+                    className="w-full pl-3 pr-10 py-2.5 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:border-[#FF5A36]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleShowPass('adminPass')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#717188] hover:text-[#1A1A2E] p-1"
+                    title={showPass['adminPass'] ? 'Ocultar senha' : 'Ver senha'}
+                  >
+                    {showPass['adminPass'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Conta de Usuário Padrão */}
+            <div className="p-4 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-3 shadow-[2px_2px_0px_#1A1A2E]">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black font-title uppercase text-[#00A6FB] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#00A6FB]" />
+                  Conta de Usuário Padrão
+                </span>
+                <span className="text-[10px] font-mono font-bold text-[#717188]">Acesso de Leitura</span>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Usuário Padrão:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={config?.auth.userUser || ''}
+                  onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, userUser: e.target.value } } : null)}
+                  placeholder="user"
+                  className="w-full p-2.5 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:border-[#00A6FB]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-mono font-bold text-[#1A1A2E]">
+                  Senha do Usuário Padrão:
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPass['userPass'] ? 'text' : 'password'}
+                    required
+                    value={config?.auth.userPass || ''}
+                    onChange={(e) => setConfig(prev => prev ? { ...prev, auth: { ...prev.auth, userPass: e.target.value } } : null)}
+                    placeholder="Senha de acesso comum"
+                    className="w-full pl-3 pr-10 py-2.5 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:border-[#00A6FB]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleShowPass('userPass')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#717188] hover:text-[#1A1A2E] p-1"
+                    title={showPass['userPass'] ? 'Ocultar senha' : 'Ver senha'}
+                  >
+                    {showPass['userPass'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -33,6 +33,9 @@ export interface FileReadResponse {
   isBinary: boolean;
   truncated: boolean;
   mtime: string;
+  isImage?: boolean;
+  mimeType?: string;
+  dataUrl?: string;
 }
 
 // Arquivos e padrões estritamente proibidos de leitura e manipulação
@@ -223,6 +226,45 @@ export async function readTargetFile(filePath: string): Promise<FileReadResponse
 
   const name = path.basename(resolvedPath);
   const size = stat.size;
+  const ext = path.extname(name).toLowerCase();
+
+  // Mapeamento para visualização de fotos/imagens
+  const imageMimeMap: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.webp': 'image/webp',
+    '.ico': 'image/x-icon',
+    '.bmp': 'image/bmp'
+  };
+
+  const mimeType = imageMimeMap[ext];
+  if (mimeType) {
+    const maxImageBytes = 8 * 1024 * 1024; // 8 MB para base64
+    if (size <= maxImageBytes) {
+      try {
+        const fullBuffer = await fs.promises.readFile(resolvedPath);
+        const dataUrl = `data:${mimeType};base64,${fullBuffer.toString('base64')}`;
+        return {
+          name,
+          path: resolvedPath,
+          size,
+          content: `[Imagem ${name} - ${formatBytes(size)}]`,
+          isBinary: true,
+          isImage: true,
+          mimeType,
+          dataUrl,
+          truncated: false,
+          mtime: stat.mtime.toISOString()
+        };
+      } catch (imgErr) {
+        console.warn('Falha ao ler buffer de imagem:', imgErr);
+      }
+    }
+  }
+
   const maxReadBytes = 512 * 1024; // 512 KB
   let truncated = false;
 

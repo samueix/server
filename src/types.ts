@@ -4,6 +4,7 @@ export type TransportType = 'websocket' | 'polling';
 export type NavigationTab = 
   | 'overview' 
   | 'monitoring' 
+  | 'antigravity'
   | 'files'
   | 'security'
   | 'credentials'
@@ -50,6 +51,9 @@ export interface FileReadResponse {
   isBinary: boolean;
   truncated: boolean;
   mtime: string;
+  isImage?: boolean;
+  mimeType?: string;
+  dataUrl?: string;
 }
 
 export interface AlertHistoryItem {

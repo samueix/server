@@ -33,7 +33,16 @@ import {
   DomainAnalysis 
 } from './server/db.js';
 import { analyzeDomainWithGemini } from './server/gemini.js';
-import { listDirectory, readTargetFile, createTargetFile, saveTargetFile } from './server/fileExplorer.js';
+import { listDirectory, readTargetFile, createTargetFile, saveTargetFile, assertPathSecurity } from './server/fileExplorer.js';
+import { 
+  getTokenQuotaMetrics, 
+  listAntigravitySessions, 
+  getAntigravitySession, 
+  createAntigravitySession, 
+  deleteAntigravitySession, 
+  askAntigravityAgent,
+  executeAntigravityCli
+} from './server/antigravity.js';
 import { runShellCommand } from './server/terminalRunner.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { getSecurityAttackStatus, recordPanelFailedLogin } from './server/securityMonitor.js';
@@ -763,6 +772,100 @@ export function createApp() {
       return res.json(result);
     } catch (err: any) {
       return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Obter stream binário de arquivo/foto diretamente
+  app.get('/api/files/raw', requireAdminAuth, async (req, res) => {
+    try {
+      const targetPath = req.query.path as string;
+      if (!targetPath) {
+        return res.status(400).send('Caminho não fornecido.');
+      }
+      const resolved = assertPathSecurity(targetPath);
+      if (!fs.existsSync(resolved)) {
+        return res.status(404).send('Arquivo não encontrado.');
+      }
+      const stat = await fs.promises.stat(resolved);
+      if (stat.isDirectory()) {
+        return res.status(400).send('Diretório não suportado.');
+      }
+      return res.sendFile(resolved);
+    } catch (err: any) {
+      return res.status(400).send(err.message);
+    }
+  });
+
+  // Rotas do Google Antigravity & AI Tokens
+  app.get('/api/antigravity/tokens', requireAdminAuth, (req, res) => {
+    try {
+      const metrics = getTokenQuotaMetrics();
+      return res.json(metrics);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/antigravity/sessions', requireAdminAuth, (req, res) => {
+    try {
+      const sessions = listAntigravitySessions();
+      return res.json(sessions);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/antigravity/sessions/:id', requireAdminAuth, (req, res) => {
+    try {
+      const data = getAntigravitySession(req.params.id);
+      return res.json(data);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/antigravity/sessions/new', requireAdminAuth, (req, res) => {
+    try {
+      const title = (req.body?.title as string) || '';
+      const session = createAntigravitySession(title);
+      return res.json(session);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/antigravity/sessions/:id', requireAdminAuth, (req, res) => {
+    try {
+      const deleted = deleteAntigravitySession(req.params.id);
+      return res.json({ success: deleted });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/antigravity/chat', requireAdminAuth, async (req, res) => {
+    try {
+      const { sessionId, prompt } = req.body || {};
+      if (!prompt || typeof prompt !== 'string') {
+        return res.status(400).json({ error: 'Prompt é obrigatório.' });
+      }
+      const result = await askAntigravityAgent(sessionId || '', prompt);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/antigravity/cli-exec', requireAdminAuth, async (req, res) => {
+    try {
+      const { command } = req.body || {};
+      if (!command) {
+        return res.status(400).json({ error: 'Comando CLI é obrigatório.' });
+      }
+      const result = await executeAntigravityCli(command);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 
