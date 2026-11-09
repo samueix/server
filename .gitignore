@@ -23,6 +23,8 @@ dist-py/
 # Arquivos de ambiente e segredos
 .env*
 !.env.example
+server-config.json
+server-config.*.json
 
 # Bancos de dados locais e caches de telemetria
 data/*.db
