@@ -22,21 +22,21 @@ export interface MonitoredService {
 const CANONICAL_SERVICES = [
   {
     canonical: 'ssh',
-    aliases: ['ssh', 'sshd'],
+    aliases: ['ssh', 'sshd', 'openssh-server'],
     name: 'OpenSSH Server',
     porta: 22,
     descricao: 'Serviço de acesso remoto seguro SSH'
   },
   {
     canonical: 'AdGuardHome',
-    aliases: ['AdGuardHome', 'adguard-home'],
+    aliases: ['AdGuardHome', 'adguard-home', 'adguardhome'],
     name: 'AdGuard Home',
     porta: '53, 8081',
     descricao: 'Servidor DNS com bloqueio de anúncios e rastreadores'
   },
   {
     canonical: 'server-panel',
-    aliases: ['server-panel', 'server-monitor'],
+    aliases: ['server-panel', 'server-monitor', 'serverpanel'],
     name: 'Server Panel',
     porta: 3000,
     descricao: 'Daemon de monitoramento em tempo real'
@@ -57,7 +57,7 @@ const CANONICAL_SERVICES = [
   },
   {
     canonical: 'systemd-resolved',
-    aliases: ['systemd-resolved'],
+    aliases: ['systemd-resolved', 'resolved'],
     name: 'systemd-resolved',
     porta: 53,
     descricao: 'Resolvedor DNS local do Ubuntu'
@@ -71,28 +71,28 @@ const CANONICAL_SERVICES = [
   },
   {
     canonical: 'docker',
-    aliases: ['docker'],
+    aliases: ['docker', 'dockerd'],
     name: 'Docker Engine',
     porta: null,
     descricao: 'Mecanismo de contêineres Docker'
   },
   {
     canonical: 'fail2ban',
-    aliases: ['fail2ban'],
+    aliases: ['fail2ban', 'fail2ban-server'],
     name: 'Fail2Ban Security',
     porta: null,
     descricao: 'Proteção contra ataques de força bruta'
   },
   {
     canonical: 'tailscaled',
-    aliases: ['tailscaled'],
+    aliases: ['tailscaled', 'tailscale'],
     name: 'Tailscale VPN',
     porta: null,
     descricao: 'Rede privada mesh VPN'
   },
   {
     canonical: 'n8n',
-    aliases: ['n8n'],
+    aliases: ['n8n', 'n8n.service'],
     name: 'n8n Workflow Automation',
     porta: 5678,
     descricao: 'Automação de fluxos e integrações'
@@ -198,8 +198,8 @@ export function getSystemdServiceStatus(serviceName: string, aliases: string[] =
     } catch {}
   }
 
-  // 3. Verificação do Tailscale VPN (interface tailscale0 ou daemon)
-  if (serviceName.toLowerCase() === 'tailscaled') {
+  // 3. Verificação do Tailscale VPN (interface tailscale0 ou daemon ou tailscale status)
+  if (serviceName.toLowerCase().startsWith('tailscale')) {
     try {
       if (fs.existsSync('/sys/class/net/tailscale0')) {
         return {
@@ -216,7 +216,62 @@ export function getSystemdServiceStatus(serviceName: string, aliases: string[] =
           uptime: 'Ativo'
         };
       }
+      const tsStatus = execSync('tailscale status 2>/dev/null || sudo tailscale status 2>/dev/null || true', { encoding: 'utf-8', timeout: 1000 }).trim();
+      if (tsStatus && !tsStatus.includes('failed') && !tsStatus.includes('not running')) {
+        return {
+          status: 'ONLINE',
+          ativo: true,
+          habilitado_boot: true,
+          installed: true,
+          sub_state: 'running',
+          pid: null,
+          tempo_ativo: 'Ativo',
+          ultima_inicializacao: 'N/D',
+          cpu: 'N/D',
+          memory: 'N/D',
+          uptime: 'Ativo'
+        };
+      }
     } catch {}
+  }
+
+  // 3.1 Verificação do Fail2Ban
+  if (serviceName.toLowerCase() === 'fail2ban') {
+    try {
+      const f2bOut = execSync('sudo fail2ban-client ping 2>/dev/null || fail2ban-client ping 2>/dev/null || true', { encoding: 'utf-8', timeout: 1000 }).trim();
+      if (f2bOut.toLowerCase().includes('pong')) {
+        return {
+          status: 'ONLINE',
+          ativo: true,
+          habilitado_boot: true,
+          installed: true,
+          sub_state: 'active (jail ativo)',
+          pid: null,
+          tempo_ativo: 'Ativo',
+          ultima_inicializacao: 'N/D',
+          cpu: 'N/D',
+          memory: 'N/D',
+          uptime: 'Ativo'
+        };
+      }
+    } catch {}
+  }
+
+  // 3.2 Verificação do Server Panel (o próprio serviço em execução)
+  if (serviceName.toLowerCase() === 'server-panel' || serviceName.toLowerCase() === 'server-monitor') {
+    return {
+      status: 'ONLINE',
+      ativo: true,
+      habilitado_boot: true,
+      installed: true,
+      sub_state: 'running',
+      pid: process.pid,
+      tempo_ativo: 'Ativo',
+      ultima_inicializacao: 'N/D',
+      cpu: 'N/D',
+      memory: 'N/D',
+      uptime: 'Ativo'
+    };
   }
 
   // 4. Verificação de portas escutando via ss -lnt

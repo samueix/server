@@ -24,7 +24,7 @@ import {
 import { executeTerminalCommand, TerminalExecResponse } from '../../services/terminalService';
 import { CommandAnatomyModal } from '../CommandAnatomyModal';
 
-export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git pull origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo systemctl restart server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`;
+export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`;
 
 interface PracticalCommand {
   command: string;

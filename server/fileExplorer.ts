@@ -161,8 +161,8 @@ export async function listDirectory(requestedPath?: string): Promise<FileExplore
     let permissions = '';
 
     try {
-      isDir = entry.isDirectory();
       const itemStat = await fs.promises.stat(fullItemPath);
+      isDir = itemStat.isDirectory();
       size = isDir ? 0 : itemStat.size;
       mtime = itemStat.mtime.toISOString();
       const modeOctal = (itemStat.mode & 0o777).toString(8);

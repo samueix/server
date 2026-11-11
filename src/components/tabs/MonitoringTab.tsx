@@ -63,8 +63,9 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
   const ramPercent = server?.memoria?.uso_percentual ?? 0;
   const ramPeak = ramHistory.length > 0 ? Math.max(...ramHistory, ramPercent) : ramPercent;
 
-  const swapTotal = 2.0;
-  const swapUsed = 0.0;
+  const ramBuffersCache = server?.memoria?.buffers_cache_gb ?? Math.max(0, Number((ramTotal - ramUsed - ramFree).toFixed(2)));
+  const swapTotal = server?.memoria?.swap_total_gb ?? 0;
+  const swapUsed = server?.memoria?.swap_usada_gb ?? 0;
 
   const hasTemp = Boolean(
     temperature?.disponivel || 
@@ -324,11 +325,15 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
           </div>
           <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]">
             <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">Cache e buffers</span>
-            <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${(ramTotal - ramUsed).toFixed(2)} GB` : 'N/D'}</span>
+            <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${ramBuffersCache.toFixed(2)} GB` : 'N/D'}</span>
           </div>
           <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]">
             <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">Swap</span>
-            <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${swapTotal.toFixed(2)} GB (${swapUsed.toFixed(2)} GB usado)` : 'N/D'}</span>
+            <span className="text-[#1A1A2E] font-bold tabular-nums">
+              {isConnected 
+                ? (swapTotal > 0 ? `${swapTotal.toFixed(2)} GB (${swapUsed.toFixed(2)} GB usado)` : '0.00 GB (desativado)') 
+                : 'N/D'}
+            </span>
           </div>
         </div>
       </div>

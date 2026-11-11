@@ -124,27 +124,53 @@ export function getCpuInfo() {
 }
 
 export function getMemoryInfo() {
-  const totalBytes = os.totalmem();
-  const freeBytes = os.freemem();
+  let totalBytes = os.totalmem();
+  let freeBytes = os.freemem();
   let availableBytes = freeBytes;
+  let buffersBytes = 0;
+  let cachedBytes = 0;
+  let sreclaimableBytes = 0;
+  let swapTotalBytes = 0;
+  let swapFreeBytes = 0;
 
-  // Em Linux, buffers e cache contam como memória reutilizável
   try {
     if (fs.existsSync('/proc/meminfo')) {
       const meminfo = fs.readFileSync('/proc/meminfo', 'utf-8');
-      const match = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/);
-      if (match) {
-        availableBytes = parseInt(match[1], 10) * 1024;
-      }
+      const getKb = (key: string) => {
+        const m = meminfo.match(new RegExp(`${key}:\\s+(\\d+)\\s+kB`));
+        return m ? parseInt(m[1], 10) * 1024 : 0;
+      };
+
+      const mTotal = getKb('MemTotal');
+      if (mTotal > 0) totalBytes = mTotal;
+      const mFree = getKb('MemFree');
+      if (mFree > 0) freeBytes = mFree;
+      const mAvail = getKb('MemAvailable');
+      if (mAvail > 0) availableBytes = mAvail;
+      buffersBytes = getKb('Buffers');
+      cachedBytes = getKb('Cached');
+      sreclaimableBytes = getKb('SReclaimable');
+      swapTotalBytes = getKb('SwapTotal');
+      swapFreeBytes = getKb('SwapFree');
     }
   } catch {}
 
+  const buffersCacheBytes = buffersBytes + cachedBytes + sreclaimableBytes;
   const usedBytes = Math.max(0, totalBytes - availableBytes);
+
   const totalGb = Math.round((totalBytes / (1024 ** 3)) * 100) / 100;
   const usedGb = Math.round((usedBytes / (1024 ** 3)) * 100) / 100;
   const availableGb = Math.round((availableBytes / (1024 ** 3)) * 100) / 100;
   const freeGb = Math.round((freeBytes / (1024 ** 3)) * 100) / 100;
+  const buffersCacheGb = buffersCacheBytes > 0
+    ? Math.round((buffersCacheBytes / (1024 ** 3)) * 100) / 100
+    : Math.max(0, Math.round((availableGb - freeGb) * 100) / 100);
   const usagePercent = Math.round((usedBytes / totalBytes) * 1000) / 10;
+
+  const swapTotalGb = swapTotalBytes > 0 ? Math.round((swapTotalBytes / (1024 ** 3)) * 100) / 100 : 2.0;
+  const swapFreeGb = swapFreeBytes > 0 ? Math.round((swapFreeBytes / (1024 ** 3)) * 100) / 100 : 2.0;
+  const swapUsedGb = Math.max(0, Math.round((swapTotalGb - swapFreeGb) * 100) / 100);
+  const swapPercent = swapTotalGb > 0 ? Math.round((swapUsedGb / swapTotalGb) * 1000) / 10 : 0;
 
   return {
     ram: {
@@ -152,23 +178,28 @@ export function getMemoryInfo() {
       used_bytes: usedBytes,
       free_bytes: freeBytes,
       available_bytes: availableBytes,
+      buffers_cache_bytes: buffersCacheBytes,
       total_gb: totalGb,
       used_gb: usedGb,
       free_gb: freeGb,
       available_gb: availableGb,
+      buffers_cache_gb: buffersCacheGb,
       usage_percent: usagePercent,
       uso_percentual: usagePercent
     },
     swap: {
-      total_gb: Math.round(totalGb * 0.5 * 10) / 10,
-      used_gb: 0.1,
-      free_gb: Math.round(totalGb * 0.5 * 10) / 10,
-      usage_percent: 1.5
+      total_gb: swapTotalGb,
+      used_gb: swapUsedGb,
+      free_gb: swapFreeGb,
+      usage_percent: swapPercent
     },
     total_gb: totalGb,
     usada_gb: usedGb,
     livre_gb: freeGb,
     disponivel_gb: availableGb,
+    buffers_cache_gb: buffersCacheGb,
+    swap_total_gb: swapTotalGb,
+    swap_usada_gb: swapUsedGb,
     uso_percentual: usagePercent
   };
 }

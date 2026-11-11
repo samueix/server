@@ -94,7 +94,7 @@ export const DocumentationTab: React.FC = () => {
             </div>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => copyToClipboard(`cd /opt/server-panel && git pull --ff-only origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`, 'update-script')}
+                onClick={() => copyToClipboard(`cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`, 'update-script')}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono font-bold bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
                 title="Copiar comando em linha única para o shell"
               >
@@ -114,12 +114,12 @@ export const DocumentationTab: React.FC = () => {
           </div>
 
           <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            Execute o script em linha única abaixo diretamente no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele baixa as últimas alterações do Git, compila o build de produção, copia para o diretório raiz do Nginx (<code className="text-[#1A1A2E] font-mono font-bold">/var/www/server-panel</code>), ajusta as permissões para <code className="text-[#1A1A2E] font-mono font-bold">www-data</code> e recarrega o serviço web.
+            Execute o script em linha única abaixo diretamente no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele baixa as últimas alterações do Git, salvaguarda as configurações locais, cria backup automático da versão web atual com suporte a rollback, compila o build de produção, copia para o diretório raiz do Nginx (<code className="text-[#1A1A2E] font-mono font-bold">/var/www/server-panel</code>), ajusta as permissões para <code className="text-[#1A1A2E] font-mono font-bold">www-data</code>, recarrega o serviço web e valida o health check.
           </p>
 
           <div className="relative">
             <pre className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs text-[#1A1A2E] font-mono font-bold overflow-x-auto shadow-[2px_2px_0px_#1A1A2E] leading-relaxed selection:bg-[#FFEECB]">
-{`cd /opt/server-panel && git pull --ff-only origin main && npm run build && sudo rm -rf /var/www/server-panel/* && sudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel && sudo nginx -t && sudo systemctl reload nginx && echo "================================" && echo "ATUALIZAÇÃO CONCLUÍDA!" && echo "================================"`}
+{`cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`}
             </pre>
           </div>
 

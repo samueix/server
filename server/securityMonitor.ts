@@ -1,8 +1,23 @@
 import fs from 'fs';
 import { exec } from 'child_process';
 import util from 'util';
+import net from 'net';
 
 const execAsync = util.promisify(exec);
+
+export function isValidIp(rawIp: string): boolean {
+  if (!rawIp) return false;
+  const clean = rawIp.trim().replace(/^::ffff:/, '');
+  return net.isIP(clean) !== 0;
+}
+
+export interface UfwRule {
+  number: number;
+  to: string;
+  action: string;
+  from: string;
+  comment?: string;
+}
 
 export interface AttackSource {
   ip: string;
@@ -36,17 +51,29 @@ export interface SecurityStatusResponse {
   }[];
   hourlyDistribution: { hour: string; count: number }[];
   blockedIpsInUfw: string[];
+  ufwRules?: UfwRule[];
+  ufwActive?: boolean;
+  externalThreatsCount?: number;
+  lanAttemptsCount?: number;
   lastChecked: string;
 }
 
 // Armazena falhas de autenticação do próprio painel em memória
-const panelFailedAttempts: { ip: string; user: string; timestamp: Date }[] = [];
+let panelFailedAttempts: { ip: string; user: string; timestamp: Date }[] = [];
+let historyClearedAt: Date | null = null;
 
 export function recordPanelFailedLogin(ip: string, user: string) {
+  if (!isValidIp(ip)) return;
   panelFailedAttempts.unshift({ ip, user, timestamp: new Date() });
   if (panelFailedAttempts.length > 500) {
     panelFailedAttempts.length = 500;
   }
+}
+
+export function clearSecurityHistory() {
+  panelFailedAttempts = [];
+  historyClearedAt = new Date();
+  return { success: true, message: 'Histórico de tentativas e auditoria limpo com sucesso.' };
 }
 
 export function classifyIpNetwork(rawIp: string): {
@@ -102,140 +129,171 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
   let failedAttemptsLastHour = 0;
   let totalScansDetected = 0;
 
-  // 0. Obter IPs atualmente bloqueados no UFW
+  // 0. Obter regras reais e IPs bloqueados no UFW
   const blockedIpsInUfw: string[] = [];
+  const ufwRules: UfwRule[] = [];
+  let ufwActive = false;
+
   try {
     const { stdout: ufwOut } = await execAsync('sudo ufw status numbered 2>/dev/null || ufw status numbered 2>/dev/null || true');
+    ufwActive = ufwOut.toLowerCase().includes('status: active') || ufwOut.toLowerCase().includes('estado: ativo');
+
     const ufwLines = ufwOut.split('\n');
     for (const line of ufwLines) {
-      if (line.includes('DENY') || line.includes('REJECT')) {
+      const ruleMatch = line.match(/^\s*\[\s*(\d+)\]\s+(.*?)\s+(ALLOW|DENY|REJECT|LIMIT)\s+(IN|OUT)?\s+(.*?)(?:\s+#\s*(.*))?$/i);
+      if (ruleMatch) {
+        const num = parseInt(ruleMatch[1], 10);
+        const to = ruleMatch[2].trim();
+        const action = ruleMatch[3].trim().toUpperCase();
+        const from = (ruleMatch[5] || '').trim();
+        const comment = ruleMatch[6]?.trim();
+
+        ufwRules.push({
+          number: num,
+          to,
+          action,
+          from,
+          comment
+        });
+
+        if (action === 'DENY' || action === 'REJECT') {
+          const ipCandidate = from.split(/\s+/)[0];
+          if (isValidIp(ipCandidate)) {
+            blockedIpsInUfw.push(ipCandidate);
+          }
+        }
+      } else if (line.includes('DENY') || line.includes('REJECT')) {
         const ipMatch = line.match(/([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|[0-9a-fA-F:]{4,})/);
-        if (ipMatch && !['0.0.0.0/0', 'Anywhere'].includes(ipMatch[1])) {
-          blockedIpsInUfw.push(ipMatch[1]);
+        if (ipMatch && isValidIp(ipMatch[1]) && !['0.0.0.0', '127.0.0.1'].includes(ipMatch[1])) {
+          if (!blockedIpsInUfw.includes(ipMatch[1])) {
+            blockedIpsInUfw.push(ipMatch[1]);
+          }
         }
       }
     }
   } catch {}
 
-  // 1. Ingestão robusta de logs do SSH (Ubuntu 24.04: journalctl com sudo, sem sudo e /var/log/auth.log)
-  try {
-    let authLogContent = '';
-    
-    // Tenta journalctl com sudo e sem sudo
+  // 1. Ingestão robusta de logs do SSH com validação estrita de IP
+  if (!historyClearedAt || (now.getTime() - historyClearedAt.getTime() > 10000)) {
     try {
-      const { stdout } = await execAsync('sudo journalctl -u ssh -u sshd -n 350 --no-pager 2>/dev/null || journalctl -u ssh -u sshd -n 350 --no-pager 2>/dev/null || true');
-      authLogContent += stdout + '\n';
-    } catch {}
-
-    // Tenta arquivo tradicional /var/log/auth.log
-    if (fs.existsSync('/var/log/auth.log')) {
+      let authLogContent = '';
+      
       try {
-        const fileLog = fs.readFileSync('/var/log/auth.log', 'utf-8');
-        authLogContent += fileLog.slice(-100000) + '\n';
-      } catch {
-        try {
-          const { stdout: sudoCat } = await execAsync('sudo tail -n 350 /var/log/auth.log 2>/dev/null || true');
-          authLogContent += sudoCat + '\n';
-        } catch {}
-      }
-    }
+        const { stdout } = await execAsync('sudo journalctl -u ssh -u sshd -n 350 --no-pager 2>/dev/null || journalctl -u ssh -u sshd -n 350 --no-pager 2>/dev/null || true');
+        authLogContent += stdout + '\n';
+      } catch {}
 
-    // Tenta utilitário nativo Linux 'lastb' (rastreador oficial do kernel de logins com falha)
-    try {
-      const { stdout: lastbOut } = await execAsync('sudo lastb -n 100 2>/dev/null || lastb -n 100 2>/dev/null || true');
-      if (lastbOut) {
-        const lastbLines = lastbOut.split('\n');
-        for (const line of lastbLines) {
-          const parts = line.trim().split(/\s+/);
-          if (parts.length >= 3 && parts[1].includes('ssh')) {
-            const user = parts[0];
-            const ip = parts[2];
-            if (ip && (ip.includes('.') || ip.includes(':')) && !ip.startsWith('0.0.0.0')) {
-              totalFailedAttempts24h++;
-              userCounts[user] = (userCounts[user] || 0) + 1;
-              if (!ipCounts[ip]) {
-                ipCounts[ip] = {
-                  count: 0,
-                  lastAttempt: new Date().toLocaleTimeString('pt-BR'),
-                  targetUser: user,
-                  service: 'SSH (Porta 22)'
-                };
+      if (fs.existsSync('/var/log/auth.log')) {
+        try {
+          const fileLog = fs.readFileSync('/var/log/auth.log', 'utf-8');
+          authLogContent += fileLog.slice(-100000) + '\n';
+        } catch {
+          try {
+            const { stdout: sudoCat } = await execAsync('sudo tail -n 350 /var/log/auth.log 2>/dev/null || true');
+            authLogContent += sudoCat + '\n';
+          } catch {}
+        }
+      }
+
+      // Tenta lastb com validação estrita
+      try {
+        const { stdout: lastbOut } = await execAsync('sudo lastb -n 100 2>/dev/null || lastb -n 100 2>/dev/null || true');
+        if (lastbOut) {
+          const lastbLines = lastbOut.split('\n');
+          for (const line of lastbLines) {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length >= 3 && parts[1].includes('ssh')) {
+              const user = parts[0];
+              const rawIp = parts[2];
+              if (isValidIp(rawIp) && !rawIp.startsWith('0.0.0.0')) {
+                totalFailedAttempts24h++;
+                userCounts[user] = (userCounts[user] || 0) + 1;
+                if (!ipCounts[rawIp]) {
+                  ipCounts[rawIp] = {
+                    count: 0,
+                    lastAttempt: new Date().toLocaleTimeString('pt-BR'),
+                    targetUser: user,
+                    service: 'SSH (Porta 22)'
+                  };
+                }
+                ipCounts[rawIp].count++;
               }
-              ipCounts[ip].count++;
             }
           }
         }
-      }
-    } catch {}
+      } catch {}
 
-    if (authLogContent) {
-      const lines = authLogContent.split('\n');
-      for (const line of lines) {
-        if (!line.trim()) continue;
+      if (authLogContent) {
+        const lines = authLogContent.split('\n');
+        for (const line of lines) {
+          if (!line.trim()) continue;
 
-        const isFailed = 
-          line.includes('Failed password') || 
-          line.includes('Invalid user') || 
-          line.includes('authentication failure') ||
-          line.includes('Connection closed by authenticating user') ||
-          line.includes('Connection reset by authenticating user');
+          const isFailed = 
+            line.includes('Failed password') || 
+            line.includes('Invalid user') || 
+            line.includes('authentication failure') ||
+            line.includes('Connection closed by authenticating user') ||
+            line.includes('Connection reset by authenticating user');
 
-        if (isFailed) {
-          totalFailedAttempts24h++;
+          if (isFailed) {
+            // Extrair IP estritamente após "from" ou "rhost="
+            const ipMatch = line.match(/(?:from|rhost=)\s*([0-9a-fA-F:.]+)/);
+            const rawCandidate = ipMatch ? ipMatch[1].replace(/^::ffff:/, '').trim() : '';
 
-          // Extrair IP
-          const ipMatch = line.match(/(?:from|rhost=|user\s+|client\s+)\s*([0-9a-fA-F:.]+)/);
-          const rawIp = ipMatch ? ipMatch[1].replace('::ffff:', '') : '';
-          const ip = (rawIp && !rawIp.includes('port') && !rawIp.includes('ssh')) ? rawIp : 'Origem externa';
+            // Rejeita strings que não são IPs válidos (ex: "a1", "port", etc)
+            if (!isValidIp(rawCandidate)) {
+              continue;
+            }
 
-          // Extrair Usuário
-          const userMatch = line.match(/(?:for|user=|by)\s*(?:invalid user\s+)?([a-zA-Z0-9._-]+)/);
-          const user = (userMatch && userMatch[1] && userMatch[1] !== 'invalid' && userMatch[1] !== 'authenticating') 
-            ? userMatch[1] 
-            : 'root';
+            totalFailedAttempts24h++;
 
-          if (user) {
-            userCounts[user] = (userCounts[user] || 0) + 1;
-          }
+            // Extrair Usuário
+            const userMatch = line.match(/(?:for|user=)\s*(?:invalid user\s+)?([a-zA-Z0-9._-]+)/);
+            const user = (userMatch && userMatch[1] && userMatch[1] !== 'invalid' && userMatch[1] !== 'authenticating') 
+              ? userMatch[1] 
+              : 'root';
 
-          if (ip && ip !== 'Origem externa') {
-            if (!ipCounts[ip]) {
-              ipCounts[ip] = {
+            if (user) {
+              userCounts[user] = (userCounts[user] || 0) + 1;
+            }
+
+            if (!ipCounts[rawCandidate]) {
+              ipCounts[rawCandidate] = {
                 count: 0,
                 lastAttempt: new Date().toLocaleTimeString('pt-BR'),
                 targetUser: user,
                 service: 'SSH (Porta 22)'
               };
             }
-            ipCounts[ip].count++;
-          }
+            ipCounts[rawCandidate].count++;
 
-          // Horário do evento para o gráfico
-          const timeMatch = line.match(/(\d{2}):(\d{2}):\d{2}/);
-          if (timeMatch) {
-            const hourKey = `${timeMatch[1]}:00`;
-            if (hourlyBuckets[hourKey] !== undefined) {
-              hourlyBuckets[hourKey]++;
+            // Horário do evento para o gráfico
+            const timeMatch = line.match(/(\d{2}):(\d{2}):\d{2}/);
+            if (timeMatch) {
+              const hourKey = `${timeMatch[1]}:00`;
+              if (hourlyBuckets[hourKey] !== undefined) {
+                hourlyBuckets[hourKey]++;
+              }
             }
-          }
 
-          if (recentIncidents.length < 10) {
-            recentIncidents.push({
-              timestamp: timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : new Date().toLocaleTimeString('pt-BR'),
-              service: 'SSH',
-              sourceIp: ip,
-              detail: `Tentativa de força bruta contra conta "${user}"`,
-              severity: (ipCounts[ip]?.count || 0) > 6 ? 'alta' : 'media'
-            });
+            if (recentIncidents.length < 10) {
+              recentIncidents.push({
+                timestamp: timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : new Date().toLocaleTimeString('pt-BR'),
+                service: 'SSH',
+                sourceIp: rawCandidate,
+                detail: `Tentativa de acesso para o usuário "${user}"`,
+                severity: (ipCounts[rawCandidate]?.count || 0) > 6 ? 'alta' : 'media'
+              });
+            }
           }
         }
       }
+    } catch (err) {
+      console.warn('[securityMonitor] Erro ao analisar logs de SSH:', err);
     }
-  } catch (err) {
-    console.warn('[securityMonitor] Erro ao analisar logs de SSH:', err);
   }
 
-  // 2. Verificar logs de Nginx para varreduras de bots (.env, wp-login, phpmyadmin, shell)
+  // 2. Verificar logs de Nginx para varreduras de bots com validação de IP
   try {
     const nginxLogPaths = ['/var/log/nginx/access.log', '/var/log/nginx/error.log'];
     for (const logPath of nginxLogPaths) {
@@ -255,17 +313,17 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
             ) {
               totalScansDetected++;
               const ipMatch = line.match(/^([0-9a-fA-F:.]+)/);
-              if (ipMatch) {
-                const ip = ipMatch[1].replace('::ffff:', '');
-                if (!ipCounts[ip]) {
-                  ipCounts[ip] = {
+              if (ipMatch && isValidIp(ipMatch[1])) {
+                const cleanIp = ipMatch[1].replace(/^::ffff:/, '');
+                if (!ipCounts[cleanIp]) {
+                  ipCounts[cleanIp] = {
                     count: 0,
                     lastAttempt: new Date().toLocaleTimeString('pt-BR'),
                     targetUser: 'web_crawler',
                     service: 'Nginx (Porta 80/443)'
                   };
                 }
-                ipCounts[ip].count++;
+                ipCounts[cleanIp].count++;
               }
             }
           }
@@ -299,11 +357,21 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
     }
   }
 
-  // 4. Montar lista de atacantes enriquecida com IP, geolocalização e classificação
+  // 4. Montar lista de atacantes com classificação criteriosa (LAN vs WAN)
+  let externalThreatsCount = 0;
+  let lanAttemptsCount = 0;
+
   const attackSources: AttackSource[] = Object.entries(ipCounts)
+    .filter(([ip]) => isValidIp(ip))
     .map(([ip, data]) => {
       const classification = classifyIpNetwork(ip);
       const isBlockedInUfw = blockedIpsInUfw.includes(ip);
+
+      if (classification.type === 'public') {
+        externalThreatsCount += data.count;
+      } else {
+        lanAttemptsCount += data.count;
+      }
 
       return {
         ip,
@@ -321,7 +389,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
       };
     })
     .sort((a, b) => b.count - a.count)
-    .slice(0, 20);
+    .slice(0, 30);
 
   const targetAccounts = Object.entries(userCounts)
     .map(([user, attempts]) => ({ user, attempts }))
@@ -333,11 +401,13 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
     count
   }));
 
-  // Determinar Nível de Ameaça
+  // Determinar Nível de Ameaça baseado em AMEAÇAS EXTERNAS REAIS (não conexões locais)
   let threatLevel: 'NORMAL' | 'MODERADO' | 'SOB ATAQUE' = 'NORMAL';
-  if (failedAttemptsLastHour >= 15 || totalFailedAttempts24h >= 40 || attackSources.some(s => s.count >= 20)) {
+  const hasAggressiveExternalAttacker = attackSources.some(s => s.ipType === 'public' && s.count >= 15);
+
+  if (hasAggressiveExternalAttacker || externalThreatsCount >= 25 || failedAttemptsLastHour >= 15) {
     threatLevel = 'SOB ATAQUE';
-  } else if (failedAttemptsLastHour >= 4 || totalFailedAttempts24h >= 8 || totalScansDetected >= 15) {
+  } else if (externalThreatsCount >= 5 || totalScansDetected >= 15) {
     threatLevel = 'MODERADO';
   }
 
@@ -354,6 +424,36 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
     recentIncidents,
     hourlyDistribution,
     blockedIpsInUfw,
+    ufwRules,
+    ufwActive,
+    externalThreatsCount,
+    lanAttemptsCount,
     lastChecked: new Date().toLocaleTimeString('pt-BR')
   };
+}
+
+export async function blockIpInUfw(ip: string): Promise<{ success: boolean; message: string }> {
+  if (!isValidIp(ip)) {
+    throw new Error(`Endereço IP inválido para bloqueio: "${ip}"`);
+  }
+  const cleanIp = ip.trim().replace(/[^0-9a-fA-F:.]/g, '');
+  try {
+    await execAsync(`sudo ufw insert 1 deny from ${cleanIp} comment 'ServerPanel' 2>/dev/null || true`);
+    return { success: true, message: `IP ${cleanIp} inserido no topo da lista de bloqueios do UFW!` };
+  } catch (err: any) {
+    throw new Error(`Falha ao executar comando UFW: ${err.message}`);
+  }
+}
+
+export async function unblockIpInUfw(ip: string): Promise<{ success: boolean; message: string }> {
+  if (!isValidIp(ip)) {
+    throw new Error(`Endereço IP inválido: "${ip}"`);
+  }
+  const cleanIp = ip.trim().replace(/[^0-9a-fA-F:.]/g, '');
+  try {
+    await execAsync(`sudo ufw delete deny from ${cleanIp} 2>/dev/null || true`);
+    return { success: true, message: `Regra de bloqueio do IP ${cleanIp} removida do UFW com sucesso!` };
+  } catch (err: any) {
+    throw new Error(`Falha ao remover regra UFW: ${err.message}`);
+  }
 }

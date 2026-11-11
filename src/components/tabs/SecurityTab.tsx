@@ -36,6 +36,14 @@ interface AttackSource {
   flag?: string;
 }
 
+interface UfwRule {
+  number: number;
+  to: string;
+  action: string;
+  from: string;
+  comment?: string;
+}
+
 interface SecurityStatusResponse {
   threatLevel: 'NORMAL' | 'MODERADO' | 'SOB ATAQUE';
   isUnderAttack: boolean;
@@ -55,6 +63,10 @@ interface SecurityStatusResponse {
   }[];
   hourlyDistribution?: { hour: string; count: number }[];
   blockedIpsInUfw?: string[];
+  ufwRules?: UfwRule[];
+  ufwActive?: boolean;
+  externalThreatsCount?: number;
+  lanAttemptsCount?: number;
   lastChecked: string;
 }
 
@@ -62,11 +74,14 @@ export const SecurityTab: React.FC = () => {
   const [data, setData] = useState<SecurityStatusResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [clearing, setClearing] = useState<boolean>(false);
+  const [managingIp, setManagingIp] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedIp, setCopiedIp] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
-  const [filterType, setFilterType] = useState<'all' | 'public' | 'local' | 'blocked'>('all');
+  const [filterType, setFilterType] = useState<'all' | 'public' | 'local' | 'blocked' | 'ufw'>('all');
 
   const fetchSecurityStatus = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -109,6 +124,53 @@ export const SecurityTab: React.FC = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const handleClearHistory = async () => {
+    setClearing(true);
+    try {
+      const res = await fetch('/api/security/clear-history', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        }
+      });
+      const json = await res.json();
+      setActionNotice(json.message || 'Histórico limpo com sucesso!');
+      setTimeout(() => setActionNotice(null), 3500);
+      fetchSecurityStatus(true);
+    } catch (err: any) {
+      setActionNotice(`Erro ao limpar: ${err.message}`);
+      setTimeout(() => setActionNotice(null), 4000);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const handleToggleBlockUfw = async (ip: string, isBlocked: boolean) => {
+    setManagingIp(ip);
+    try {
+      const endpoint = isBlocked ? '/api/security/unblock-ip' : '/api/security/block-ip';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders()
+        },
+        body: JSON.stringify({ ip })
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Erro na operação do UFW');
+      setActionNotice(json.message || (isBlocked ? `IP ${ip} desbloqueado!` : `IP ${ip} bloqueado no UFW!`));
+      setTimeout(() => setActionNotice(null), 3500);
+      fetchSecurityStatus(true);
+    } catch (err: any) {
+      setActionNotice(`Erro: ${err.message}`);
+      setTimeout(() => setActionNotice(null), 4000);
+    } finally {
+      setManagingIp(null);
     }
   };
 
@@ -207,7 +269,7 @@ export const SecurityTab: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 self-start md:self-auto shrink-0">
+          <div className="flex items-center gap-2 self-start md:self-auto shrink-0 flex-wrap justify-end">
             <button
               onClick={() => setAutoRefresh(!autoRefresh)}
               className={`px-3 py-2 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none ${
@@ -217,6 +279,15 @@ export const SecurityTab: React.FC = () => {
             >
               <Radio className={`w-3.5 h-3.5 inline mr-1.5 ${autoRefresh ? 'animate-pulse text-[#12B76A]' : ''}`} />
               Auto {autoRefresh ? 'ON' : 'OFF'}
+            </button>
+
+            <button
+              onClick={handleClearHistory}
+              disabled={clearing}
+              className="px-3 py-2 bg-white hover:bg-[#FFEECB] text-[#1A1A2E] text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50"
+              title="Zerar e limpar histórico de falhas e auditoria"
+            >
+              {clearing ? 'Limpando...' : 'Limpar Histórico'}
             </button>
 
             <button
@@ -230,6 +301,18 @@ export const SecurityTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {actionNotice && (
+        <div className="p-3 bg-[#D1FADF] border-2 border-[#12B76A] rounded-xl text-[#12B76A] font-bold text-xs flex items-center justify-between shadow-[2px_2px_0px_#12B76A]">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-[#12B76A]" />
+            <span>{actionNotice}</span>
+          </div>
+          <button onClick={() => setActionNotice(null)} className="text-xs font-mono underline hover:text-[#1A1A2E]">
+            Fechar
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="p-4 bg-[#FEE4E2] border-2 border-[#F04438] shadow-[3px_3px_0px_#F04438] rounded-xl text-[#1A1A2E] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -250,7 +333,7 @@ export const SecurityTab: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#717188]">Tentativas de SSH (24h)</span>
+            <span className="text-xs font-bold text-[#717188]">Tentativas de SSH & Login (24h)</span>
             <Lock className="w-4 h-4 text-[#FF5A36]" />
           </div>
           <div className="flex items-baseline gap-2 mt-2">
@@ -260,7 +343,7 @@ export const SecurityTab: React.FC = () => {
             <span className="text-[11px] font-mono font-bold text-[#717188]">{data ? 'falhas' : 'sem dados'}</span>
           </div>
           <span className="text-[11px] text-[#4A4A68] mt-1 font-mono font-bold block">
-            Última hora: {data ? data.failedAttemptsLastHour : '--'} tentativas
+            Rede Local: {data?.lanAttemptsCount || 0} | Externa: {data?.externalThreatsCount || 0}
           </span>
         </div>
 
@@ -282,14 +365,14 @@ export const SecurityTab: React.FC = () => {
 
         <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#717188]">IPs Hostis Catalogados</span>
+            <span className="text-xs font-bold text-[#717188]">Ameaças Externas WAN</span>
             <Ban className="w-4 h-4 text-[#FF5A36]" />
           </div>
           <div className="flex items-baseline gap-2 mt-2">
             <span className="text-3xl font-black font-title text-[#FF5A36]">
-              {data?.attackSources ? data.attackSources.length : '--'}
+              {data ? (data.externalThreatsCount || 0) : '--'}
             </span>
-            <span className="text-[11px] font-mono font-bold text-[#717188]">{data ? 'origens' : 'sem dados'}</span>
+            <span className="text-[11px] font-mono font-bold text-[#717188]">{data ? 'ataques' : 'sem dados'}</span>
           </div>
           <span className="text-[11px] text-[#4A4A68] mt-1 font-mono font-bold block">
             {data?.blockedIpsInUfw?.length || 0} bloqueados no UFW
@@ -298,17 +381,17 @@ export const SecurityTab: React.FC = () => {
 
         <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#717188]">Status do Firewall UFW</span>
+            <span className="text-xs font-bold text-[#717188]">Firewall UFW do Ubuntu</span>
             <ShieldCheck className="w-4 h-4 text-[#12B76A]" />
           </div>
           <div className="flex items-center gap-2 mt-2">
             <span className="w-3 h-3 rounded-full bg-[#12B76A] border border-[#1A1A2E]" />
             <span className="text-sm font-black font-title text-[#1A1A2E]">
-              UFW & SSH Protegidos
+              {data?.ufwActive ? 'UFW Ativo & Protegido' : 'UFW Protegido'}
             </span>
           </div>
           <span className="text-[11px] text-[#4A4A68] mt-1 font-mono font-bold block">
-            Portas: 22, 80, 53, 5678, 8081
+            {data?.ufwRules?.length || 0} regras ativas no sistema
           </span>
         </div>
       </div>
@@ -401,12 +484,12 @@ export const SecurityTab: React.FC = () => {
             <div className="flex items-center gap-2">
               <Ban className="w-4 h-4 text-[#FF5A36]" />
               <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                Detalhamento dos IPs Hostis & Tentativas de Invasão
+                {filterType === 'ufw' ? 'Regras Ativas do Firewall UFW' : 'Detalhamento dos IPs Hostis & Tentativas de Invasão'}
               </h2>
             </div>
 
-            {/* Filtros de IPs */}
-            <div className="flex items-center gap-1.5">
+            {/* Filtros de IPs e UFW */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 onClick={() => setFilterType('all')}
                 className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
@@ -425,7 +508,17 @@ export const SecurityTab: React.FC = () => {
                     : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
                 }`}
               >
-                Públicos
+                WAN Externa
+              </button>
+              <button
+                onClick={() => setFilterType('local')}
+                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
+                  filterType === 'local'
+                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
+                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
+                }`}
+              >
+                LAN / Local
               </button>
               <button
                 onClick={() => setFilterType('blocked')}
@@ -435,97 +528,177 @@ export const SecurityTab: React.FC = () => {
                     : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
                 }`}
               >
-                Bloqueados
+                Bloqueados ({data?.blockedIpsInUfw?.length || 0})
+              </button>
+              <button
+                onClick={() => setFilterType('ufw')}
+                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
+                  filterType === 'ufw'
+                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
+                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
+                }`}
+              >
+                Regras UFW ({data?.ufwRules?.length || 0})
               </button>
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
-              <thead className="bg-[#FFF7E8]/60 border-b-2 border-[#1A1A2E] font-black text-xs">
-                <tr>
-                  <th className="py-2.5 px-3.5">Endereço IP & Tipo</th>
-                  <th className="py-2.5 px-3.5">Tentativas</th>
-                  <th className="py-2.5 px-3.5">Usuário Alvo</th>
-                  <th className="py-2.5 px-3.5">Serviço</th>
-                  <th className="py-2.5 px-3.5 text-center">Status UFW</th>
-                  <th className="py-2.5 px-3.5 text-right">Ação Rápida</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#E2DFD8]">
-                {filteredAttackers.length === 0 ? (
+            {filterType === 'ufw' ? (
+              <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
+                <thead className="bg-[#FFF7E8]/60 border-b-2 border-[#1A1A2E] font-black text-xs">
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-[#717188]">
-                      <ShieldCheck className="w-8 h-8 text-[#12B76A] mx-auto mb-2" />
-                      <span className="font-bold block text-sm text-[#1A1A2E]">Nenhum IP hostil correspondente ao filtro!</span>
-                      <span className="text-xs">O firewall e o sistema de autenticação estão estáveis.</span>
-                    </td>
+                    <th className="py-2.5 px-3.5">Nº</th>
+                    <th className="py-2.5 px-3.5">Destino / Porta</th>
+                    <th className="py-2.5 px-3.5">Ação</th>
+                    <th className="py-2.5 px-3.5">Origem (From)</th>
+                    <th className="py-2.5 px-3.5">Comentário</th>
+                    <th className="py-2.5 px-3.5 text-right">Ação</th>
                   </tr>
-                ) : (
-                  filteredAttackers.map((item, idx) => (
-                    <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
-                      <td className="py-2.5 px-3.5">
-                        <div className="flex items-center gap-2 font-bold">
-                          <span>{item.flag || '🌐'}</span>
-                          <span className="tabular-nums font-black text-[#1A1A2E]">{item.ip}</span>
-                          <button
-                            onClick={() => copyIp(item.ip)}
-                            className="p-1 hover:bg-[#FFEECB] rounded border border-transparent hover:border-[#1A1A2E] transition"
-                            title="Copiar IP"
-                          >
-                            {copiedIp === item.ip ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#717188]" />}
-                          </button>
-                        </div>
-                        <span className="text-[10px] text-[#717188] font-medium block mt-0.5">
-                          {item.ipTypeLabel || item.country || 'Acesso Externo'}
-                        </span>
-                      </td>
-
-                      <td className="py-2.5 px-3.5">
-                        <span className={`px-2 py-0.5 rounded-full font-black text-[11px] border ${
-                          item.count >= 10 
-                            ? 'bg-[#FEE4E2] text-[#F04438] border-[#F04438]' 
-                            : item.count >= 4
-                            ? 'bg-[#FEF0C7] text-[#B54708] border-[#F79009]'
-                            : 'bg-[#E0F2FE] text-[#00A6FB] border-[#00A6FB]'
-                        }`}>
-                          {item.count} tentativa(s)
-                        </span>
-                      </td>
-
-                      <td className="py-2.5 px-3.5 font-bold text-[#FF5A36]">
-                        {item.targetUser || 'root'}
-                      </td>
-
-                      <td className="py-2.5 px-3.5 text-[#717188]">
-                        {item.service}
-                      </td>
-
-                      <td className="py-2.5 px-3.5 text-center">
-                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
-                          item.status === 'bloqueado'
-                            ? 'bg-[#D1FADF] text-[#12B76A] border-[#12B76A]'
-                            : 'bg-[#FEE4E2] text-[#F04438] border-[#F04438]'
-                        }`}>
-                          {item.status === 'bloqueado' ? 'BLOQUEADO' : 'ATIVO / DETECTADO'}
-                        </span>
-                      </td>
-
-                      <td className="py-2.5 px-3.5 text-right">
-                        <button
-                          onClick={() => copyBlockCommand(item.ip)}
-                          className="flex items-center gap-1 ml-auto px-2 py-1 bg-[#1A1A2E] hover:bg-[#FF5A36] text-white rounded text-[10px] font-mono font-bold border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5"
-                          title="Copiar comando UFW para banir este IP"
-                        >
-                          <ShieldX className="w-3 h-3" />
-                          <span>{copiedCmd === item.ip ? 'Comando Copiado!' : 'Banir no UFW'}</span>
-                        </button>
+                </thead>
+                <tbody className="divide-y divide-[#E2DFD8]">
+                  {(!data?.ufwRules || data.ufwRules.length === 0) ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-[#717188]">
+                        <ShieldCheck className="w-8 h-8 text-[#12B76A] mx-auto mb-2" />
+                        <span className="font-bold block text-sm text-[#1A1A2E]">Nenhuma regra numerada no UFW.</span>
+                        <span className="text-xs">O firewall padrão está ativo aplicando a política padrão do sistema.</span>
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    data.ufwRules.map((rule, idx) => (
+                      <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
+                        <td className="py-2.5 px-3.5 font-bold tabular-nums">[{rule.number}]</td>
+                        <td className="py-2.5 px-3.5 font-bold">{rule.to}</td>
+                        <td className="py-2.5 px-3.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            rule.action === 'DENY' || rule.action === 'REJECT'
+                              ? 'bg-[#FEE4E2] text-[#F04438] border-[#F04438]'
+                              : 'bg-[#D1FADF] text-[#12B76A] border-[#12B76A]'
+                          }`}>
+                            {rule.action}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3.5 font-bold tabular-nums">{rule.from}</td>
+                        <td className="py-2.5 px-3.5 text-[#717188]">{rule.comment || '--'}</td>
+                        <td className="py-2.5 px-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleBlockUfw(rule.from.split(/\s+/)[0], true)}
+                            className="px-2 py-1 bg-[#1A1A2E] hover:bg-[#F04438] text-white rounded text-[10px] font-bold border border-[#1A1A2E] transition"
+                            title="Remover regra do UFW"
+                          >
+                            Excluir Regra
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
+                <thead className="bg-[#FFF7E8]/60 border-b-2 border-[#1A1A2E] font-black text-xs">
+                  <tr>
+                    <th className="py-2.5 px-3.5">Endereço IP & Tipo</th>
+                    <th className="py-2.5 px-3.5">Tentativas</th>
+                    <th className="py-2.5 px-3.5">Usuário Alvo</th>
+                    <th className="py-2.5 px-3.5">Serviço</th>
+                    <th className="py-2.5 px-3.5 text-center">Status UFW</th>
+                    <th className="py-2.5 px-3.5 text-right">Ação Rápida</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E2DFD8]">
+                  {filteredAttackers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center text-[#717188]">
+                        <ShieldCheck className="w-8 h-8 text-[#12B76A] mx-auto mb-2" />
+                        <span className="font-bold block text-sm text-[#1A1A2E]">Nenhum IP hostil correspondente ao filtro!</span>
+                        <span className="text-xs">O firewall e o sistema de autenticação estão estáveis.</span>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAttackers.map((item, idx) => {
+                      const isBlocked = item.status === 'bloqueado';
+                      return (
+                        <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
+                          <td className="py-2.5 px-3.5">
+                            <div className="flex items-center gap-2 font-bold">
+                              <span>{item.flag || '🌐'}</span>
+                              <span className="tabular-nums font-black text-[#1A1A2E]">{item.ip}</span>
+                              <button
+                                onClick={() => copyIp(item.ip)}
+                                className="p-1 hover:bg-[#FFEECB] rounded border border-transparent hover:border-[#1A1A2E] transition"
+                                title="Copiar IP"
+                              >
+                                {copiedIp === item.ip ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#717188]" />}
+                              </button>
+                            </div>
+                            <span className="text-[10px] text-[#717188] font-medium block mt-0.5">
+                              {item.ipTypeLabel || item.country || 'Acesso Externo'}
+                            </span>
+                          </td>
+
+                          <td className="py-2.5 px-3.5">
+                            <span className={`px-2 py-0.5 rounded-full font-black text-[11px] border ${
+                              item.count >= 10 
+                                ? 'bg-[#FEE4E2] text-[#F04438] border-[#F04438]' 
+                                : item.count >= 4
+                                ? 'bg-[#FEF0C7] text-[#B54708] border-[#F79009]'
+                                : 'bg-[#E0F2FE] text-[#00A6FB] border-[#00A6FB]'
+                            }`}>
+                              {item.count} tentativa(s)
+                            </span>
+                          </td>
+
+                          <td className="py-2.5 px-3.5 font-bold text-[#FF5A36]">
+                            {item.targetUser || 'root'}
+                          </td>
+
+                          <td className="py-2.5 px-3.5 text-[#717188]">
+                            {item.service}
+                          </td>
+
+                          <td className="py-2.5 px-3.5 text-center">
+                            <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                              isBlocked
+                                ? 'bg-[#D1FADF] text-[#12B76A] border-[#12B76A]'
+                                : 'bg-[#FEE4E2] text-[#F04438] border-[#F04438]'
+                            }`}>
+                              {isBlocked ? 'BLOQUEADO' : 'ATIVO / DETECTADO'}
+                            </span>
+                          </td>
+
+                          <td className="py-2.5 px-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                disabled={managingIp === item.ip}
+                                onClick={() => handleToggleBlockUfw(item.ip, isBlocked)}
+                                className={`px-2.5 py-1 text-white rounded text-[10px] font-mono font-bold border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50 ${
+                                  isBlocked ? 'bg-[#12B76A] hover:bg-[#0E9355]' : 'bg-[#F04438] hover:bg-[#D92D20]'
+                                }`}
+                                title={isBlocked ? 'Desbloquear este IP no firewall UFW' : 'Banir este IP imediatamente no firewall UFW'}
+                              >
+                                {managingIp === item.ip ? 'Aplicando...' : isBlocked ? 'Desbloquear' : 'Banir no UFW'}
+                              </button>
+
+                              <button
+                                onClick={() => copyBlockCommand(item.ip)}
+                                className="p-1 hover:bg-[#FFEECB] rounded border border-[#1A1A2E] transition"
+                                title="Copiar comando UFW"
+                              >
+                                {copiedCmd === item.ip ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#1A1A2E]" />}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 

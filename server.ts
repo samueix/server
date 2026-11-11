@@ -16,6 +16,7 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import net from 'net';
+import { execFile } from 'child_process';
 import { 
   fetchAdGuardStatus, 
   fetchAdGuardStats, 
@@ -45,7 +46,13 @@ import {
 } from './server/antigravity.js';
 import { runShellCommand } from './server/terminalRunner.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
-import { getSecurityAttackStatus, recordPanelFailedLogin } from './server/securityMonitor.js';
+import { 
+  getSecurityAttackStatus, 
+  recordPanelFailedLogin, 
+  clearSecurityHistory, 
+  blockIpInUfw, 
+  unblockIpInUfw 
+} from './server/securityMonitor.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
   setN8nConfig as setN8nConfigFallback,
@@ -597,7 +604,26 @@ export function createApp() {
     });
   };
 
-  // Endpoint de Ping do servidor para a internet (sem comandos externos e com resposta instantânea)
+  const measureIcmpPing = async (host: string): Promise<number | null> => {
+    return new Promise((resolve) => {
+      if (!/^[a-zA-Z0-9.-]+$/.test(host)) {
+        return resolve(null);
+      }
+      execFile('ping', ['-c', '1', '-W', '1', host], { timeout: 1200 }, (err, stdout) => {
+        if (err || !stdout) {
+          return resolve(null);
+        }
+        const match = stdout.match(/time[=<]([0-9.]+)\s*ms/i);
+        if (match && match[1]) {
+          const val = parseFloat(match[1]);
+          return resolve(Math.round(val));
+        }
+        resolve(null);
+      });
+    });
+  };
+
+  // Endpoint de Ping do servidor para a internet (com resolução híbrida TCP/ICMP/HTTP de alta confiabilidade)
   app.get('/api/ping', async (req, res) => {
     applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -620,7 +646,20 @@ export function createApp() {
           const timeout = t.type === 'local' ? 350 : 800;
           let pingMs = await measureTcpPing(t.host, t.port, timeout);
 
-          // Fallback HTTP instantâneo se porta 53 TCP for bloqueada por firewall/operadora
+          // Se for gateway local e porta 80 falhou, tenta porta 53 ou 443 antes do ICMP
+          if (pingMs === null && t.type === 'local') {
+            pingMs = await measureTcpPing(t.host, 53, 300);
+            if (pingMs === null) {
+              pingMs = await measureTcpPing(t.host, 443, 300);
+            }
+          }
+
+          // Fallback via ICMP ping nativo do sistema
+          if (pingMs === null) {
+            pingMs = await measureIcmpPing(t.host);
+          }
+
+          // Fallback HTTP instantâneo se porta 53 TCP e ICMP forem bloqueados
           if (pingMs === null && t.httpProbe) {
             try {
               const hStart = Date.now();
@@ -891,6 +930,40 @@ export function createApp() {
       return res.json(status);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Limpar histórico de auditoria e falhas
+  app.post('/api/security/clear-history', requireAdminAuth, async (req, res) => {
+    try {
+      const result = clearSecurityHistory();
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Bloquear IP no UFW via interface
+  app.post('/api/security/block-ip', requireAdminAuth, async (req, res) => {
+    try {
+      const { ip } = req.body || {};
+      if (!ip) return res.status(400).json({ error: 'IP não fornecido.' });
+      const result = await blockIpInUfw(ip);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Desbloquear IP no UFW via interface
+  app.post('/api/security/unblock-ip', requireAdminAuth, async (req, res) => {
+    try {
+      const { ip } = req.body || {};
+      if (!ip) return res.status(400).json({ error: 'IP não fornecido.' });
+      const result = await unblockIpInUfw(ip);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
     }
   });
 

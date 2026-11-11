@@ -33,28 +33,28 @@ interface KnownServiceMeta {
 const KNOWN_SERVICES_META: KnownServiceMeta[] = [
   { 
     key: 'ssh', 
-    aliases: ['ssh', 'sshd', 'openssh-server'], 
+    aliases: ['ssh', 'sshd', 'openssh-server', 'openssh server', 'openssh'], 
     name: 'OpenSSH Server', 
     desc: 'Serviço de acesso remoto seguro e criptografado SSH', 
     port: 22 
   },
   { 
     key: 'adguard', 
-    aliases: ['adguardhome', 'adguard-home', 'adguard_home'], 
+    aliases: ['adguardhome', 'adguard-home', 'adguard_home', 'adguard home', 'adguard'], 
     name: 'AdGuard Home', 
     desc: 'Servidor DNS com bloqueio de anúncios e rastreadores', 
     port: '53, 8081' 
   },
   { 
     key: 'server-panel', 
-    aliases: ['server-panel', 'server-monitor', 'serverpanel', 'servermonitor'], 
+    aliases: ['server-panel', 'server-monitor', 'serverpanel', 'servermonitor', 'server panel'], 
     name: 'Server Panel', 
-    desc: 'Daemon FastAPI de monitoramento e telemetria remota', 
-    port: 8000 
+    desc: 'Daemon de telemetria, gerenciamento de arquivos e monitoramento do Ubuntu', 
+    port: 3000 
   },
   { 
     key: 'nginx', 
-    aliases: ['nginx'], 
+    aliases: ['nginx', 'nginx web server', 'nginx-server'], 
     name: 'Nginx Web Server', 
     desc: 'Servidor web reverso HTTP e roteador de rotas /api e /adguard-api', 
     port: '80, 443' 
@@ -69,53 +69,53 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
   },
   { 
     key: 'cron', 
-    aliases: ['cron', 'crond'], 
+    aliases: ['cron', 'crond', 'cron daemon'], 
     name: 'Cron Daemon', 
     desc: 'Agendador de tarefas periódicas automatizadas do sistema', 
     port: undefined 
   },
   { 
     key: 'systemd-resolved', 
-    aliases: ['systemd-resolved', 'resolved'], 
+    aliases: ['systemd-resolved', 'resolved', 'systemd resolved'], 
     name: 'systemd-resolved', 
     desc: 'Resolvedor DNS local e gerenciador de rede do Ubuntu', 
     port: 53 
   },
   { 
     key: 'ufw', 
-    aliases: ['ufw'], 
+    aliases: ['ufw', 'ufw firewall'], 
     name: 'UFW Firewall', 
     desc: 'Firewall descomplicado do Ubuntu Server', 
     port: undefined 
   },
   { 
     key: 'docker', 
-    aliases: ['docker', 'dockerd'], 
+    aliases: ['docker', 'dockerd', 'docker engine'], 
     name: 'Docker Engine', 
     desc: 'Mecanismo de contêineres e microsserviços', 
     port: undefined 
   },
   { 
     key: 'fail2ban', 
-    aliases: ['fail2ban'], 
+    aliases: ['fail2ban', 'fail2ban-server', 'fail2ban security'], 
     name: 'Fail2Ban Security', 
     desc: 'Proteção contra tentativas de ataque de força bruta', 
     port: undefined 
   },
   { 
     key: 'tailscaled', 
-    aliases: ['tailscaled', 'tailscale'], 
+    aliases: ['tailscaled', 'tailscale', 'tailscale vpn'], 
     name: 'Tailscale VPN', 
     desc: 'Rede privada mesh VPN segura', 
     port: undefined 
   },
   { 
     key: 'n8n', 
-    aliases: ['n8n'], 
+    aliases: ['n8n', 'n8n workflow automation', 'n8n-server'], 
     name: 'n8n Workflow Automation', 
-    desc: 'Automação de fluxos e integrações (Instalação futura planejada)', 
+    desc: 'Automação de fluxos e integrações de processos', 
     port: 5678, 
-    isFuture: true 
+    isFuture: false 
   }
 ];
 
@@ -199,44 +199,71 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
 
   const services = localServices.length > 0 ? localServices : initialServices;
 
-  const handleCopyCommand = (serviceName: string, action: 'status' | 'restart') => {
-    const clean = serviceName.endsWith('.service') ? serviceName : `${serviceName}.service`;
+  const handleCopyCommand = (serviceName: string, action: 'status' | 'restart', canonicalName?: string) => {
+    // Mapeamento para o nome exato da unit systemd
+    const unitMap: Record<string, string> = {
+      'OpenSSH Server': 'ssh',
+      'AdGuard Home': 'AdGuardHome',
+      'Server Panel': 'server-panel',
+      'Nginx Web Server': 'nginx',
+      'Docker Engine': 'docker',
+      'Fail2Ban Security': 'fail2ban',
+      'Tailscale VPN': 'tailscaled',
+      'n8n Workflow Automation': 'n8n',
+      'UFW Firewall': 'ufw',
+      'Cron Daemon': 'cron',
+      'systemd-resolved': 'systemd-resolved'
+    };
+
+    const targetUnit = canonicalName || unitMap[serviceName] || serviceName;
+    const clean = targetUnit.endsWith('.service') ? targetUnit : `${targetUnit}.service`;
     const cmd = `sudo systemctl ${action} ${clean}`;
     navigator.clipboard.writeText(cmd);
     setCopiedId(`${serviceName}-${action}`);
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Mescla dados reais do sistema com os metadados sem duplicatas
+  // Normaliza string para chave alfanumérica única (ex: 'OpenSSH Server' -> 'opensshserver')
+  const normalizeKey = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  // Mescla dados reais do sistema com os metadados sem falsos negativos
   const enrichedServices = useMemo(() => {
     const map = new Map<string, ServiceItem>();
 
-    // Indexa os serviços que vieram do backend
+    // Indexa os serviços que vieram do backend por múltiplos identificadores
     services.forEach(s => {
-      const clean = s.nome.toLowerCase().replace('.service', '').trim();
-      map.set(clean, s);
+      const raw = s.nome.toLowerCase().replace('.service', '').trim();
+      const norm = normalizeKey(raw);
+      map.set(raw, s);
+      map.set(norm, s);
+
+      if ((s as any).canonical) {
+        const can = String((s as any).canonical).toLowerCase();
+        map.set(can, s);
+        map.set(normalizeKey(can), s);
+      }
     });
 
-    const result: Array<ServiceItem & { desc: string; port?: string | number; isFuture?: boolean; isExternal?: boolean; installed: boolean }> = [];
-    const seenNames = new Set<string>();
+    const result: Array<ServiceItem & { desc: string; port?: string | number; isFuture?: boolean; isExternal?: boolean; installed: boolean; canonicalUnit?: string }> = [];
+    const matchedServiceNames = new Set<string>();
 
     // Prioriza os serviços canônicos
     KNOWN_SERVICES_META.forEach(meta => {
-      let found: ServiceItem | undefined = map.get(meta.key);
+      let found: ServiceItem | undefined = map.get(meta.key.toLowerCase()) || map.get(normalizeKey(meta.key));
+
       if (!found) {
         for (const alias of meta.aliases) {
-          if (map.has(alias)) {
-            found = map.get(alias);
+          const match = map.get(alias.toLowerCase()) || map.get(normalizeKey(alias));
+          if (match) {
+            found = match;
             break;
           }
         }
       }
 
-      // Remove todos os aliases do mapa para não duplicar no loop restante
-      meta.aliases.forEach(alias => map.delete(alias));
-      map.delete(meta.key);
-
-      seenNames.add(meta.name.toLowerCase());
+      if (!found) {
+        found = map.get(meta.name.toLowerCase()) || map.get(normalizeKey(meta.name));
+      }
 
       if (meta.isExternal) {
         // Serviço externo independente (api.macvendors.com)
@@ -257,28 +284,34 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
           uptime: 'Cloud',
           isFuture: false,
           isExternal: true,
-          installed: true
+          installed: true,
+          canonicalUnit: meta.key
         });
       } else if (found) {
+        matchedServiceNames.add(found.nome.toLowerCase());
+        matchedServiceNames.add(normalizeKey(found.nome));
         const isOnline = found.status === 'ONLINE' || found.ativo === true;
         result.push({
           ...found,
           nome: meta.name,
+          status: isOnline ? 'ONLINE' : found.status || 'OFFLINE',
+          ativo: isOnline,
           desc: meta.desc,
           port: found.porta || meta.port,
-          isFuture: meta.isFuture,
+          isFuture: false,
           isExternal: false,
-          installed: isOnline || (found as any).installed !== false
+          installed: isOnline || (found as any).installed !== false,
+          canonicalUnit: (found as any).canonical || meta.key
         });
       } else {
-        // Serviço planejado (ex: n8n) ou não instalado no host
+        // Serviço não encontrado nos processos ativos ou unit systemd
         result.push({
           nome: meta.name,
           status: 'OFFLINE',
           ativo: false,
           habilitado_boot: false,
           pid: null,
-          tempo_ativo: meta.isFuture ? 'Planejado' : 'Não instalado',
+          tempo_ativo: 'Não instalado',
           ultima_inicializacao: 'N/D',
           descricao: meta.desc,
           porta: meta.port,
@@ -286,25 +319,28 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
           port: meta.port,
           cpu: 'N/D',
           memory: 'N/D',
-          uptime: meta.isFuture ? 'Futuro' : 'Não instalado',
-          isFuture: meta.isFuture,
+          uptime: 'Inativo',
+          isFuture: false,
           isExternal: false,
-          installed: false
+          installed: false,
+          canonicalUnit: meta.key
         });
       }
     });
 
     // Adiciona outros serviços retornados pelo backend, sem duplicatas
-    map.forEach((s) => {
+    services.forEach((s) => {
       const cleanName = s.nome.replace('.service', '').trim();
-      if (!seenNames.has(cleanName.toLowerCase())) {
-        seenNames.add(cleanName.toLowerCase());
+      if (!matchedServiceNames.has(cleanName.toLowerCase()) && !matchedServiceNames.has(normalizeKey(cleanName))) {
+        matchedServiceNames.add(cleanName.toLowerCase());
+        matchedServiceNames.add(normalizeKey(cleanName));
         result.push({
           ...s,
           nome: cleanName,
           desc: s.descricao || `Serviço do sistema ${cleanName}`,
           port: s.porta,
-          installed: s.status === 'ONLINE' || (s as any).installed !== false
+          installed: s.status === 'ONLINE' || (s as any).installed !== false,
+          canonicalUnit: (s as any).canonical || cleanName
         });
       }
     });
@@ -544,9 +580,9 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
                     <div className="flex items-center gap-1 pl-2 border-l border-[#1A1A2E]/20">
                       <button
                         type="button"
-                        onClick={() => handleCopyCommand(svc.nome, 'status')}
+                        onClick={() => handleCopyCommand(svc.nome, 'status', (svc as any).canonicalUnit)}
                         className="px-2 py-1 rounded bg-[#FFF7E8] hover:bg-[#FFC857]/50 border border-[#1A1A2E] text-[10px] font-mono font-bold flex items-center gap-1 shadow-[1px_1px_0px_#1A1A2E] transition active:translate-x-[0.5px]"
-                        title={`Copiar: sudo systemctl status ${svc.nome}`}
+                        title={`Copiar: sudo systemctl status ${(svc as any).canonicalUnit || svc.nome}`}
                         aria-label={`Copiar comando systemctl status para ${svc.nome}`}
                       >
                         {copiedId === `${svc.nome}-status` ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#4A4A68]" />}
@@ -554,9 +590,9 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleCopyCommand(svc.nome, 'restart')}
+                        onClick={() => handleCopyCommand(svc.nome, 'restart', (svc as any).canonicalUnit)}
                         className="px-2 py-1 rounded bg-[#FFF7E8] hover:bg-[#FFC857]/50 border border-[#1A1A2E] text-[10px] font-mono font-bold flex items-center gap-1 shadow-[1px_1px_0px_#1A1A2E] transition active:translate-x-[0.5px]"
-                        title={`Copiar: sudo systemctl restart ${svc.nome}`}
+                        title={`Copiar: sudo systemctl restart ${(svc as any).canonicalUnit || svc.nome}`}
                         aria-label={`Copiar comando systemctl restart para ${svc.nome}`}
                       >
                         {copiedId === `${svc.nome}-restart` ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#4A4A68]" />}

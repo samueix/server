@@ -46,16 +46,15 @@ export const PingTab: React.FC = () => {
       setErrorMsg(null);
       setLastCheck(new Date().toLocaleTimeString('pt-BR'));
 
-      if (res.average_ms !== null) {
-        setHistory(prev => {
-          const point: PingHistoryItem = {
-            time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            avgMs: res.average_ms!
-          };
-          const next = [...prev, point];
-          return next.slice(-25); // Mantém os últimos 25 registros
-        });
-      }
+      const sampleMs = res.average_ms !== null && res.average_ms !== undefined ? res.average_ms : 0;
+      setHistory(prev => {
+        const point: PingHistoryItem = {
+          time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          avgMs: sampleMs
+        };
+        const next = [...prev, point];
+        return next.slice(-25); // Mantém os últimos 25 registros
+      });
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         setErrorMsg(err.message || 'Falha ao medir latência do servidor.');
@@ -247,129 +246,134 @@ export const PingTab: React.FC = () => {
         <div className="lg:col-span-7 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5 flex flex-col justify-between">
           <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E]/10">
             <span className="text-sm font-bold font-title text-[#1A1A2E]">Pontos de verificação</span>
-            <span className="text-xs font-mono font-bold text-[#4A4A68] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E]">3 alvos</span>
-          </div>
-
-          <div className="divide-y-2 divide-[#1A1A2E]/10 my-auto">
-            {/* Cloudflare */}
-            {(() => {
-              const cf = data?.targets?.find(t => t.id === 'cloudflare');
-              const badge = getQualityBadge(cf?.quality || 'FALHA');
-              return (
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-[#1A1A2E] font-sans">Cloudflare DNS</div>
-                    <div className="text-[11px] font-mono font-semibold text-[#4A4A68]">1.1.1.1 (Anycast)</div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-mono font-bold text-[#1A1A2E] tabular-nums">
-                      {cf?.pingMs !== null && cf?.pingMs !== undefined ? `${cf.pingMs} ms` : '--'}
-                    </span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold shadow-[1.5px_1.5px_0px_#1A1A2E] ${badge.bg}`}>
-                      <span className={`w-2 h-2 rounded-full border border-[#1A1A2E] ${badge.dot}`} />
-                      {cf?.quality || 'AGUARDANDO'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Google */}
-            {(() => {
-              const gg = data?.targets?.find(t => t.id === 'google');
-              const badge = getQualityBadge(gg?.quality || 'FALHA');
-              return (
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-[#1A1A2E] font-sans">Google DNS</div>
-                    <div className="text-[11px] font-mono font-semibold text-[#4A4A68]">8.8.8.8 (Anycast)</div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-mono font-bold text-[#1A1A2E] tabular-nums">
-                      {gg?.pingMs !== null && gg?.pingMs !== undefined ? `${gg.pingMs} ms` : '--'}
-                    </span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold shadow-[1.5px_1.5px_0px_#1A1A2E] ${badge.bg}`}>
-                      <span className={`w-2 h-2 rounded-full border border-[#1A1A2E] ${badge.dot}`} />
-                      {gg?.quality || 'AGUARDANDO'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Gateway */}
-            {(() => {
-              const gw = data?.targets?.find(t => t.id === 'gateway');
-              const badge = getQualityBadge(gw?.quality || 'FALHA');
-              return (
-                <div className="py-3 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-[#1A1A2E] font-sans">Roteador local (Gateway)</div>
-                    <div className="text-[11px] font-mono font-semibold text-[#4A4A68]">192.168.100.1 (LAN)</div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm font-mono font-bold text-[#1A1A2E] tabular-nums">
-                      {gw?.pingMs !== null && gw?.pingMs !== undefined ? `${gw.pingMs} ms` : '--'}
-                    </span>
-                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold shadow-[1.5px_1.5px_0px_#1A1A2E] ${badge.bg}`}>
-                      <span className={`w-2 h-2 rounded-full border border-[#1A1A2E] ${badge.dot}`} />
-                      {gw?.quality || 'AGUARDANDO'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      </div>
-
-      {/* Histórico Temporal de Ping */}
-      {history.length > 1 && (
-        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5 space-y-3.5">
-          <div className="flex items-center justify-between pb-2 border-b-2 border-[#1A1A2E]/10">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-center">
-                <Activity className="w-3.5 h-3.5 text-[#00A6FB]" />
-              </div>
-              <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Oscilação de latência em tempo real</h3>
-            </div>
-            <span className="text-xs font-mono font-bold text-[#4A4A68] bg-[#FFF7E8] px-3 py-1 rounded-lg border-2 border-[#1A1A2E]">
-              Mín: <strong className="text-[#12B76A] tabular-nums">{Math.min(...history.map(h => h.avgMs))}ms</strong> | Máx: <strong className="text-[#FF5A36] ml-1 tabular-nums">{Math.max(...history.map(h => h.avgMs))}ms</strong>
+            <span className="text-xs font-mono font-bold text-[#4A4A68] bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E] tabular-nums">
+              {data?.targets?.length || 5} alvos
             </span>
           </div>
 
-          {/* Gráfico de barras simples */}
-          <div className="h-28 flex items-end gap-1.5 pt-4 border-b-2 border-[#1A1A2E] bg-[#FFF7E8]/50 p-2 rounded-t-lg">
-            {history.map((h, i) => {
-              const maxH = Math.max(...history.map(x => x.avgMs), 50);
-              const heightPct = Math.max(10, Math.min(100, (h.avgMs / maxH) * 100));
-              const isLatest = i === history.length - 1;
+          <div className="divide-y-2 divide-[#1A1A2E]/10 my-auto">
+            {(data?.targets && data.targets.length > 0 ? data.targets : [
+              { id: 'cloudflare', name: 'Cloudflare DNS', host: '1.1.1.1', port: 53, type: 'external' as const, pingMs: null, status: 'OFFLINE' as const, quality: 'FALHA' },
+              { id: 'google', name: 'Google Public DNS', host: '8.8.8.8', port: 53, type: 'external' as const, pingMs: null, status: 'OFFLINE' as const, quality: 'FALHA' },
+              { id: 'quad9', name: 'Quad9 DNS Seguro', host: '9.9.9.9', port: 53, type: 'external' as const, pingMs: null, status: 'OFFLINE' as const, quality: 'FALHA' },
+              { id: 'nicbr', name: 'NIC.br / PTT Brasil', host: '200.160.2.3', port: 53, type: 'external' as const, pingMs: null, status: 'OFFLINE' as const, quality: 'FALHA' },
+              { id: 'gateway', name: 'Gateway Local (Roteador)', host: '192.168.100.1', port: 80, type: 'local' as const, pingMs: null, status: 'OFFLINE' as const, quality: 'FALHA' }
+            ]).map((t) => {
+              const badge = getQualityBadge(t.quality || 'FALHA');
               return (
-                <div 
-                  key={i} 
-                  className="flex-1 flex flex-col items-center group relative h-full justify-end"
-                >
-                  <div
-                    style={{ height: `${heightPct}%` }}
-                    className={`w-full rounded-t-sm border border-[#1A1A2E] transition-all duration-300 ${
-                      isLatest ? 'bg-[#FF5A36]' : 'bg-[#00A6FB] group-hover:bg-[#FF5A36]'
-                    }`}
-                  />
-                  {/* Tooltip on hover */}
-                  <div className="absolute -top-8 hidden group-hover:flex px-2 py-1 rounded-md bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-[11px] font-mono font-bold text-[#1A1A2E] whitespace-nowrap z-10 pointer-events-none tabular-nums">
-                    {h.avgMs}ms ({h.time})
+                <div key={t.id} className="py-2.5 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-[#1A1A2E] font-sans flex items-center gap-1.5">
+                      <span>{t.name}</span>
+                      {t.type === 'local' && (
+                        <span className="text-[10px] bg-[#D1FADF] text-[#12B76A] px-1.5 py-0.2 rounded border border-[#1A1A2E] font-mono font-bold">LAN</span>
+                      )}
+                    </div>
+                    <div className="text-[11px] font-mono font-semibold text-[#4A4A68]">{t.host}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-mono font-bold text-[#1A1A2E] tabular-nums">
+                      {t.pingMs !== null && t.pingMs !== undefined ? `${t.pingMs} ms` : (t.status === 'OFFLINE' ? 'Inacessível' : '--')}
+                    </span>
+                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold shadow-[1.5px_1.5px_0px_#1A1A2E] ${badge.bg}`}>
+                      <span className={`w-2 h-2 rounded-full border border-[#1A1A2E] ${badge.dot}`} />
+                      {t.quality || (t.status === 'OFFLINE' ? 'FALHA' : 'AGUARDANDO')}
+                    </span>
                   </div>
                 </div>
               );
             })}
           </div>
+        </div>
+      </div>
 
-          <div className="flex items-center justify-between text-xs font-mono font-medium text-[#4A4A68] pt-1">
-            <span>{history[0]?.time}</span>
-            <span className="font-bold text-[#1A1A2E]">Agora ({history[history.length - 1]?.time})</span>
+      {/* Histórico Temporal de Ping com Gráfico SVG */}
+      <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5 space-y-3.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2 border-b-2 border-[#1A1A2E]/10 gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-center">
+              <Activity className="w-3.5 h-3.5 text-[#00A6FB]" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Oscilação de latência em tempo real</h3>
+              <span className="text-[10px] text-[#4A4A68] font-mono">Últimas {history.length} amostras contínuas</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="bg-[#FFF7E8] px-2.5 py-1 rounded-lg border-2 border-[#1A1A2E]">
+              Mín: <strong className="text-[#12B76A] tabular-nums">{pingStats.min} ms</strong>
+            </span>
+            <span className="bg-[#FFF7E8] px-2.5 py-1 rounded-lg border-2 border-[#1A1A2E]">
+              Média: <strong className="text-[#00A6FB] tabular-nums">{pingStats.avg} ms</strong>
+            </span>
+            <span className="bg-[#FFF7E8] px-2.5 py-1 rounded-lg border-2 border-[#1A1A2E]">
+              Máx: <strong className="text-[#FF5A36] tabular-nums">{pingStats.max} ms</strong>
+            </span>
           </div>
         </div>
-      )}
+
+        {/* Gráfico SVG de Linha e Área */}
+        <div className="relative w-full h-32 rounded-lg bg-[#FFF7E8]/60 border-2 border-[#1A1A2E] overflow-hidden p-2">
+          {history.length < 2 ? (
+            <div className="w-full h-full flex items-center justify-center text-xs font-mono text-[#4A4A68]">
+              Coletando telemetria inicial... ({history.length}/2 amostras)
+            </div>
+          ) : (
+            (() => {
+              const svgW = 600;
+              const svgH = 100;
+              const padY = 12;
+              const effH = svgH - padY * 2;
+              const maxVal = Math.max(50, ...history.map(h => h.avgMs), 1);
+              const minVal = 0;
+              const range = maxVal - minVal;
+
+              const points = history.map((h, i) => {
+                const x = (i / (history.length - 1)) * svgW;
+                const normalized = Math.max(0, Math.min(1, (h.avgMs - minVal) / range));
+                const y = svgH - padY - normalized * effH;
+                return { x, y, ms: h.avgMs, time: h.time };
+              });
+
+              const lineD = points.reduce((acc, p, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`, '');
+              const areaD = `${lineD} L ${svgW} ${svgH} L 0 ${svgH} Z`;
+
+              return (
+                <svg viewBox={`0 0 ${svgW} ${svgH}`} className="w-full h-full overflow-visible" preserveAspectRatio="none">
+                  <line x1="0" y1={svgH * 0.25} x2={svgW} y2={svgH * 0.25} stroke="#1A1A2E" strokeOpacity="0.1" strokeDasharray="3 3" />
+                  <line x1="0" y1={svgH * 0.50} x2={svgW} y2={svgH * 0.50} stroke="#1A1A2E" strokeOpacity="0.1" strokeDasharray="3 3" />
+                  <line x1="0" y1={svgH * 0.75} x2={svgW} y2={svgH * 0.75} stroke="#1A1A2E" strokeOpacity="0.1" strokeDasharray="3 3" />
+
+                  <path d={areaD} fill="#00A6FB" fillOpacity="0.18" />
+                  <path d={lineD} fill="none" stroke="#00A6FB" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+
+                  {points.map((p, idx) => {
+                    const isLatest = idx === points.length - 1;
+                    const isFailed = p.ms <= 0;
+                    return (
+                      <g key={idx}>
+                        <circle
+                          cx={p.x}
+                          cy={p.y}
+                          r={isLatest ? 4.5 : 3}
+                          fill={isFailed ? '#F04438' : isLatest ? '#FF5A36' : '#00A6FB'}
+                          stroke="#1A1A2E"
+                          strokeWidth="1.5"
+                        />
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()
+          )}
+        </div>
+
+        <div className="flex items-center justify-between text-xs font-mono font-medium text-[#4A4A68] pt-1">
+          <span>{history[0]?.time || '--:--'}</span>
+          <span className="font-bold text-[#1A1A2E]">Tempo real ({history[history.length - 1]?.time || '--:--'})</span>
+        </div>
+      </div>
 
       {/* Tabela Detalhada de Destinos de Ping */}
       <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5">

@@ -132,6 +132,11 @@ export const FilesTab: React.FC = () => {
       setEditedText(contentRes.content || '');
       setIsEditing(false);
     } catch (err: any) {
+      if (err.message && (err.message.includes('diretório') || err.message.includes('pasta'))) {
+        setSelectedFile(null);
+        loadFolder(item.path);
+        return;
+      }
       setFileError(err.message || 'Não foi possível ler o arquivo.');
     } finally {
       setReadingFile(false);

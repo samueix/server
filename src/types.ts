@@ -139,6 +139,10 @@ export interface ApiMemoria {
   disponivel_gb: number;
   livre_gb: number;
   uso_percentual: number;
+  buffers_cache_gb?: number;
+  swap_total_gb?: number;
+  swap_usada_gb?: number;
+  swap_percentual?: number;
 }
 
 export interface ApiDisco {

@@ -397,14 +397,17 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
           0
         </div>
 
-        {/* Tooltip flutuante */}
-        {hoverIndex !== null && hoverTimeInfo && mousePos && (
+        {/* Tooltip flutuante perfeitamente sincronizado com o ponto e linha vertical */}
+        {hoverIndex !== null && hoverTimeInfo && (
           <div
-            className="absolute pointer-events-none z-20"
+            className="absolute pointer-events-none z-20 top-2 transition-all duration-75"
             style={{
-              left: `${Math.min(Math.max(mousePos.x, 110), (containerRef.current?.clientWidth || 600) - 110)}px`,
-              top: '8px',
-              transform: 'translateX(-50%)'
+              left: `${hoverXPercent}%`,
+              transform: hoverXPercent < 20 
+                ? 'translateX(8px)' 
+                : hoverXPercent > 80 
+                  ? 'translateX(calc(-100% - 8px))' 
+                  : 'translateX(-50%)'
             }}
           >
             <div className="bg-white border-2 border-[#1A1A2E] rounded-lg p-2.5 shadow-[4px_4px_0px_#1A1A2E] text-xs font-mono min-w-[200px]">
