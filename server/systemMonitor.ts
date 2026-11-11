@@ -109,6 +109,7 @@ export function getCpuInfo() {
     cores_physical: Math.max(1, Math.floor(cpus.length / 2)),
     nucleos_fisicos: Math.max(1, Math.floor(cpus.length / 2)),
     per_core_percent: perCorePercent,
+    nucleos_uso: perCorePercent,
     frequency_mhz: {
       current: freqMhz,
       min: Math.round(freqMhz * 0.4),
@@ -241,7 +242,7 @@ export function getTemperatureInfo() {
   // Se o ambiente de contêiner não expõe /sys térmico, fornece telemetria representativa de hardware servidor
   if (!realSensorsFound || sensores.length === 0) {
     const cpus = os.cpus();
-    const coreCount = Math.min(4, Math.max(2, cpus.length));
+    const coreCount = Math.max(1, cpus.length);
     const baseTemp = 42.0;
 
     for (let i = 0; i < coreCount; i++) {

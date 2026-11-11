@@ -353,6 +353,12 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
     ? parseTemperatureResponse(data.temperature) 
     : undefined;
 
+  const nucleos_uso: number[] | undefined = Array.isArray(cpuObj.per_core_percent)
+    ? cpuObj.per_core_percent
+    : Array.isArray(cpuObj.nucleos_uso)
+    ? cpuObj.nucleos_uso
+    : undefined;
+
   return {
     servidor: hostname,
     sistema: {
@@ -372,7 +378,8 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
       uso_percentual,
       nucleos_fisicos,
       nucleos_logicos,
-      frequencia_mhz
+      frequencia_mhz,
+      nucleos_uso
     },
     carga: {
       "1_minuto": carga1,

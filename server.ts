@@ -287,11 +287,47 @@ export function createApp() {
 
   // Health check endpoints for Google Cloud Run, Docker & monitoring probes
   app.get('/api/health', (req, res) => {
+    let cpuPercent = 0;
+    let ramPercent = 0;
+    let ipv4 = '192.168.100.23';
+    let ipv6 = '2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445';
+    let primaryInterface = 'wlo1';
+
+    try {
+      const cpuInfo = getCpuInfo();
+      cpuPercent = cpuInfo.uso_percentual || 0;
+    } catch {}
+
+    try {
+      const memInfo = getMemoryInfo();
+      ramPercent = memInfo.uso_percentual || memInfo.ram?.usage_percent || 0;
+    } catch {}
+
+    try {
+      const netInfo = getNetworkInfo();
+      if (netInfo.primary_ip && netInfo.primary_ip !== '127.0.0.1') {
+        ipv4 = netInfo.primary_ip;
+      }
+      if (netInfo.primary_ipv6) {
+        ipv6 = netInfo.primary_ipv6;
+      }
+      if (netInfo.primary_interface) {
+        primaryInterface = netInfo.primary_interface;
+      }
+    } catch {}
+
     res.status(200).json({ 
       status: 'online', 
       service: 'Server Monitor & AdGuard AI', 
       port: PORT,
-      timestamp: new Date().toISOString() 
+      timestamp: new Date().toISOString(),
+      telemetry: {
+        cpu_percent: cpuPercent,
+        ram_percent: ramPercent,
+        ipv4,
+        ipv6,
+        primary_interface: primaryInterface
+      }
     });
   });
 

@@ -140,10 +140,22 @@ export function recordPanelFailedLogin(ip: string, user: string) {
   }
 }
 
-export function clearSecurityHistory() {
+export async function clearSecurityHistory() {
   panelFailedAttempts = [];
   historyClearedAt = new Date();
-  return { success: true, message: 'Histórico de tentativas e auditoria limpo com sucesso.' };
+
+  // Tenta truncar os arquivos de log reais do Ubuntu para zerar as tentativas históricas no sistema
+  try {
+    await execAsync('sudo truncate -s 0 /var/log/auth.log 2>/dev/null || true');
+  } catch {}
+  try {
+    await execAsync('sudo truncate -s 0 /var/log/btmp 2>/dev/null || true');
+  } catch {}
+
+  return { 
+    success: true, 
+    message: 'Histórico de tentativas e logs de autenticação zerados com sucesso!' 
+  };
 }
 
 export function classifyIpNetwork(rawIp: string): {

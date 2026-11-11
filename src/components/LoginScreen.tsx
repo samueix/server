@@ -8,10 +8,12 @@ import {
   CheckCircle2, 
   RefreshCw,
   ShieldCheck,
+  Cpu,
+  Layers,
+  Network,
   Globe
 } from 'lucide-react';
 import { verifyCredentialsWithServer } from '../services/authService';
-import { SERVER_IPV4, SERVER_IPV6 } from '../config';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: string, role?: 'admin' | 'user') => void;
@@ -28,6 +30,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [apiHealth, setApiHealth] = useState<'checking' | 'online' | 'offline'>('checking');
+  const [telemetry, setTelemetry] = useState<{
+    cpu_percent: number;
+    ram_percent: number;
+    ipv4: string;
+    ipv6: string;
+    primary_interface: string;
+  } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -40,6 +49,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         if (isMounted) {
           if (res.ok) {
             setApiHealth('online');
+            const data = await res.json();
+            if (data.telemetry) {
+              setTelemetry(data.telemetry);
+            }
           } else {
             setApiHealth('offline');
           }
@@ -52,7 +65,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
     };
 
     checkHealth();
-    const interval = setInterval(checkHealth, 15000);
+    const interval = setInterval(checkHealth, 5000);
     return () => {
       isMounted = false;
       clearInterval(interval);
@@ -119,11 +132,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <h1 className="text-2xl sm:text-3xl font-extrabold font-title leading-tight tracking-tight text-white mb-2">
               Ubuntu Server Panel
             </h1>
-            <p className="text-xs text-white/90 font-medium leading-relaxed mb-6">
-              Telemetria operacional em tempo real de hardware, serviços systemd, AdGuard Home, explorador de arquivos e segurança de rede.
-            </p>
 
-            <div className="space-y-2 font-mono text-xs">
+            {/* Métricas de Hardware em Porcentagem e Rede Básica em Tempo Real */}
+            <div className="space-y-2 font-mono text-xs mt-3">
+              {/* API Status */}
               <div className="flex items-center justify-between p-2 rounded-lg bg-black/20 border border-white/30">
                 <span className="text-white/80">API FastAPI</span>
                 <span className="font-bold flex items-center gap-1.5 text-white">
@@ -133,15 +145,52 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   <span>{apiHealth === 'online' ? 'Conectada' : apiHealth === 'offline' ? 'Aguardando' : 'Verificando'}</span>
                 </span>
               </div>
+
+              {/* CPU e RAM em Porcentagem */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-2 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-white/80">
+                    <Cpu className="w-3.5 h-3.5 text-[#FFC857]" />
+                    <span>CPU</span>
+                  </div>
+                  <span className="font-bold text-white tabular-nums">
+                    {telemetry ? `${telemetry.cpu_percent.toFixed(1)}%` : '--%'}
+                  </span>
+                </div>
+
+                <div className="p-2 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-white/80">
+                    <Layers className="w-3.5 h-3.5 text-[#00A6FB]" />
+                    <span>RAM</span>
+                  </div>
+                  <span className="font-bold text-white tabular-nums">
+                    {telemetry ? `${telemetry.ram_percent.toFixed(1)}%` : '--%'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Status de Rede Básico */}
+              <div className="p-2 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-white/80">
+                  <Network className="w-3.5 h-3.5 text-[#12B76A]" />
+                  <span>Interface</span>
+                </div>
+                <span className="font-bold text-white">
+                  {telemetry?.primary_interface || 'eth0'} (Ativa)
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="pt-6 mt-6 border-t border-white/20 text-[11px] font-mono text-white/80 space-y-1">
+          {/* Endereços IP Atualizados Dinamicamente pelo Servidor */}
+          <div className="pt-4 mt-5 border-t border-white/20 text-[11px] font-mono text-white/90 space-y-1">
             <div className="flex items-center gap-1.5">
-              <Globe className="w-3.5 h-3.5 text-[#FFC857]" />
-              <span className="truncate">IPv4: {SERVER_IPV4}</span>
+              <Globe className="w-3.5 h-3.5 text-[#FFC857] shrink-0" />
+              <span className="truncate font-semibold">IPv4: {telemetry?.ipv4 || '192.168.100.23'}</span>
             </div>
-            <div className="truncate text-[10px] text-white/70">IPv6: {SERVER_IPV6}</div>
+            <div className="text-[10px] text-white/80 truncate font-medium pl-5">
+              IPv6: {telemetry?.ipv6 || '2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445'}
+            </div>
           </div>
         </div>
 

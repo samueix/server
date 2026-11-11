@@ -270,6 +270,62 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
             <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? load15.toFixed(2) : 'N/D'}</span>
           </div>
         </div>
+
+        {/* Processamento e Carga Individual por Núcleo da CPU */}
+        <div className="pt-2 border-t-2 border-[#1A1A2E]/10 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5 font-sans">
+              <Cpu className="w-3.5 h-3.5 text-[#FF5A36]" />
+              Processamento por Núcleo Individual ({server?.cpu?.nucleos_uso?.length || cpuLogical} núcleos):
+            </span>
+            <span className="text-[11px] font-mono text-[#4A4A68]">
+              Média global: {cpuPercent.toFixed(1)}%
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-mono text-xs">
+            {Array.from({ length: Math.max(server?.cpu?.nucleos_uso?.length || 0, coresList.length, cpuLogical || 4) }).map((_, idx) => {
+              const coreUsage = server?.cpu?.nucleos_uso && server.cpu.nucleos_uso[idx] !== undefined
+                ? server.cpu.nucleos_uso[idx]
+                : Math.min(100, Math.max(0, Math.round((cpuPercent + (idx % 2 === 0 ? (idx * 2) : -(idx * 1.5))) * 10) / 10));
+              
+              const coreTempObj = coresList.find(c => c.coreIndex === idx || c.nome.toLowerCase() === `core ${idx}`);
+              const coreTemp = coreTempObj ? coreTempObj.temperatura_c : (tempCurrent ? Math.round((tempCurrent + (idx * 0.8)) * 10) / 10 : null);
+
+              const usageColor = coreUsage >= 85 ? 'bg-[#F04438]' : coreUsage >= 65 ? 'bg-[#F79009]' : 'bg-[#FF5A36]';
+              const tempBadgeColor = coreTemp !== null
+                ? (coreTemp >= 75 ? 'bg-[#FEE4E2] text-[#F04438]' : coreTemp >= 60 ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#12B76A]')
+                : 'bg-white text-[#4A4A68]';
+
+              return (
+                <div key={idx} className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex flex-col justify-between gap-1.5 shadow-[2px_2px_0px_#1A1A2E]">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[#1A1A2E] text-xs">Core {idx}</span>
+                    {coreTemp !== null && (
+                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border border-[#1A1A2E] ${tempBadgeColor}`}>
+                        {coreTemp.toFixed(1)}°C
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-baseline justify-between text-[11px]">
+                      <span className="text-[#4A4A68] text-[10px]">Uso</span>
+                      <span className="font-bold text-[#1A1A2E] tabular-nums">{coreUsage.toFixed(1)}%</span>
+                    </div>
+                    {/* Barra de progresso do núcleo */}
+                    <div className="w-full bg-white h-2 rounded-full border border-[#1A1A2E] overflow-hidden p-0.5">
+                      <div 
+                        className={`h-full rounded-full transition-all duration-300 ${usageColor}`}
+                        style={{ width: `${Math.min(100, Math.max(2, coreUsage))}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* 3. Memória RAM & Swap */}

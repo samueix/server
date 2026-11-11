@@ -125,6 +125,7 @@ export interface ApiCpu {
   nucleos_fisicos: number;
   nucleos_logicos: number;
   frequencia_mhz: number;
+  nucleos_uso?: number[];
 }
 
 export interface ApiCarga {

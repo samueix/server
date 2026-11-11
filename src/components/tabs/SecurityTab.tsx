@@ -318,6 +318,39 @@ export const SecurityTab: React.FC = () => {
         </div>
       </div>
 
+      {/* Caixa de Comando para Limpar Histórico de Ataques e Logs no Shell */}
+      <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[4px_4px_0px_#1A1A2E] space-y-2.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-[#FF5A36]" />
+            <span className="font-title font-bold text-sm text-[#1A1A2E]">Comando Shell para Limpar Histórico de Tentativas no Servidor</span>
+          </div>
+          <span className="text-[11px] font-mono font-semibold text-[#4A4A68]">
+            Execução via SSH ou aba Terminal & Shell
+          </span>
+        </div>
+        <p className="text-xs text-[#4A4A68]">
+          Para truncar os logs de autenticação do Linux (/var/log/auth.log e /var/log/btmp) e resetar os contadores de ataques e auditoria:
+        </p>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-[#FFF7E8] p-2.5 rounded-lg border-2 border-[#1A1A2E]">
+          <code className="text-xs font-mono font-bold text-[#1A1A2E] select-all flex-1 break-all">
+            sudo truncate -s 0 /var/log/auth.log && sudo truncate -s 0 /var/log/btmp && sudo systemctl restart ssh
+          </code>
+          <button
+            onClick={() => {
+              const cmd = 'sudo truncate -s 0 /var/log/auth.log && sudo truncate -s 0 /var/log/btmp && sudo systemctl restart ssh';
+              navigator.clipboard.writeText(cmd);
+              setCopiedCmd('clear_cmd');
+              setTimeout(() => setCopiedCmd(null), 2500);
+            }}
+            className="px-3 py-1.5 bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-1.5 shrink-0"
+          >
+            {copiedCmd === 'clear_cmd' ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5 text-white" />}
+            <span>{copiedCmd === 'clear_cmd' ? 'Copiado!' : 'Copiar Comando'}</span>
+          </button>
+        </div>
+      </div>
+
       {actionNotice && (
         <div className="p-3 bg-[#D1FADF] border-2 border-[#12B76A] rounded-xl text-[#12B76A] font-bold text-xs flex items-center justify-between shadow-[2px_2px_0px_#12B76A]">
           <div className="flex items-center gap-2">

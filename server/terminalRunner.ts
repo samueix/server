@@ -115,11 +115,26 @@ const ALLOWED_BINARIES = new Set([
   'touch',
   'chmod',
   'chown',
+  'truncate',
   'tar',
   'gzip',
   'gunzip',
   'zip',
   'unzip',
+  'file',
+  'stat',
+
+  // Diagnóstico térmico, logs e auditoria
+  'sensors',
+  'last',
+  'lastb',
+  'w',
+  'dmesg',
+
+  // Gerenciamento de pacotes Ubuntu (instalação e manutenção)
+  'apt',
+  'apt-get',
+  'dpkg',
 
   // Runtimes, servidores e automações
   'nginx',
@@ -356,10 +371,13 @@ export function isCommandAllowed(commandString: string): { allowed: boolean; rea
 
       // Regras específicas de proteção para binários permitidos
       if (normalizedBinary === 'systemctl') {
-        const allowedActions = ['status', 'is-active', 'is-enabled', 'reload', 'restart', 'start', 'stop', 'cat'];
+        const allowedActions = [
+          'status', 'is-active', 'is-enabled', 'is-failed', 'reload', 'restart', 
+          'start', 'stop', 'enable', 'disable', 'cat', 'list-units', 'daemon-reload'
+        ];
         const action = tokens.find(t => allowedActions.includes(t.toLowerCase()));
         if (!action) {
-          return { allowed: false, reason: 'systemctl: apenas status, reload, restart, start, stop e is-active são permitidos via painel web.' };
+          return { allowed: false, reason: 'systemctl: apenas ações administrativas de serviços (status, restart, reload, start, stop, daemon-reload, enable, disable) são permitidas.' };
         }
       }
 

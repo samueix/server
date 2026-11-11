@@ -3,7 +3,10 @@ import path from 'path';
 import crypto from 'crypto';
 import { exec } from 'child_process';
 import util from 'util';
+import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+
+dotenv.config();
 
 const execAsync = util.promisify(exec);
 
@@ -278,14 +281,15 @@ export async function askAntigravityAgent(
     assistantReplyText = `[Simulação do Agente Antigravity - Chave de API não configurada]\n\nRecebi sua solicitação: "${userPrompt}".\nPara conectar com os modelos oficiais do Google Gemini e Antigravity Agent em produção, configure a variável GEMINI_API_KEY nas Credenciais ou no arquivo .env do servidor.`;
     completionTokens = 45;
   } else {
-    try {
-      // Cria contexto das mensagens anteriores
-      const historyContents = msgs.slice(-8).map(m => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }]
-      }));
+    // Ordem de modelos de produção resilientes com fallback automático
+    const candidateModels = [
+      'gemini-3.1-flash-lite',
+      'gemini-3.5-flash',
+      'gemini-flash-lite-latest',
+      'gemini-3.8-flash'
+    ];
 
-      const systemInstruction = `Você é o Lux (representado pelo pinguim mascote do Ubuntu), assistente oficial de inteligência artificial e engenheiro DevOps sênior do host "samuelserver" (Ubuntu Server 24.04 LTS, processador Intel Core i5-9500T, 19 GB RAM).
+    const systemInstruction = `Você é o Lux (representado pelo pinguim mascote do Ubuntu), assistente oficial de inteligência artificial e engenheiro DevOps sênior do host "samuelserver" (Ubuntu Server 24.04 LTS, processador Intel Core i5-9500T, 19 GB RAM).
 Seu objetivo é ajudar o administrador "samuel" a gerenciar sua infraestrutura com precisão técnica máxima, alta segurança e clareza.
 Você tem domínio completo sobre:
 1. Redes: IPv4 local (192.168.100.23), IPv6 dinâmico global, túnel Tailscale WireGuard (100.97.208.102).
@@ -295,28 +299,48 @@ Você tem domínio completo sobre:
 5. Automações n8n & Docker: workflows em segundo plano e monitoramento de serviços do systemd.
 Sempre forneça comandos prontos e verificados com sintaxe correta para Ubuntu Server.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: historyContents as any,
-        config: {
-          systemInstruction,
-          temperature: 0.3
+    const historyContents = msgs.slice(-8).map(m => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }]
+    }));
+
+    let lastError: any = null;
+    let modelSuccessName = '';
+
+    for (const modelCandidate of candidateModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelCandidate,
+          contents: historyContents as any,
+          config: {
+            systemInstruction,
+            temperature: 0.3
+          }
+        });
+
+        if (response && response.text) {
+          assistantReplyText = response.text;
+          modelSuccessName = modelCandidate;
+
+          if (response.usageMetadata) {
+            promptTokens = response.usageMetadata.promptTokenCount || promptTokens;
+            completionTokens = response.usageMetadata.candidatesTokenCount || Math.ceil(assistantReplyText.length / 4);
+          } else {
+            completionTokens = Math.ceil(assistantReplyText.length / 4);
+          }
+          break;
         }
-      });
-
-      assistantReplyText = response.text || 'Sem resposta do agente.';
-      
-      // Token usage extraction if available from SDK
-      if (response.usageMetadata) {
-        promptTokens = response.usageMetadata.promptTokenCount || promptTokens;
-        completionTokens = response.usageMetadata.candidatesTokenCount || Math.ceil(assistantReplyText.length / 4);
-      } else {
-        completionTokens = Math.ceil(assistantReplyText.length / 4);
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[Antigravity] Modelo ${modelCandidate} falhou (${err.message}). Tentando próximo da lista...`);
       }
+    }
 
-      reasoningText = 'Processado com gemini-3.8-flash via Google GenAI SDK. Raciocínio de infraestrutura e análise de telemetria concluídos.';
-    } catch (err: any) {
-      assistantReplyText = `Erro ao invocar o modelo Gemini: ${err.message}`;
+    if (assistantReplyText) {
+      reasoningText = `Processado com sucesso pelo agente Lux utilizando ${modelSuccessName}. Diagnóstico concluído.`;
+      session.model = modelSuccessName;
+    } else {
+      assistantReplyText = `Erro ao invocar o modelo Lux Gemini: ${lastError?.message || 'Serviço temporariamente indisponível'}`;
       completionTokens = 20;
     }
   }
