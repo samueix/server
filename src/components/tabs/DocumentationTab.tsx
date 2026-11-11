@@ -14,13 +14,28 @@ import {
   Lock,
   ExternalLink,
   ChevronRight,
-  Info
+  Info,
+  Activity,
+  Radio,
+  Bot,
+  Folder,
+  ShieldAlert,
+  Key,
+  ScrollText,
+  GitBranch,
+  ShieldCheck,
+  AlertTriangle,
+  RotateCcw,
+  Zap,
+  HelpCircle,
+  Clock
 } from 'lucide-react';
 import { SERVER_IPV4, SERVER_IPV6, SSH_USER, getDynamicSshCommand } from '../../config';
 
 export const DocumentationTab: React.FC = () => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>('all');
+  const [expandedTab, setExpandedTab] = useState<string | null>('overview');
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -30,42 +45,342 @@ export const DocumentationTab: React.FC = () => {
 
   const dynamicIpv6Ssh = getDynamicSshCommand(SERVER_IPV6);
 
+  const TABS_DOCUMENTATION = [
+    {
+      id: 'overview',
+      name: '1. Visão Geral',
+      icon: Layers,
+      summary: 'Dashboard consolidado de telemetria, integridade de serviços e métricas vitais.',
+      purpose: 'Apresentar em uma única tela o pulso em tempo real do Ubuntu Server, consolidando status de CPU, RAM, disco, rede, segurança e uptime.',
+      whatYouCanDo: [
+        'Visualizar medidores rápidos de saúde (CPU, RAM, disco raiz e rede).',
+        'Conferir o resumo de serviços críticos (Nginx, AdGuard, Docker, SSH, Tailscale).',
+        'Checar conexões ativas e histórico recente de tráfego de dados.'
+      ],
+      indicators: [
+        { label: 'Servidor Online / Offline', desc: 'Indica se o backend Node.js está respondendo ao polling HTTP/WebSocket.' },
+        { label: 'Uptime', desc: 'Tempo contínuo em dias/horas desde a última reinicialização do kernel do Ubuntu.' },
+        { label: 'Carga da CPU (Load Average)', desc: 'Média de processos aguardando tempo de execução nos últimos 1, 5 e 15 minutos.' }
+      ],
+      apis: 'GET /api/server, GET /api/status, GET /api/services/status',
+      permissions: 'Disponível para usuários comuns e administradores.',
+      troubleshooting: 'Se a tela exibir "Desconectado", verifique se o serviço server-panel está ativo via: sudo systemctl status server-panel.'
+    },
+    {
+      id: 'monitoring',
+      name: '2. Monitoramento',
+      icon: Activity,
+      summary: 'Telemetria profunda de hardware, sensores de temperatura de núcleos e partições.',
+      purpose: 'Acompanhar curvas históricas de consumo de recursos físicos, uso detalhado de memória (disponível, livre, cache/buffers e swap) e saúde térmica.',
+      whatYouCanDo: [
+        'Acompanhar oscilação de CPU e RAM nos últimos 60 segundos com sparklines.',
+        'Auditar temperatura por núcleo com sensores Intel Core i5 (Package, Core 0 a 5).',
+        'Verificar taxa de transferência de download e upload por interface de rede ativa.'
+      ],
+      indicators: [
+        { label: 'Disponível vs Livre', desc: 'Disponível é a memória real que novos processos podem alocar; Livre é a RAM intocada.' },
+        { label: 'Cache e Buffers', desc: 'RAM utilizada pelo kernel Linux para acelerar leitura de disco, liberada dinamicamente quando requisitada.' },
+        { label: 'Swap', desc: 'Espaço em disco reservado para paginação virtual de memória.' }
+      ],
+      apis: 'GET /api/server (parse direto de /proc/meminfo e /sys/class/thermal)',
+      permissions: 'Público/Operador.',
+      troubleshooting: 'Temperaturas acima de 75°C geram alerta automático. Verifique poeira ou rotação de cooler do processador.'
+    },
+    {
+      id: 'adguard',
+      name: '3. AdGuard Home',
+      icon: Shield,
+      summary: 'Central de controle de DNS, bloqueio de telemetria e dossiê com inteligência artificial.',
+      purpose: 'Proteger toda a rede doméstica contra anúncios, rastreadores e malwares, resolvendo DNS localmente na porta 53.',
+      whatYouCanDo: [
+        'Verificar consultas totais, permitidas e bloqueadas em 24h ou 2h com tooltip sincronizado.',
+        'Consultar servidores upstream ativos (Cloudflare DNS, Quad9, Google) e seus tempos de resposta.',
+        'Ativar Dossiê Inteligente com IA Gemini para explicar a finalidade de qualquer domínio bloqueado.'
+      ],
+      indicators: [
+        { label: 'Taxa de Bloqueio (%)', desc: 'Percentual de requisições de DNS que foram retidas por listas de bloqueio.' },
+        { label: 'Upstream Latency', desc: 'Tempo em milissegundos que os provedores DNS externos levam para responder ao servidor.' }
+      ],
+      apis: 'Proxy reverso local em http://127.0.0.1:8081/control (rotas /stats, /querylog, /status)',
+      permissions: 'Operador visualiza consultas; Administrador limpa histórico e configura regras.',
+      troubleshooting: 'Se o AdGuard estiver inativo, execute: sudo systemctl restart AdGuardHome. Cheque logs em /opt/AdGuardHome/data/AdGuardHome.yaml.'
+    },
+    {
+      id: 'ping',
+      name: '4. Ping / Latência',
+      icon: Radio,
+      summary: 'Medição contínua de latência (RTT) e perda de pacotes via socket e ICMP.',
+      purpose: 'Monitorar a qualidade da conexão com o gateway local e os maiores backbones da internet sem consumir recursos pesados.',
+      whatYouCanDo: [
+        'Acompanhar oscilação de latência em tempo real com gráfico SVG contínuo.',
+        'Auditar múltiplos destinos: Cloudflare (1.1.1.1), Google (8.8.8.8), Quad9 (9.9.9.9), NIC.br e Gateway (192.168.100.1).',
+        'Identificar perda de pacotes e diferenciar latência elevada de indisponibilidade de rota.'
+      ],
+      indicators: [
+        { label: 'Mín / Média / Máx', desc: 'Distribuição estatística das últimas 25 amostras de ida e volta (RTT).' },
+        { label: 'Taxa de Descarte (%)', desc: 'Percentual de falhas completas de comunicação nas amostras coletadas.' }
+      ],
+      apis: 'GET /api/ping (camada híbrida TCP/IP + fallback ICMP /bin/ping)',
+      permissions: 'Público/Operador.',
+      troubleshooting: 'Se o gateway local aparecer como inativo, confirme se o roteador aceita ICMP ping ou responde na porta 53/80.'
+    },
+    {
+      id: 'antigravity',
+      name: '5. Lux & IA (Ubuntu)',
+      icon: Bot,
+      summary: 'Agente inteligente oficial do Ubuntu Server impulsionado pelo modelo Gemini 3.8 Flash.',
+      purpose: 'Auxiliar na administração, geração de scripts e diagnóstico avançado do host samuelserver com raciocínio DevOps.',
+      whatYouCanDo: [
+        'Conversar com o Agente Lux sobre diagnósticos de rede, firewall, Nginx e automações.',
+        'Acompanhar cota de tokens consumidos, histórico diário e limites de requisição por minuto (RPM/TPM).',
+        'Salvar e alternar entre múltiplas sessões de auditoria com histórico persistido em disco.'
+      ],
+      indicators: [
+        { label: 'Tokens Usados Hoje', desc: 'Total acumulado de tokens de entrada e saída consumidos na data atual.' },
+        { label: 'Quota Diária', desc: 'Percentual de uso da quota gratuita recomendada pelo Google GenAI SDK.' }
+      ],
+      apis: 'POST /api/antigravity/message, GET /api/antigravity/metrics, GET /api/antigravity/sessions',
+      permissions: 'Restrito para Administradores.',
+      troubleshooting: 'Certifique-se de configurar a variável GEMINI_API_KEY no arquivo /opt/server-panel/.env para ativar o agente em produção.'
+    },
+    {
+      id: 'files',
+      name: '6. Gerenciador de Arquivos',
+      icon: Folder,
+      summary: 'Navegação segura na árvore de diretórios do Ubuntu, editor de texto e visualizador de imagens.',
+      purpose: 'Permitir inspeção, criação e edição rápida de arquivos de configuração sem exigir conexão SSH com nano/vim.',
+      whatYouCanDo: [
+        'Navegar por pastas do sistema, inclusive links simbólicos (/lib, /bin, /sbin).',
+        'Visualizar fotos e imagens em modo nativo.',
+        'Criar novos arquivos de texto/bloco de notas e salvar alterações diretamente no servidor.'
+      ],
+      indicators: [
+        { label: 'Permissões (rwxr-xr-x)', desc: 'Privilégios de leitura, escrita e execução do usuário do sistema.' },
+        { label: 'Bloqueio de Path Traversal', desc: 'Proteção de segurança que bloqueia acesso a arquivos confidenciais (/etc/shadow).' }
+      ],
+      apis: 'GET /api/files/list, GET /api/files/read, POST /api/files/create, POST /api/files/save',
+      permissions: 'Restrito para Administradores autenticados com token Bearer.',
+      troubleshooting: 'Caso não consiga salvar um arquivo, verifique se o usuário do processo tem permissão de escrita no diretório alvo.'
+    },
+    {
+      id: 'security',
+      name: '7. Segurança & Ataques',
+      icon: ShieldAlert,
+      summary: 'Auditoria de força bruta SSH, varreduras web e gerenciamento do firewall UFW.',
+      purpose: 'Detectar e neutralizar invasores externos, diferenciando acessos locais legítimos de ataques maliciosos de força bruta.',
+      whatYouCanDo: [
+        'Visualizar IPs hostis com geolocalização GeoIP (País, Cidade, Provedor e Bandeira).',
+        'Identificar o motivo do erro (Senha Incorreta vs Usuário Inexistente vs Scan HTTP).',
+        'Banir ou desbanir IPs hostis no firewall UFW com 1 clique e limpar o histórico de auditoria.'
+      ],
+      indicators: [
+        { label: 'Nível de Ameaça (Normal / Moderado / Sob Ataque)', desc: 'Classificação calculada baseada em ameaças externas reais.' },
+        { label: 'Regras do UFW', desc: 'Listagem numerada de regras de firewall ativas em tempo real no kernel do Ubuntu.' }
+      ],
+      apis: 'GET /api/security/attack-monitor, POST /api/security/block-ip, POST /api/security/unblock-ip, POST /api/security/clear-history',
+      permissions: 'Restrito para Administradores.',
+      troubleshooting: 'Para inspecionar regras diretamente no terminal, execute: sudo ufw status numbered.'
+    },
+    {
+      id: 'credentials',
+      name: '8. Credenciais & APIs',
+      icon: Key,
+      summary: 'Central de chaves de API, variáveis de ambiente e gerenciamento de senhas de acesso.',
+      purpose: 'Centralizar e atualizar parâmetros de conexão (AdGuard, n8n, Gemini) e senhas do painel sem editar arquivos manualmente.',
+      whatYouCanDo: [
+        'Alterar as credenciais de login do Administrador e Operador.',
+        'Configurar credenciais da API do AdGuard Home e tokens do n8n.',
+        'Cadastrar variáveis de ambiente personalizadas armazenadas com segurança.'
+      ],
+      indicators: [
+        { label: 'Cofre Protegido', desc: 'Camada de proteção que exige senha mestra para revelar segredos na tela.' }
+      ],
+      apis: 'GET /api/credentials, POST /api/credentials',
+      permissions: 'Exclusivo para Administrador.',
+      troubleshooting: 'As credenciais alteradas são gravadas no arquivo server-config.json e no ambiente local.'
+    },
+    {
+      id: 'processes',
+      name: '9. Processos',
+      icon: Cpu,
+      summary: 'Inspetor de processos em tempo real do kernel Linux com PID, consumo de CPU e memória.',
+      purpose: 'Identificar gargalos de processamento, processos zumbis ou serviços consumindo recursos excessivos.',
+      whatYouCanDo: [
+        'Filtrar processos por nome, usuário ou comando.',
+        'Ordenar por maior consumo de CPU ou memória RAM.',
+        'Finalizar processos com sinal SIGTERM/SIGKILL (botão de encerramento).'
+      ],
+      indicators: [
+        { label: 'PID', desc: 'Identificador único do processo no sistema operacional.' },
+        { label: 'Estado (R, S, Z)', desc: 'R (Executando), S (Dormindo/Aguardando), Z (Zumbi).' }
+      ],
+      apis: 'GET /api/processes, POST /api/processes/kill',
+      permissions: 'Restrito para Administrador.',
+      troubleshooting: 'Tenha cautela ao finalizar processos do sistema como sshd, systemd-journald ou nginx.'
+    },
+    {
+      id: 'services',
+      name: '10. Serviços',
+      icon: ShieldCheck,
+      summary: 'Painel de controle do systemd para daemons e serviços do Ubuntu.',
+      purpose: 'Verificar status de execução, reiniciar, iniciar ou parar serviços essenciais de infraestrutura.',
+      whatYouCanDo: [
+        'Conferir o estado real de serviços: Nginx, AdGuard Home, Docker, OpenSSH, Tailscale, Fail2Ban, Server Panel.',
+        'Reiniciar ou parar serviços diretamente pelo painel.',
+        'Copiar comandos canônicos do systemctl com 1 clique.'
+      ],
+      indicators: [
+        { label: 'Ativo (Running)', desc: 'O serviço está em execução normal no systemd.' },
+        { label: 'Inativo (Dead/Exited)', desc: 'O serviço está parado ou foi desabilitado intencionalmente.' }
+      ],
+      apis: 'GET /api/services/status, POST /api/services/action',
+      permissions: 'Restrito para Administradores.',
+      troubleshooting: 'Se um serviço falhar ao iniciar, consulte seus logs com: sudo journalctl -u NOME_DO_SERVICO -n 50.'
+    },
+    {
+      id: 'network',
+      name: '11. Rede & MAC',
+      icon: Network,
+      summary: 'Auditoria de interfaces físicas e virtuais, endereçamento IPv4/IPv6 e tabela ARP.',
+      purpose: 'Mapear todos os dispositivos conectados à rede local, interfaces ativas e portas de escuta.',
+      whatYouCanDo: [
+        'Inspecionar IPs locais, máscaras de sub-rede, gateway e endereços MAC.',
+        'Consultar tabela ARP com identificação de fabricantes de dispositivos na LAN.',
+        'Verificar portas TCP/UDP em escuta (LISTEN) no servidor.'
+      ],
+      indicators: [
+        { label: 'Dual-Stack IPv4/IPv6', desc: 'Indica disponibilidade simultânea de IPv4 estático e IPv6 global.' },
+        { label: 'Interface UP/DOWN', desc: 'Estado físico do link de rede ethernet ou Wi-Fi.' }
+      ],
+      apis: 'GET /api/network, GET /api/network/interfaces',
+      permissions: 'Público/Operador.',
+      troubleshooting: 'O endereço IPv6 global é dinâmico e sincronizado automaticamente pela interface wlo1.'
+    },
+    {
+      id: 'logs',
+      name: '12. Logs do Sistema',
+      icon: ScrollText,
+      summary: 'Visualizador unificado de logs do journald, Nginx, autenticação e kernel.',
+      purpose: 'Acelerar a investigação de falhas de software, erros de proxy e eventos de segurança.',
+      whatYouCanDo: [
+        'Filtrar logs por serviço específico (Nginx, SSH, AdGuard, Kernel, Server Panel).',
+        'Pesquisar por palavras-chave com busca em tempo real.',
+        'Exportar e copiar registros de log selecionados.'
+      ],
+      indicators: [
+        { label: 'Severidade (Info, Warning, Error)', desc: 'Classificação do nível de criticidade da mensagem registrada.' }
+      ],
+      apis: 'GET /api/logs/query',
+      permissions: 'Restrito para Administradores.',
+      troubleshooting: 'Para visualizar logs brutos contínuos no terminal: sudo journalctl -f.'
+    },
+    {
+      id: 'n8n',
+      name: '13. n8n Workflows',
+      icon: GitBranch,
+      summary: 'Integração com a plataforma de automação de fluxos de trabalho e webhooks.',
+      purpose: 'Supervisionar execuções de automações, alertas de infraestrutura e rotinas agendadas.',
+      whatYouCanDo: [
+        'Conferir status do serviço n8n local na porta 5678.',
+        'Monitorar workflows ativos e taxas de sucesso/falha de execução.',
+        'Acessar diretamente o editor visual do n8n.'
+      ],
+      indicators: [
+        { label: 'Workflow Ativo', desc: 'Fluxo em execução aguardando gatilhos ou cron schedules.' }
+      ],
+      apis: 'GET /api/n8n/status, GET /api/n8n/workflows',
+      permissions: 'Restrito para Administradores.',
+      troubleshooting: 'Se o n8n estiver offline, execute: sudo systemctl start n8n ou verifique seu contêiner Docker.'
+    },
+    {
+      id: 'commands',
+      name: '14. Terminal & Shell',
+      icon: Terminal,
+      summary: 'Console interativo para execução segura de comandos administrativos no Ubuntu.',
+      purpose: 'Executar tarefas de manutenção sem necessidade de abrir um cliente SSH externo.',
+      whatYouCanDo: [
+        'Executar diagnósticos rápidos pré-formatados com 1 clique.',
+        'Digitar comandos manuais no terminal embutido com suporte a histórico.',
+        'Acompanhar a saída completa (stdout/stderr) em tempo real.'
+      ],
+      indicators: [
+        { label: 'Allowlist Policy', desc: 'Camada de proteção que bloqueia comandos destrutivos não autorizados.' }
+      ],
+      apis: 'POST /api/terminal/exec',
+      permissions: 'Exclusivo para Administrador autenticado.',
+      troubleshooting: 'Comandos de longa duração possuem timeout de segurança de 30 segundos.'
+    },
+    {
+      id: 'system',
+      name: '15. Sistema',
+      icon: Server,
+      summary: 'Informações de distribuição Linux, kernel, arquitetura e controle de energia.',
+      purpose: 'Consultar detalhes de release do sistema operacional e executar ações de reboot/shutdown quando necessário.',
+      whatYouCanDo: [
+        'Visualizar versão detalhada do Ubuntu 24.04 LTS e versão do kernel Linux.',
+        'Conferir hostname oficial, arquitetura x86_64 e tipo de virtualização/bare-metal.',
+        'Executar reinicialização controlada do host.'
+      ],
+      indicators: [
+        { label: 'Kernel Version', desc: 'Versão do núcleo Linux em execução.' },
+        { label: 'Hostname', desc: 'Nome de rede da máquina (samuelserver).' }
+      ],
+      apis: 'GET /api/system/info, POST /api/system/reboot',
+      permissions: 'Restrito para Administradores.',
+      troubleshooting: 'Após reiniciar o servidor, o painel restabelece a conexão automaticamente em ~45 segundos.'
+    },
+    {
+      id: 'documentation',
+      name: '16. Documentação',
+      icon: BookOpen,
+      summary: 'Manual operacional completo de infraestrutura, arquitetura e procedimentos de recuperação.',
+      purpose: 'Servir como fonte definitiva de consulta técnica para operar, atualizar e recuperar o servidor doméstico.',
+      whatYouCanDo: [
+        'Copiar comandos operacionais em linha única com backup automático.',
+        'Consultar o manual específico de cada uma das 16 abas do sistema.',
+        'Seguir guias de resolução passo a passo para emergências e incidentes.'
+      ],
+      indicators: [
+        { label: 'Versão de Infraestrutura', desc: 'Versão do pacote de scripts e automações em vigor.' }
+      ],
+      apis: 'Integrada estaticamente no frontend.',
+      permissions: 'Acessível para todos os perfis.',
+      troubleshooting: 'Mantenha este manual atualizado sempre que novas integrações forem adicionadas.'
+    }
+  ];
+
   return (
     <div className="space-y-4 font-sans text-[#1A1A2E]">
-      {/* Header */}
+      {/* Top Banner Neo-brutalist */}
       <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b-2 border-[#1A1A2E] gap-2">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#FF5A36]/15 border-2 border-[#1A1A2E] flex items-center justify-center shrink-0">
-              <BookOpen className="w-4 h-4 text-[#FF5A36]" />
+            <div className="w-9 h-9 rounded-lg bg-[#FF5A36]/15 border-2 border-[#1A1A2E] flex items-center justify-center shrink-0">
+              <BookOpen className="w-5 h-5 text-[#FF5A36]" />
             </div>
             <div>
-              <h1 className="text-sm font-black text-[#1A1A2E] font-title">
-                Documentação da infraestrutura do servidor
+              <h1 className="text-base font-black text-[#1A1A2E] font-title">
+                Manual Operacional & Documentação Técnica do Sistema
               </h1>
               <p className="text-xs text-[#4A4A68] font-medium">
-                Manual operacional técnico do Ubuntu Server, Server Panel, AdGuard Home e Rede
+                Ubuntu Server 24.04 LTS (samuelserver) • Nginx • AdGuard Home • Tailscale • Lux AI
               </p>
             </div>
           </div>
           <span className="text-xs font-mono font-bold text-[#FF5A36] bg-[#FFF7E8] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] self-start sm:self-auto">
-            Versão de infraestrutura: v2.4 (Dual-Stack)
+            Versão v2.5 (Dual-Stack & Lux AI)
           </span>
         </div>
 
-        {/* Navegação Rápida de Tópicos */}
-        <div className="flex items-center gap-1.5 flex-wrap pt-3 text-xs">
-          <span className="text-[#4A4A68] font-bold mr-1 text-xs">Tópicos:</span>
+        {/* Navegação Rápida de Seções */}
+        <div className="flex items-center gap-2 flex-wrap pt-3 text-xs">
+          <span className="text-[#4A4A68] font-bold mr-1 text-xs">Seções:</span>
           {[
-            { id: 'all', label: 'Todos os tópicos' },
-            { id: 'update', label: '⚡ Atualizar Painel (Script Git)' },
-            { id: '1', label: '1. Identificação' },
-            { id: '2', label: '2. Acesso SSH' },
-            { id: '3', label: '3. Ubuntu Server' },
-            { id: '4', label: '4. Server Panel' },
-            { id: '5', label: '5. AdGuard Home' },
-            { id: '6', label: '6. Rede e Firewall' },
-            { id: '7', label: '7. Preparação n8n' }
+            { id: 'all', label: 'Tudo' },
+            { id: 'overview', label: '1. Visão Geral da Arquitetura' },
+            { id: 'tabs', label: '2. Manual das 16 Abas' },
+            { id: 'ops', label: '3. Procedimentos Operacionais' },
+            { id: 'update', label: '⚡ Script de Atualização' }
           ].map(sec => (
             <button
               key={sec.id}
@@ -82,14 +397,14 @@ export const DocumentationTab: React.FC = () => {
         </div>
       </div>
 
-      {/* SCRIPT DE ATUALIZAÇÃO DO SERVIDOR */}
+      {/* SCRIPT DE ATUALIZAÇÃO SEGURA (DESTAQUE PRIORITÁRIO) */}
       {(activeSection === 'all' || activeSection === 'update') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
           <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <Terminal className="w-4 h-4 text-[#FF5A36]" />
               <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                Procedimento de Atualização do Painel no Servidor Ubuntu
+                Procedimento de Atualização Segura do Painel (com Backup & Rollback)
               </h2>
             </div>
             <div className="flex items-center gap-2">
@@ -101,7 +416,7 @@ export const DocumentationTab: React.FC = () => {
                 {copiedKey === 'update-script' ? (
                   <>
                     <Check className="w-3.5 h-3.5 text-white" />
-                    <span>Copiado em Linha Única!</span>
+                    <span>Copiado com Sucesso!</span>
                   </>
                 ) : (
                   <>
@@ -114,7 +429,7 @@ export const DocumentationTab: React.FC = () => {
           </div>
 
           <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            Execute o script em linha única abaixo diretamente no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele baixa as últimas alterações do Git, salvaguarda as configurações locais, cria backup automático da versão web atual com suporte a rollback, compila o build de produção, copia para o diretório raiz do Nginx (<code className="text-[#1A1A2E] font-mono font-bold">/var/www/server-panel</code>), ajusta as permissões para <code className="text-[#1A1A2E] font-mono font-bold">www-data</code>, recarrega o serviço web e valida o health check.
+            Execute o script em linha única abaixo no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele realiza: (1) salvaguarda de configurações locais; (2) backup automático timestamped em <code className="text-[#1A1A2E] font-mono font-bold">/var/backups/server-panel</code>; (3) sincronização via git pull; (4) compilação de produção com Vite/esbuild; (5) rollback automático em caso de qualquer falha; (6) reload sem queda no Nginx e validação por health check.
           </p>
 
           <div className="relative">
@@ -123,510 +438,249 @@ export const DocumentationTab: React.FC = () => {
             </pre>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs font-mono">
             <div className="p-3 rounded-lg bg-[#D1FADF] border-2 border-[#12B76A] text-[#12B76A] font-bold">
-              <span>1. Git Pull & Build</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Sincroniza a branch main e compila os pacotes TypeScript/Vite.</p>
+              <span>1. Backup Preventivo</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Cria snapshot em /var/backups antes de tocar nos arquivos.</p>
             </div>
             <div className="p-3 rounded-lg bg-[#E0F2FE] border-2 border-[#00A6FB] text-[#026AA2] font-bold">
-              <span>2. Publicação Nginx</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Substitui os arquivos em /var/www/server-panel com posse www-data.</p>
+              <span>2. Git Pull & Build</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Sincroniza o repositório e compila frontend e backend.</p>
             </div>
             <div className="p-3 rounded-lg bg-[#FEF0C7] border-2 border-[#F79009] text-[#B54708] font-bold">
-              <span>3. Reload Sem Queda</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Valida a sintaxe e recarrega o Nginx sem derrubar conexões ativas.</p>
+              <span>3. Deploy Nginx</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Substitui arquivos em /var/www/server-panel como www-data.</p>
+            </div>
+            <div className="p-3 rounded-lg bg-[#FEE4E2] border-2 border-[#F04438] text-[#D92D20] font-bold">
+              <span>4. Rollback Automático</span>
+              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Restaura a versão anterior caso o build ou API falhem.</p>
             </div>
           </div>
         </div>
       )}
 
-      {/* 1. IDENTIFICAÇÃO DO SERVIDOR */}
-      {(activeSection === 'all' || activeSection === '1') && (
+      {/* SEÇÃO 1: VISÃO GERAL DA ARQUITETURA */}
+      {(activeSection === 'all' || activeSection === 'overview') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
           <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Server className="w-4 h-4 text-[#FF5A36]" />
+            <Layers className="w-5 h-5 text-[#00A6FB]" />
             <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              1. Identificação do servidor
+              1. Visão Geral da Arquitetura do Sistema
             </h2>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Hostname</span>
-              <span className="text-[#1A1A2E] font-black text-sm font-mono mt-0.5 block">samuelserver</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">IPv4 Wi-Fi (LAN)</span>
-              <span className="text-[#FF5A36] font-black text-sm font-mono tabular-nums mt-0.5 block">{SERVER_IPV4}</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Tailscale IP (VPN)</span>
-              <span className="text-[#00A6FB] font-black text-sm font-mono tabular-nums mt-0.5 block">100.97.208.102</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Usuário administrativo</span>
-              <span className="text-[#12B76A] font-black text-sm font-mono mt-0.5 block">{SSH_USER} (sudoer)</span>
-            </div>
-          </div>
-
-          <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-xs">
-            <span className="text-[#4A4A68] text-xs font-bold block mb-1">IPv6 global atual (dinâmico via wlo1)</span>
-            <span className="text-[#1A1A2E] font-mono font-bold break-all text-xs tabular-nums">{SERVER_IPV6}</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Processador</span>
-              <span className="text-[#1A1A2E] font-bold mt-0.5 block">Intel® Core™ i5-9500T (6C/6T @ 3.70 GHz)</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Memória RAM & Disco</span>
-              <span className="text-[#1A1A2E] font-mono font-bold mt-0.5 block">19 GB RAM · ~190 GB SSD livres</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Sistema operacional</span>
-              <span className="text-[#1A1A2E] font-bold mt-0.5 block">Ubuntu 24.04 LTS (x86_64)</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. ACESSO SSH */}
-      {(activeSection === 'all' || activeSection === '2') && (
-        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Terminal className="w-4 h-4 text-[#FF5A36]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              2. Procedimentos de acesso remoto (SSH)
-            </h2>
-          </div>
-
-          <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            O servidor está configurado com OpenSSH Server na porta 22 para conexões em IPv4, IPv6 e Tailscale WireGuard.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* Acesso Tailscale (Recomendado) */}
-            <div className="p-4 rounded-lg bg-[#EFF8FF] border-2 border-[#00A6FB] shadow-[2px_2px_0px_#1A1A2E] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-md bg-white text-[#00A6FB] border-2 border-[#00A6FB] font-mono text-xs font-bold shadow-sm">
-                  Tailscale (Global Seguro)
-                </span>
-                <button
-                  onClick={() => copyToClipboard(`ssh ${SSH_USER}@100.97.208.102`, 'ssh-ts-doc')}
-                  className="p-1.5 rounded-md text-[#1A1A2E] bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#FFEECB] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
-                  title="Copiar comando"
-                >
-                  {copiedKey === 'ssh-ts-doc' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <code className="text-xs text-[#1A1A2E] font-mono font-bold block p-2.5 rounded-md bg-white border-2 border-[#1A1A2E] select-all">
-                ssh {SSH_USER}@100.97.208.102
-              </code>
-              <p className="text-xs text-[#4A4A68] font-medium">
-                Conexão P2P criptografada de qualquer lugar do mundo (ou <code className="text-[#00A6FB]">ssh samuel@samuelserver</code>).
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            <div className="p-4 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2">
+              <h3 className="font-bold text-sm text-[#1A1A2E] flex items-center gap-2">
+                <Server className="w-4 h-4 text-[#FF5A36]" />
+                O que é o Ubuntu Server Panel?
+              </h3>
+              <p className="text-[#4A4A68] leading-relaxed">
+                É um painel operacional completo e soberano desenvolvido especificamente para o servidor doméstico <code className="font-bold text-[#1A1A2E]">samuelserver</code>. Ele resolve o problema de fragmentação administrativa, unificando em uma única interface responsiva a telemetria do sistema, o bloqueador de DNS AdGuard Home, o firewall UFW, o terminal, o explorador de arquivos e o agente inteligente Lux AI.
               </p>
             </div>
 
-            {/* Acesso IPv4 Local */}
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-md bg-white text-[#FF5A36] border-2 border-[#1A1A2E] font-mono text-xs font-bold shadow-sm">
-                  Acesso LAN IPv4
-                </span>
-                <button
-                  onClick={() => copyToClipboard(`ssh ${SSH_USER}@${SERVER_IPV4}`, 'ssh-ipv4-doc')}
-                  className="p-1.5 rounded-md text-[#1A1A2E] bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#FFEECB] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
-                  title="Copiar comando"
-                >
-                  {copiedKey === 'ssh-ipv4-doc' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <code className="text-xs text-[#1A1A2E] font-mono font-bold block p-2.5 rounded-md bg-white border-2 border-[#1A1A2E] select-all">
-                ssh {SSH_USER}@{SERVER_IPV4}
-              </code>
-              <p className="text-xs text-[#4A4A68] font-medium">
-                Acesso estável dentro do Wi-Fi/Ethernet doméstico (192.168.100.x).
-              </p>
-            </div>
-
-            {/* Acesso IPv6 */}
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-1 rounded-md bg-white text-[#12B76A] border-2 border-[#1A1A2E] font-mono text-xs font-bold shadow-sm">
-                  Acesso IPv6 Público
-                </span>
-                <button
-                  onClick={() => copyToClipboard(dynamicIpv6Ssh, 'ssh-ipv6-doc')}
-                  className="p-1.5 rounded-md text-[#1A1A2E] bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#FFEECB] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
-                  title="Copiar comando"
-                >
-                  {copiedKey === 'ssh-ipv6-doc' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-              <code className="text-xs text-[#1A1A2E] font-mono font-bold block p-2.5 rounded-md bg-white border-2 border-[#1A1A2E] break-all select-all">
-                {dynamicIpv6Ssh}
-              </code>
-              <p className="text-xs text-[#4A4A68] font-medium">
-                Endereço IPv6 global entre colchetes <code className="text-[#1A1A2E] font-mono font-bold">[ ]</code>.
+            <div className="p-4 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2">
+              <h3 className="font-bold text-sm text-[#1A1A2E] flex items-center gap-2">
+                <Network className="w-4 h-4 text-[#12B76A]" />
+                Comunicação Frontend & Backend
+              </h3>
+              <p className="text-[#4A4A68] leading-relaxed">
+                O frontend é uma SPA React moderna com Vite e Tailwind CSS, servida pelo Nginx. O backend é um serviço Node.js Express rodando na porta local 3000 (<code className="font-bold text-[#1A1A2E]">server.cjs</code>). As requisições à API (<code className="font-bold text-[#1A1A2E]">/api/*</code>) são protegidas por autenticação via headers e consultam diretamente arquivos do kernel (<code className="font-mono">/proc/meminfo</code>, <code className="font-mono">journalctl</code>, <code className="font-mono">ufw</code>).
               </p>
             </div>
           </div>
 
-          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs text-[#4A4A68] flex items-start gap-2.5 shadow-[2px_2px_0px_#1A1A2E]">
-            <Info className="w-4 h-4 text-[#FF5A36] shrink-0 mt-0.5" />
-            <div>
-              <strong className="text-[#1A1A2E] block mb-1">Atenção sobre o IPv6 dinâmico:</strong>
-              O prefixo IPv6 é dinâmico e fornecido pela operadora (SLAAC / DHCPv6). Não fixe o IPv6 antigo 
-              (<code className="text-[#1A1A2E] font-mono font-bold">2804:2d5c:a2:512d...</code>). Para consultar o IPv6 em tempo real no servidor, execute:
-              <code className="text-[#12B76A] bg-white px-2.5 py-1.5 rounded-md block mt-2 border-2 border-[#1A1A2E] font-mono font-bold select-all">
-                ip -6 addr show dev enp2s0 scope global
-              </code>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. UBUNTU SERVER */}
-      {(activeSection === 'all' || activeSection === '3') && (
-        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Server className="w-4 h-4 text-[#FF5A36]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              3. Guia operacional do Ubuntu Server
-            </h2>
-          </div>
-
-          <div className="space-y-3 font-mono text-xs">
-            {/* Atualização */}
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#1A1A2E] font-bold font-sans block mb-1.5">Como atualizar os pacotes e segurança do sistema:</span>
-              <div className="flex items-center justify-between bg-white p-2.5 rounded-md border-2 border-[#1A1A2E]">
-                <code className="text-[#1A1A2E] font-bold">sudo apt update && sudo apt upgrade -y</code>
-                <button
-                  onClick={() => copyToClipboard('sudo apt update && sudo apt upgrade -y', 'apt-update')}
-                  className="p-1 text-[#1A1A2E] hover:bg-[#FFEECB] rounded transition"
-                  title="Copiar"
-                >
-                  {copiedKey === 'apt-update' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
+          {/* Dados de Identificação do Host */}
+          <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
+              Identificação de Conectividade do Servidor
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
+                <span className="text-[#4A4A68] text-[10px] block font-bold">IPv4 Wi-Fi (LAN Doméstica)</span>
+                <span className="text-[#1A1A2E] font-bold text-sm">192.168.100.23</span>
               </div>
-            </div>
-
-            {/* Como verificar versão e kernel */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-                <span className="text-[#1A1A2E] font-bold font-sans block mb-1.5">Verificar versão do Ubuntu:</span>
-                <code className="text-[#FF5A36] bg-white p-2.5 rounded-md border-2 border-[#1A1A2E] block select-all font-bold">
-                  lsb_release -a
-                </code>
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
+                <span className="text-[#4A4A68] text-[10px] block font-bold">Tailscale IP (VPN Global)</span>
+                <span className="text-[#00A6FB] font-bold text-sm">100.97.208.102</span>
               </div>
-              <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-                <span className="text-[#1A1A2E] font-bold font-sans block mb-1.5">Verificar versão do Kernel:</span>
-                <code className="text-[#00A6FB] bg-white p-2.5 rounded-md border-2 border-[#1A1A2E] block select-all font-bold">
-                  uname -r
-                </code>
-              </div>
-            </div>
-
-            {/* Reiniciar e Desligar */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-                <span className="text-[#1A1A2E] font-bold font-sans block mb-1.5">Reiniciar o servidor com segurança:</span>
-                <code className="text-[#1A1A2E] bg-white p-2.5 rounded-md border-2 border-[#1A1A2E] block select-all font-bold">
-                  sudo reboot
-                </code>
-              </div>
-              <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-                <span className="text-[#1A1A2E] font-bold font-sans block mb-1.5">Desligar o servidor com segurança:</span>
-                <code className="text-[#F04438] bg-white p-2.5 rounded-md border-2 border-[#1A1A2E] block select-all font-bold">
-                  sudo poweroff
-                </code>
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
+                <span className="text-[#4A4A68] text-[10px] block font-bold">Usuário Administrativo</span>
+                <span className="text-[#12B76A] font-bold text-sm">samuel (sudoer)</span>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 4. SERVER PANEL */}
-      {(activeSection === 'all' || activeSection === '4') && (
-        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Layers className="w-4 h-4 text-[#FF5A36]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              4. Arquitetura do Server Panel
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#1A1A2E] font-black block mb-1 text-sm font-title">Frontend React / Vite</span>
-              <p className="text-[#4A4A68] leading-relaxed text-xs font-medium">
-                Interface de usuário moderna em Tailwind CSS, servida via Nginx na porta 80. Consome exclusivamente rotas relativas (/api).
-              </p>
-            </div>
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#1A1A2E] font-black block mb-1 text-sm font-title">Backend FastAPI (:8000)</span>
-              <p className="text-[#4A4A68] leading-relaxed text-xs font-medium">
-                API de telemetria em Python com psutil, lendo métricas reais de hardware, processos e systemd diretamente do kernel.
-              </p>
-            </div>
-            <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#1A1A2E] font-black block mb-1 text-sm font-title">Nginx Reverse Proxy</span>
-              <p className="text-[#4A4A68] leading-relaxed text-xs font-medium">
-                Injeta internamente os cabeçalhos de segurança e a API Key secreta. O navegador do cliente nunca conhece ou expõe credenciais.
-              </p>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs space-y-2.5 shadow-[2px_2px_0px_#1A1A2E]">
-            <span className="text-[#1A1A2E] font-bold block">Comandos de gestão do daemon do Server Panel:</span>
-            <div className="space-y-2 font-mono text-xs">
-              <div className="flex items-center justify-between p-2.5 rounded-md bg-white border-2 border-[#1A1A2E]">
-                <code className="text-[#1A1A2E] font-bold">sudo systemctl status server-panel</code>
-                <span className="text-[#4A4A68] text-xs font-sans font-bold">Verificar status</span>
-              </div>
-              <div className="flex items-center justify-between p-2.5 rounded-md bg-white border-2 border-[#1A1A2E]">
-                <code className="text-[#1A1A2E] font-bold">sudo systemctl restart server-panel</code>
-                <span className="text-[#4A4A68] text-xs font-sans font-bold">Reiniciar processo</span>
-              </div>
-              <div className="flex items-center justify-between p-2.5 rounded-md bg-white border-2 border-[#1A1A2E]">
-                <code className="text-[#1A1A2E] font-bold">sudo journalctl -u server-panel -f</code>
-                <span className="text-[#4A4A68] text-xs font-sans font-bold">Acompanhar logs ao vivo</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 5. ADGUARD HOME */}
-      {(activeSection === 'all' || activeSection === '5') && (
-        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Shield className="w-4 h-4 text-[#12B76A]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              5. Integração com o AdGuard Home
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Porta Web GUI</span>
-              <span className="text-[#1A1A2E] font-mono font-black text-sm tabular-nums mt-0.5 block">:8081</span>
-              <span className="text-xs text-[#717188] font-medium block mt-0.5">Interface administrativa AdGuard</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Porta de serviço DNS</span>
-              <span className="text-[#1A1A2E] font-mono font-black text-sm tabular-nums mt-0.5 block">:53 (UDP / TCP)</span>
-              <span className="text-xs text-[#717188] font-medium block mt-0.5">Servidor DNS da rede local</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Proxy Nginx</span>
-              <span className="text-[#12B76A] font-mono font-black text-sm mt-0.5 block">/adguard-api/</span>
-              <span className="text-xs text-[#717188] font-medium block mt-0.5">Injeção segura de Basic Auth</span>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs shadow-[2px_2px_0px_#1A1A2E]">
-            <span className="text-[#1A1A2E] font-bold block mb-2">Servidores DNS upstream recomendados:</span>
-            <ul className="list-disc list-inside space-y-1.5 text-[#4A4A68] text-xs font-mono font-bold">
-              <li><code className="text-[#1A1A2E]">https://dns.cloudflare.com/dns-query</code> <span className="font-sans text-xs text-[#717188] font-medium">(Cloudflare DoH)</span></li>
-              <li><code className="text-[#1A1A2E]">https://dns.google/dns-query</code> <span className="font-sans text-xs text-[#717188] font-medium">(Google DNS DoH)</span></li>
-              <li><code className="text-[#1A1A2E]">tls://1.1.1.1</code> e <code className="text-[#1A1A2E]">tls://8.8.8.8</code> <span className="font-sans text-xs text-[#717188] font-medium">(DNS-over-TLS)</span></li>
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* 6. REDE & FIREWALL */}
-      {(activeSection === 'all' || activeSection === '6') && (
-        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Network className="w-4 h-4 text-[#FF5A36]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              6. Topologia de rede e portas liberadas
-            </h2>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Sub-rede local</span>
-              <span className="text-[#1A1A2E] font-mono font-black tabular-nums mt-0.5 block">192.168.100.0/24</span>
-              <span className="text-[#717188] text-xs font-medium block mt-0.5">Gateway: 192.168.100.1</span>
-            </div>
-            <div className="p-3.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-              <span className="text-[#4A4A68] text-xs font-bold block">Endereçamento IPv6</span>
-              <span className="text-[#00A6FB] font-mono font-black mt-0.5 block">SLAAC dinâmico (/64)</span>
-              <span className="text-[#717188] text-xs font-medium block mt-0.5">Roteamento global ativo</span>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
-            <table className="w-full text-xs font-mono text-left text-[#1A1A2E]">
-              <thead className="bg-[#FFF7E8] text-[#1A1A2E] text-xs font-black border-b-2 border-[#1A1A2E] font-sans">
-                <tr>
-                  <th className="py-2.5 px-3.5">Porta</th>
-                  <th className="py-2.5 px-3.5">Protocolo</th>
-                  <th className="py-2.5 px-3.5">Serviço</th>
-                  <th className="py-2.5 px-3.5">Acesso</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#E2DFD8] bg-white">
-                <tr>
-                  <td className="py-2.5 px-3.5 font-black text-[#1A1A2E] tabular-nums">22</td>
-                  <td className="py-2.5 px-3.5">TCP</td>
-                  <td className="py-2.5 px-3.5 text-[#1A1A2E] font-sans font-bold">OpenSSH Server</td>
-                  <td className="py-2.5 px-3.5 text-[#12B76A] font-sans font-bold">Rede local e IPv6</td>
-                </tr>
-                <tr>
-                  <td className="py-2.5 px-3.5 font-black text-[#1A1A2E] tabular-nums">80</td>
-                  <td className="py-2.5 px-3.5">TCP</td>
-                  <td className="py-2.5 px-3.5 text-[#1A1A2E] font-sans font-bold">Nginx (Server Panel UI e Proxies)</td>
-                  <td className="py-2.5 px-3.5 text-[#12B76A] font-sans font-bold">Público / LAN</td>
-                </tr>
-                <tr>
-                  <td className="py-2.5 px-3.5 font-black text-[#1A1A2E] tabular-nums">53</td>
-                  <td className="py-2.5 px-3.5">UDP / TCP</td>
-                  <td className="py-2.5 px-3.5 text-[#1A1A2E] font-sans font-bold">AdGuard Home DNS Server</td>
-                  <td className="py-2.5 px-3.5 text-[#12B76A] font-sans font-bold">Rede local (LAN)</td>
-                </tr>
-                <tr>
-                  <td className="py-2.5 px-3.5 font-black text-[#1A1A2E] tabular-nums">8000</td>
-                  <td className="py-2.5 px-3.5">TCP</td>
-                  <td className="py-2.5 px-3.5 text-[#1A1A2E] font-sans font-bold">FastAPI Telemetria Server</td>
-                  <td className="py-2.5 px-3.5 text-[#00A6FB] font-sans font-bold">Localhost / Nginx</td>
-                </tr>
-                <tr>
-                  <td className="py-2.5 px-3.5 font-black text-[#1A1A2E] tabular-nums">8081</td>
-                  <td className="py-2.5 px-3.5">TCP</td>
-                  <td className="py-2.5 px-3.5 text-[#1A1A2E] font-sans font-bold">AdGuard Home Web GUI</td>
-                  <td className="py-2.5 px-3.5 text-[#00A6FB] font-sans font-bold">Localhost / Nginx</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* 7. GUIA COMPLETO DO N8N NO UBUNTU */}
-      {(activeSection === 'all' || activeSection === '7') && (
+      {/* SEÇÃO 2: DOCUMENTAÇÃO INDIVIDUAL DAS 16 ABAS */}
+      {(activeSection === 'all' || activeSection === 'tabs') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
           <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <Workflow className="w-4 h-4 text-[#FF5A36]" />
+              <BookOpen className="w-5 h-5 text-[#FF5A36]" />
               <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                7. Guia Oficial de Instalação e Configuração do n8n no Ubuntu
+                2. Manual Individual das 16 Abas do Painel
               </h2>
             </div>
-            <span className="text-[11px] font-mono font-bold bg-[#ECFDF3] text-[#12B76A] border border-[#12B76A] px-2 py-0.5 rounded">
-              Porta Padrão: 5678
+            <span className="text-xs font-mono font-bold text-[#4A4A68]">
+              Clique em qualquer aba para expandir os detalhes
             </span>
           </div>
 
-          <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            O <strong>n8n</strong> é a plataforma de automação e orquestração de fluxos (workflows) para integrar seu Ubuntu Server com Telegram, WhatsApp, APIs externas e bancos de dados. Abaixo estão os dois métodos oficiais para instalá-lo no Ubuntu 24.04/22.04.
-          </p>
+          <div className="space-y-3">
+            {TABS_DOCUMENTATION.map((tab) => {
+              const Icon = tab.icon;
+              const isExpanded = expandedTab === tab.id;
 
-          {/* Método 1: Docker (Recomendado) */}
-          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                Método 1: Instalação via Docker (Recomendado)
-              </span>
-              <button
-                onClick={() => copyToClipboard(`docker run -d --name n8n --restart always -p 5678:5678 -v ~/.n8n:/home/node/.n8n -e N8N_HOST="192.168.100.23" -e WEBHOOK_URL="http://192.168.100.23:5678/" n8nio/n8n`, 'docker-n8n')}
-                className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
-              >
-                {copiedKey === 'docker-n8n' ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedKey === 'docker-n8n' ? 'Copiado!' : 'Copiar comando Docker'}</span>
-              </button>
-            </div>
+              return (
+                <div 
+                  key={tab.id}
+                  className="rounded-xl border-2 border-[#1A1A2E] bg-white overflow-hidden shadow-[2px_2px_0px_#1A1A2E] transition"
+                >
+                  <button
+                    onClick={() => setExpandedTab(isExpanded ? null : tab.id)}
+                    className="w-full p-3.5 bg-[#FFF7E8] hover:bg-[#FFEECB] text-left flex items-center justify-between gap-3 transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-7 h-7 rounded-md bg-white border border-[#1A1A2E] flex items-center justify-center shrink-0">
+                        <Icon className="w-4 h-4 text-[#FF5A36]" />
+                      </div>
+                      <div>
+                        <span className="font-bold font-title text-sm text-[#1A1A2E] block">{tab.name}</span>
+                        <span className="text-xs text-[#4A4A68] font-medium">{tab.summary}</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-white px-2 py-1 rounded border border-[#1A1A2E]">
+                      {isExpanded ? 'Recolher ▲' : 'Ver Detalhes ▼'}
+                    </span>
+                  </button>
 
-            <pre className="p-3 rounded bg-[#1A1A2E] text-[#ECFDF3] text-xs font-mono font-bold overflow-x-auto leading-relaxed">
-{`docker run -d \\
-  --name n8n \\
-  --restart always \\
-  -p 5678:5678 \\
-  -v ~/.n8n:/home/node/.n8n \\
-  -e N8N_HOST="192.168.100.23" \\
-  -e WEBHOOK_URL="http://192.168.100.23:5678/" \\
-  n8nio/n8n`}
-            </pre>
+                  {isExpanded && (
+                    <div className="p-4 space-y-3.5 text-xs text-[#1A1A2E] bg-white border-t-2 border-[#1A1A2E]">
+                      {/* Finalidade */}
+                      <div>
+                        <strong className="text-xs font-bold text-[#4A4A68] uppercase tracking-wider block mb-1">
+                          Finalidade do Módulo:
+                        </strong>
+                        <p className="text-[#1A1A2E] leading-relaxed bg-[#FFF7E8]/50 p-2.5 rounded-lg border border-[#1A1A2E]/20">
+                          {tab.purpose}
+                        </p>
+                      </div>
+
+                      {/* O que você consegue fazer */}
+                      <div>
+                        <strong className="text-xs font-bold text-[#4A4A68] uppercase tracking-wider block mb-1">
+                          Ações e Recursos Disponíveis:
+                        </strong>
+                        <ul className="list-disc pl-5 space-y-1 text-[#1A1A2E]">
+                          {tab.whatYouCanDo.map((item, idx) => (
+                            <li key={idx}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Indicadores */}
+                      <div>
+                        <strong className="text-xs font-bold text-[#4A4A68] uppercase tracking-wider block mb-1">
+                          Significado dos Indicadores:
+                        </strong>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {tab.indicators.map((ind, idx) => (
+                            <div key={idx} className="p-2 rounded bg-[#FFF7E8] border border-[#1A1A2E]/30 text-xs">
+                              <span className="font-bold text-[#FF5A36] block">{ind.label}:</span>
+                              <span className="text-[#4A4A68]">{ind.desc}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Técnico e Troubleshooting */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-[#1A1A2E]/20 font-mono text-[11px]">
+                        <div className="p-2.5 rounded bg-[#E0F2FE] border border-[#00A6FB] text-[#026AA2]">
+                          <strong className="block text-[10px] uppercase font-bold">APIs Envolvidas:</strong>
+                          <span className="text-[#1A1A2E] font-medium">{tab.apis}</span>
+                        </div>
+                        <div className="p-2.5 rounded bg-[#D1FADF] border border-[#12B76A] text-[#12B76A]">
+                          <strong className="block text-[10px] uppercase font-bold">Permissões:</strong>
+                          <span className="text-[#1A1A2E] font-medium">{tab.permissions}</span>
+                        </div>
+                        <div className="p-2.5 rounded bg-[#FEE4E2] border border-[#F04438] text-[#D92D20]">
+                          <strong className="block text-[10px] uppercase font-bold">Resolução de Problemas:</strong>
+                          <span className="text-[#1A1A2E] font-medium">{tab.troubleshooting}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SEÇÃO 3: PROCEDIMENTOS OPERACIONAIS REAIS */}
+      {(activeSection === 'all' || activeSection === 'ops') && (
+        <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
+          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
+            <Terminal className="w-5 h-5 text-[#12B76A]" />
+            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+              3. Procedimentos Operacionais & Comandos de Emergência
+            </h2>
           </div>
 
-          {/* Método 2: Instalação Nativa via npm & systemd */}
-          <div className="p-4 rounded-lg bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                Método 2: Instalação Nativa via npm (Node.js) & systemd
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs font-mono">
+            {/* AdGuard */}
+            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
+              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-[#FF5A36]" />
+                Reiniciar e Diagnosticar AdGuard Home
               </span>
-              <button
-                onClick={() => copyToClipboard(`sudo npm install -g n8n && n8n`, 'npm-n8n')}
-                className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
-              >
-                {copiedKey === 'npm-n8n' ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedKey === 'npm-n8n' ? 'Copiado!' : 'Copiar comando npm'}</span>
-              </button>
+              <p className="text-xs text-[#4A4A68] font-sans">Caso o bloqueador de DNS não responda na porta 53:</p>
+              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
+{`sudo systemctl restart AdGuardHome
+sudo systemctl status AdGuardHome --no-pager`}
+              </pre>
             </div>
 
-            <pre className="p-3 rounded bg-[#1A1A2E] text-[#ECFDF3] text-xs font-mono font-bold overflow-x-auto leading-relaxed">
-{`# 1. Instalar o n8n globalmente com Node.js 18+ ou 20+
-sudo npm install -g n8n
-
-# 2. Criar serviço systemd para inicialização automática (/etc/systemd/system/n8n.service):
-[Unit]
-Description=n8n Workflow Automation
-After=network.target
-
-[Service]
-Type=simple
-User=samuel
-ExecStart=/usr/bin/n8n
-Restart=on-failure
-Environment="N8N_PORT=5678"
-Environment="N8N_HOST=192.168.100.23"
-
-[Install]
-WantedBy=multi-user.target
-
-# 3. Ativar e iniciar o serviço
-sudo systemctl daemon-reload && sudo systemctl enable --now n8n`}
-            </pre>
-          </div>
-
-          {/* Proxy Reverso Nginx com WebSockets para n8n */}
-          <div className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                Configuração do Proxy Reverso Nginx (/etc/nginx/sites-available/default)
+            {/* Nginx */}
+            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
+              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
+                <Globe className="w-4 h-4 text-[#00A6FB]" />
+                Testar Sintaxe e Recarregar Nginx
               </span>
-              <button
-                onClick={() => copyToClipboard(`location /n8n/ {\n    proxy_pass http://127.0.0.1:5678/;\n    proxy_http_version 1.1;\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;\n    proxy_buffering off;\n    proxy_cache off;\n}`, 'nginx-n8n')}
-                className="flex items-center gap-1 text-[11px] font-mono text-[#FF5A36] hover:underline font-bold"
-              >
-                {copiedKey === 'nginx-n8n' ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedKey === 'nginx-n8n' ? 'Copiado!' : 'Copiar bloco Nginx'}</span>
-              </button>
+              <p className="text-xs text-[#4A4A68] font-sans">Sempre teste a sintaxe antes de recarregar o servidor web:</p>
+              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
+{`sudo nginx -t && sudo systemctl reload nginx`}
+              </pre>
             </div>
 
-            <p className="text-xs text-[#4A4A68] leading-relaxed">
-              O n8n requer suporte obrigatório a WebSockets (<code className="font-mono font-bold text-[#1A1A2E]">Upgrade $http_upgrade</code>) para que a interface de criação de nós e nós de trigger em tempo real funcionem perfeitamente.
-            </p>
+            {/* Tailscale */}
+            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
+              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
+                <Lock className="w-4 h-4 text-[#12B76A]" />
+                Diagnóstico de Rede Tailscale WireGuard
+              </span>
+              <p className="text-xs text-[#4A4A68] font-sans">Verifica a conectividade segura da VPN ponto a ponto:</p>
+              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
+{`tailscale status
+tailscale ping 100.97.208.102`}
+              </pre>
+            </div>
 
-            <pre className="p-3 rounded bg-[#1A1A2E] text-[#ECFDF3] text-xs font-mono font-bold overflow-x-auto leading-relaxed">
-{`location /n8n/ {
-    proxy_pass http://127.0.0.1:5678/;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    proxy_buffering off;
-    proxy_cache off;
-}`}
-            </pre>
+            {/* Rollback Manual */}
+            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
+              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
+                <RotateCcw className="w-4 h-4 text-[#F04438]" />
+                Recuperação / Rollback Manual do Painel
+              </span>
+              <p className="text-xs text-[#4A4A68] font-sans">Restaura a cópia de segurança em caso de emergência:</p>
+              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
+{`sudo cp -a /var/www/server-panel.bak/. /var/www/server-panel/
+sudo systemctl restart server-panel`}
+              </pre>
+            </div>
           </div>
         </div>
       )}

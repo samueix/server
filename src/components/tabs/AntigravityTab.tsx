@@ -250,14 +250,15 @@ export const AntigravityTab: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-base font-black text-[#1A1A2E] font-title">
-                Google Antigravity & Agente Gemini AI
+                Lux — Agente IA do Ubuntu Server
               </h1>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#D1FADF] border border-[#12B76A] text-[#12B76A]">
                 <Sparkles className="w-3 h-3" />
-                gemini-3.8-flash
+                gemini-3.8-flash (Google GenAI)
               </span>
             </div>
             <p className="text-xs text-[#4A4A68] font-medium mt-0.5">
+              Assistente inteligente e engenheiro DevOps do host samuelserver para diagnóstico de rede, AdGuard DNS, UFW e automações.
               Console interativo do Agente Antigravity, monitoramento de tokens consumidos, limites de quota e histórico de sessões.
             </p>
           </div>

@@ -29,7 +29,29 @@ export interface AttackSource {
   ipType: 'local' | 'tailscale' | 'public' | 'docker' | 'loopback';
   ipTypeLabel: string;
   country?: string;
+  city?: string;
+  isp?: string;
   flag?: string;
+  failureReason?: 'senha_incorreta' | 'usuario_inexistente' | 'conexao_abortada' | 'scan_http' | 'outro';
+  failureReasonLabel?: string;
+}
+
+export interface SecurityIncident {
+  id: string;
+  timestamp: string;
+  hora: string;
+  service: string;
+  sourceIp: string;
+  targetUser: string;
+  failureReason: 'senha_incorreta' | 'usuario_inexistente' | 'conexao_abortada' | 'scan_http' | 'outro';
+  failureReasonLabel: string;
+  location: string;
+  country?: string;
+  city?: string;
+  isp?: string;
+  flag?: string;
+  detail: string;
+  severity: 'baixa' | 'media' | 'alta';
 }
 
 export interface SecurityStatusResponse {
@@ -42,13 +64,7 @@ export interface SecurityStatusResponse {
   nginxStatus: 'normal' | 'scans_detectados';
   attackSources: AttackSource[];
   targetAccounts: { user: string; attempts: number }[];
-  recentIncidents: {
-    timestamp: string;
-    service: string;
-    sourceIp: string;
-    detail: string;
-    severity: 'baixa' | 'media' | 'alta';
-  }[];
+  recentIncidents: SecurityIncident[];
   hourlyDistribution: { hour: string; count: number }[];
   blockedIpsInUfw: string[];
   ufwRules?: UfwRule[];
@@ -61,6 +77,60 @@ export interface SecurityStatusResponse {
 // Armazena falhas de autenticação do próprio painel em memória
 let panelFailedAttempts: { ip: string; user: string; timestamp: Date }[] = [];
 let historyClearedAt: Date | null = null;
+
+// Cache local de GeoIP em memória para resposta instantânea
+const geoCache = new Map<string, { country: string; city: string; isp: string; flag: string }>();
+
+function getFlagEmoji(countryCode: string): string {
+  if (!countryCode || countryCode.length !== 2) return '🌐';
+  const codePoints = countryCode
+    .toUpperCase()
+    .split('')
+    .map(char => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+}
+
+export async function resolveIpLocation(ip: string): Promise<{ country: string; city: string; isp: string; flag: string }> {
+  const cleanIp = ip.trim().replace(/^::ffff:/, '');
+  if (geoCache.has(cleanIp)) {
+    return geoCache.get(cleanIp)!;
+  }
+  const netInfo = classifyIpNetwork(cleanIp);
+  if (netInfo.type !== 'public') {
+    const loc = {
+      country: netInfo.country,
+      city: netInfo.type === 'local' ? 'Rede Local' : netInfo.type === 'tailscale' ? 'Tailscale' : 'Interno',
+      isp: 'Rede Local / VPN Segura',
+      flag: netInfo.flag
+    };
+    geoCache.set(cleanIp, loc);
+    return loc;
+  }
+
+  try {
+    const res = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,country,countryCode,city,isp,org`, {
+      signal: AbortSignal.timeout(1200)
+    });
+    if (res.ok) {
+      const data: any = await res.json();
+      if (data && data.status === 'success') {
+        const flag = data.countryCode ? getFlagEmoji(data.countryCode) : '🌐';
+        const loc = {
+          country: data.country || 'Desconhecido',
+          city: data.city || 'Desconhecida',
+          isp: data.org || data.isp || 'Provedor Desconhecido',
+          flag
+        };
+        geoCache.set(cleanIp, loc);
+        return loc;
+      }
+    }
+  } catch {}
+
+  const fallback = { country: 'Internet Pública (WAN)', city: 'WAN', isp: 'Externo', flag: '🌐' };
+  geoCache.set(cleanIp, fallback);
+  return fallback;
+}
 
 export function recordPanelFailedLogin(ip: string, user: string) {
   if (!isValidIp(ip)) return;
@@ -113,9 +183,16 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
   const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
   const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-  const ipCounts: Record<string, { count: number; lastAttempt: string; targetUser: string; service: string }> = {};
+  const ipCounts: Record<string, { 
+    count: number; 
+    lastAttempt: string; 
+    targetUser: string; 
+    service: string;
+    failureReason: 'senha_incorreta' | 'usuario_inexistente' | 'conexao_abortada' | 'scan_http' | 'outro';
+    failureReasonLabel: string;
+  }> = {};
   const userCounts: Record<string, number> = {};
-  const recentIncidents: SecurityStatusResponse['recentIncidents'] = [];
+  const recentIncidents: SecurityIncident[] = [];
   const hourlyBuckets: Record<string, number> = {};
 
   // Inicializa últimas 12 horas para o gráfico
@@ -173,7 +250,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
     }
   } catch {}
 
-  // 1. Ingestão robusta de logs do SSH com validação estrita de IP
+  // 1. Ingestão robusta de logs do SSH com detecção detalhada do motivo e hora exata
   if (!historyClearedAt || (now.getTime() - historyClearedAt.getTime() > 10000)) {
     try {
       let authLogContent = '';
@@ -186,7 +263,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
       if (fs.existsSync('/var/log/auth.log')) {
         try {
           const fileLog = fs.readFileSync('/var/log/auth.log', 'utf-8');
-          authLogContent += fileLog.slice(-100000) + '\n';
+          authLogContent += fileLog.slice(-120000) + '\n';
         } catch {
           try {
             const { stdout: sudoCat } = await execAsync('sudo tail -n 350 /var/log/auth.log 2>/dev/null || true');
@@ -213,7 +290,9 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
                     count: 0,
                     lastAttempt: new Date().toLocaleTimeString('pt-BR'),
                     targetUser: user,
-                    service: 'SSH (Porta 22)'
+                    service: 'SSH (Porta 22)',
+                    failureReason: 'senha_incorreta',
+                    failureReasonLabel: 'Senha Incorreta'
                   };
                 }
                 ipCounts[rawIp].count++;
@@ -257,32 +336,70 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
               userCounts[user] = (userCounts[user] || 0) + 1;
             }
 
+            // Identificação precisa do motivo do ataque / erro
+            let failureReason: 'senha_incorreta' | 'usuario_inexistente' | 'conexao_abortada' | 'outro' = 'outro';
+            let failureReasonLabel = 'Falha de autenticação';
+
+            if (line.includes('Invalid user')) {
+              failureReason = 'usuario_inexistente';
+              failureReasonLabel = 'Usuário Inexistente no Sistema';
+            } else if (line.includes('Failed password')) {
+              failureReason = 'senha_incorreta';
+              failureReasonLabel = 'Senha Incorreta (Usuário Existente)';
+            } else if (line.includes('Connection closed') || line.includes('Connection reset')) {
+              failureReason = 'conexao_abortada';
+              failureReasonLabel = 'Conexão Abortada / Timeout';
+            }
+
+            // Horário do evento para o gráfico e auditoria
+            let incidentTime = new Date().toLocaleTimeString('pt-BR');
+            let incidentHour = `${String(new Date().getHours()).padStart(2, '0')}:00`;
+            const dateMatch = line.match(/^([A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2})/);
+            const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
+
+            if (dateMatch) {
+              incidentTime = dateMatch[1];
+              const hMatch = dateMatch[1].match(/(\d{2}):/);
+              if (hMatch) incidentHour = `${hMatch[1]}:00`;
+            } else if (isoMatch) {
+              const d = new Date(isoMatch[1]);
+              incidentTime = `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR')}`;
+              incidentHour = `${String(d.getHours()).padStart(2, '0')}:00`;
+            }
+
+            if (hourlyBuckets[incidentHour] !== undefined) {
+              hourlyBuckets[incidentHour]++;
+            }
+
             if (!ipCounts[rawCandidate]) {
               ipCounts[rawCandidate] = {
                 count: 0,
-                lastAttempt: new Date().toLocaleTimeString('pt-BR'),
+                lastAttempt: incidentTime,
                 targetUser: user,
-                service: 'SSH (Porta 22)'
+                service: 'SSH (Porta 22)',
+                failureReason,
+                failureReasonLabel
               };
             }
             ipCounts[rawCandidate].count++;
+            ipCounts[rawCandidate].lastAttempt = incidentTime;
+            ipCounts[rawCandidate].targetUser = user;
+            ipCounts[rawCandidate].failureReason = failureReason;
+            ipCounts[rawCandidate].failureReasonLabel = failureReasonLabel;
 
-            // Horário do evento para o gráfico
-            const timeMatch = line.match(/(\d{2}):(\d{2}):\d{2}/);
-            if (timeMatch) {
-              const hourKey = `${timeMatch[1]}:00`;
-              if (hourlyBuckets[hourKey] !== undefined) {
-                hourlyBuckets[hourKey]++;
-              }
-            }
-
-            if (recentIncidents.length < 10) {
+            if (recentIncidents.length < 20) {
               recentIncidents.push({
-                timestamp: timeMatch ? `${timeMatch[1]}:${timeMatch[2]}` : new Date().toLocaleTimeString('pt-BR'),
-                service: 'SSH',
+                id: 'inc_' + Math.random().toString(36).slice(2, 9),
+                timestamp: incidentTime,
+                hora: incidentTime.includes(':') ? incidentTime.split(' ').pop() || incidentTime : incidentTime,
+                service: 'SSH (Porta 22)',
                 sourceIp: rawCandidate,
-                detail: `Tentativa de acesso para o usuário "${user}"`,
-                severity: (ipCounts[rawCandidate]?.count || 0) > 6 ? 'alta' : 'media'
+                targetUser: user,
+                failureReason,
+                failureReasonLabel,
+                location: 'Carregando geolocalização...',
+                detail: `${failureReasonLabel} para usuário "${user}"`,
+                severity: failureReason === 'senha_incorreta' ? 'alta' : 'media'
               });
             }
           }
@@ -320,7 +437,9 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
                     count: 0,
                     lastAttempt: new Date().toLocaleTimeString('pt-BR'),
                     targetUser: 'web_crawler',
-                    service: 'Nginx (Porta 80/443)'
+                    service: 'Nginx (Porta 80/443)',
+                    failureReason: 'scan_http',
+                    failureReasonLabel: 'Varredura HTTP / Path Traversal'
                   };
                 }
                 ipCounts[cleanIp].count++;
@@ -345,7 +464,9 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
           count: 0,
           lastAttempt: item.timestamp.toLocaleTimeString('pt-BR'),
           targetUser: item.user,
-          service: 'Server Panel Web'
+          service: 'Server Panel Web',
+          failureReason: 'senha_incorreta',
+          failureReasonLabel: 'Senha Incorreta no Painel Web'
         };
       }
       ipCounts[item.ip].count++;
@@ -385,11 +506,34 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
         ipType: classification.type,
         ipTypeLabel: classification.label,
         country: classification.country,
-        flag: classification.flag
+        flag: classification.flag,
+        failureReason: data.failureReason,
+        failureReasonLabel: data.failureReasonLabel
       };
     })
     .sort((a, b) => b.count - a.count)
     .slice(0, 30);
+
+  // 5. Enriquecer geolocalização (País, Cidade, Provedor e Bandeira) em paralelo
+  await Promise.all([
+    ...attackSources.map(async s => {
+      const loc = await resolveIpLocation(s.ip);
+      s.country = loc.country;
+      s.city = loc.city;
+      s.isp = loc.isp;
+      s.flag = loc.flag;
+    }),
+    ...recentIncidents.map(async inc => {
+      const loc = await resolveIpLocation(inc.sourceIp);
+      inc.country = loc.country;
+      inc.city = loc.city;
+      inc.isp = loc.isp;
+      inc.flag = loc.flag;
+      inc.location = loc.city && loc.city !== 'Desconhecida' && loc.city !== 'WAN' 
+        ? `${loc.city}, ${loc.country} ${loc.flag}`
+        : `${loc.country} ${loc.flag}`;
+    })
+  ]);
 
   const targetAccounts = Object.entries(userCounts)
     .map(([user, attempts]) => ({ user, attempts }))
