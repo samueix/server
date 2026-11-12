@@ -119,6 +119,9 @@ export const CommandsTab: React.FC = () => {
   const [opencodeCwd, setOpencodeCwd] = useState<string>('/opt/server-panel');
   const [opencodeRunning, setOpencodeRunning] = useState<boolean>(false);
   const [opencodeHistory, setOpencodeHistory] = useState<Array<{id:string; cmd:string; stdout:string; stderr:string; exitCode:number; cwd:string; ts:string}>>([]);
+  const [opencodeSessions, setOpencodeSessions] = useState<Array<{id:string; title:string; updated:string}>>([]);
+  const [showOpencodeSessions, setShowOpencodeSessions] = useState<boolean>(false);
+  const [loadingOpencodeSessions, setLoadingOpencodeSessions] = useState<boolean>(false);
   const opencodeEndRef = useRef<HTMLDivElement | null>(null);
 
 
@@ -170,6 +173,33 @@ export const CommandsTab: React.FC = () => {
   useEffect(() => {
     if (showOpencodeCli) opencodeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [opencodeHistory, opencodeRunning, showOpencodeCli]);
+
+  const loadOpencodeSessions = async () => {
+    setLoadingOpencodeSessions(true);
+    try {
+      const res = await executeTerminalCommand('/home/samuel/.opencode/bin/opencode session list', opencodeCwd);
+      const out = (res.stdout || '').split(/\r?\n/);
+      const parsed: Array<{id:string; title:string; updated:string}> = [];
+      for (const line of out) {
+        const m = line.match(/^(ses_[A-Za-z0-9]+)\s+(.*?)\s{2,}(.+)$/);
+        if (m) parsed.push({ id: m[1].trim(), title: m[2].trim(), updated: m[3].trim() });
+      }
+      setOpencodeSessions(parsed);
+      setShowOpencodeSessions(true);
+    } catch (e: any) {
+      setOpencodeHistory(prev => [...prev, {
+        id: `${Date.now()}-${Math.random()}`,
+        cmd: '/home/samuel/.opencode/bin/opencode session list',
+        stdout: '',
+        stderr: e?.message || 'Falha ao listar sessões',
+        exitCode: 1,
+        cwd: opencodeCwd,
+        ts: new Date().toLocaleTimeString('pt-BR')
+      }].slice(-200));
+    } finally {
+      setLoadingOpencodeSessions(false);
+    }
+  };
 
   const buildOpencodeCommand = (raw: string): string => {
     const input = raw.trim();
@@ -392,16 +422,43 @@ export const CommandsTab: React.FC = () => {
                 {opencodeModels.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
               <button onClick={()=>runOpencodeCli('/models')} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">/models</button>
+              <button onClick={loadOpencodeSessions} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Sessões antigas</button>
               <button onClick={()=>runOpencodeCli('/sessions')} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">/sessions</button>
-              <button onClick={()=>{setOpencodeHistory([]); setOpencodeSessionId('');}} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Nova sessão</button>
+              <button onClick={()=>{setOpencodeHistory([]); setOpencodeSessionId(''); setShowOpencodeSessions(false);}} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Nova sessão</button>
             </div>
           </div>
+          {showOpencodeSessions && (
+            <div className="border-b border-[#2E2E48] bg-[#121422] p-3 max-h-48 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-mono font-bold text-[#F1F5F9]">Sessões antigas (clique para continuar)</span>
+                <div className="flex items-center gap-2">
+                  <button onClick={loadOpencodeSessions} className="text-[11px] font-mono text-[#94A3B8] hover:text-white">{loadingOpencodeSessions ? 'Carregando...' : 'Atualizar'}</button>
+                  <button onClick={()=>setShowOpencodeSessions(false)} className="text-[11px] font-mono text-[#94A3B8] hover:text-white">Fechar</button>
+                </div>
+              </div>
+              {opencodeSessions.length === 0 ? (
+                <div className="text-[11px] font-mono text-[#94A3B8]">{loadingOpencodeSessions ? 'Buscando sessões...' : 'Nenhuma sessão encontrada.'}</div>
+              ) : (
+                <div className="space-y-1">
+                  {opencodeSessions.map(sess => (
+                    <button key={sess.id} onClick={()=>{ setOpencodeSessionId(sess.id); setShowOpencodeSessions(false); }} className={`w-full text-left px-2 py-1.5 rounded border text-[11px] font-mono ${opencodeSessionId===sess.id ? 'border-[#00A6FB] bg-[#0b2740] text-[#E0F2FE]' : 'border-[#2E2E48] hover:border-[#00A6FB] text-[#E2E8F0]'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[#38BDF8] truncate">{sess.id}</span>
+                        <span className="text-[#64748B] shrink-0">{sess.updated}</span>
+                      </div>
+                      <div className="text-[#94A3B8] truncate">{sess.title}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <div className="h-80 overflow-y-auto p-3 space-y-3 font-mono text-[13px] bg-[#0D0D15]">
             {opencodeHistory.length === 0 && (
               <div className="text-[#94A3B8] text-xs space-y-1">
-                <div>Terminal do <code className="text-[#38BDF8]">opencode</code> (CLI real via bash). Digite prompt ou comando:</div>
-                <div>• <code className="text-[#12B76A]">/help</code> <code className="text-[#12B76A]">/models</code> <code className="text-[#12B76A]">/sessions</code> • prompt: <code className="text-[#12B76A]">edite server.ts para ...</code> • slash skill: <code className="text-[#12B76A]">/skill-name args</code></div>
-                <div>• comando direto: <code className="text-[#12B76A]">opencode run "mensagem"</code> ou <code className="text-[#12B76A]">opencode models</code></div>
+                <div>Terminal do <code className="text-[#38BDF8]">opencode</code> CLI real (executa no servidor). Prompts editam código aqui.</div>
+                <div>• <code className="text-[#12B76A]">/help</code> <code className="text-[#12B76A]">/models</code> • <code className="text-[#12B76A]">Sessões antigas</code> para retomar • prompt: <code className="text-[#12B76A]">edite server.ts para ...</code></div>
+                <div>• slash/skills no prompt: <code className="text-[#12B76A]">/commit</code>, <code className="text-[#12B76A]">/review</code> etc. • direto: <code className="text-[#12B76A]">opencode models</code></div>
               </div>
             )}
             {opencodeHistory.map(item => (
