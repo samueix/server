@@ -20,7 +20,8 @@ import {
   PlusCircle, 
   AlertCircle,
   ExternalLink,
-  Code
+  Code,
+  Shield
 } from 'lucide-react';
 import { getAuthHeaders } from '../../services/authService';
 
@@ -87,6 +88,13 @@ export const OpencodeTab: React.FC = () => {
   
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
+  const [showAdGuardPanel, setShowAdGuardPanel] = useState<boolean>(false);
+  const adguardPanelUrl = (() => {
+    if (typeof window === 'undefined') return ':8081/#';
+    const host = window.location.hostname || '127.0.0.1';
+    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    return `${window.location.protocol}//${formattedHost}:8081/#`;
+  })();
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -327,41 +335,64 @@ export const OpencodeTab: React.FC = () => {
         </div>
 
         {/* Sub-Tabs Selector */}
-        <div className="flex items-center border-2 border-[#1A1A2E] rounded-lg overflow-hidden shadow-[2px_2px_0px_#1A1A2E] bg-white self-start md:self-auto">
+        <div className="flex items-center gap-2 flex-wrap self-start md:self-auto">
           <button
-            onClick={() => setActiveSubTab('chat')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition ${
-              activeSubTab === 'chat' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
-            }`}
+            onClick={() => setShowAdGuardPanel(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none ${showAdGuardPanel ? 'bg-[#D1FADF] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#ECFDF3] text-[#1A1A2E]'}`}
+            title="Abrir painel nativo do AdGuard Home integrado ao chat"
           >
-            <Bot className="w-3.5 h-3.5" />
-            <span>Agente Interativo</span>
+            <Shield className="w-3.5 h-3.5 text-[#12B76A]" />
+            <span>{showAdGuardPanel ? 'Ocultar AdGuard' : 'Painel AdGuard'}</span>
           </button>
+          <div className="flex items-center border-2 border-[#1A1A2E] rounded-lg overflow-hidden shadow-[2px_2px_0px_#1A1A2E] bg-white">
+            <button
+              onClick={() => setActiveSubTab('chat')}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition ${
+                activeSubTab === 'chat' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
+              }`}
+            >
+              <Bot className="w-3.5 h-3.5" />
+              <span>Agente Interativo</span>
+            </button>
 
-          <button
-            onClick={() => { setActiveSubTab('tokens'); fetchMetrics(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition border-l-2 border-[#1A1A2E] ${
-              activeSubTab === 'tokens' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>Tokens & Limites</span>
-          </button>
+            <button
+              onClick={() => { setActiveSubTab('tokens'); fetchMetrics(); }}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition border-l-2 border-[#1A1A2E] ${
+                activeSubTab === 'tokens' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Tokens & Limites</span>
+            </button>
 
-          <button
-            onClick={() => { setActiveSubTab('history'); fetchSessions(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition border-l-2 border-[#1A1A2E] ${
-              activeSubTab === 'history' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>Conversas Anteriores</span>
-          </button>
+            <button
+              onClick={() => { setActiveSubTab('history'); fetchSessions(); }}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition border-l-2 border-[#1A1A2E] ${
+                activeSubTab === 'history' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
+              }`}
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>Conversas Anteriores</span>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* SUB-ABA 1: AGENTE INTERATIVO (CHAT & CLI) */}
       {activeSubTab === 'chat' && (
+        <>
+          {showAdGuardPanel && (
+            <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-[#12B76A]" />
+                  <span className="text-xs font-mono font-black text-[#1A1A2E]">AdGuard Home integrado — consulte/edite filtros, clientes, DNS e rotas enquanto conversa com o agente</span>
+                </div>
+                <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+              </div>
+              <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '60vh', minHeight: '520px', border: '0' }} />
+            </div>
+          )}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Coluna Central do Chat */}
           <div className="lg:col-span-8 flex flex-col h-[680px] bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
@@ -631,6 +662,7 @@ export const OpencodeTab: React.FC = () => {
             </div>
           </div>
         </div>
+        </>
       )}
 
       {/* SUB-ABA 2: CONSUMO DE TOKENS & LIMITES DE QUOTA */}

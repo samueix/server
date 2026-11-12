@@ -108,6 +108,13 @@ export const CommandsTab: React.FC = () => {
 
   // Estado visual de tela cheia expandida
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+  const [showAdGuardPanel, setShowAdGuardPanel] = useState<boolean>(false);
+  const adguardPanelUrl = (() => {
+    if (typeof window === 'undefined') return ':8081/#';
+    const host = window.location.hostname || '127.0.0.1';
+    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    return `${window.location.protocol}//${formattedHost}:8081/#`;
+  })();
 
   // Estados de confirmação dupla (Etapa 1 e Etapa 2)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
@@ -263,6 +270,15 @@ export const CommandsTab: React.FC = () => {
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
+            onClick={() => setShowAdGuardPanel(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#12B76A] ${showAdGuardPanel ? 'bg-[#D1FADF] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#ECFDF3] text-[#1A1A2E]'}`}
+            title="Abrir painel nativo do AdGuard Home integrado ao shell"
+          >
+            <Shield className="w-3.5 h-3.5 text-[#12B76A]" />
+            <span>{showAdGuardPanel ? 'Ocultar AdGuard' : 'Painel AdGuard'}</span>
+          </button>
+
+          <button
             onClick={() => setAnatomyCommand(commandInput || 'uptime')}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
             title="Aprender como o comando digitado funciona"
@@ -281,6 +297,20 @@ export const CommandsTab: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* PAINEL ADGUARD INTEGRADO AO SHELL */}
+      {showAdGuardPanel && (
+        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-[#12B76A]" />
+              <span className="text-xs font-mono font-black text-[#1A1A2E]">AdGuard Home integrado — edite/verifique filtros, clientes, DNS e todas as rotas aqui enquanto usa o shell abaixo</span>
+            </div>
+            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+          </div>
+          <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '68vh', minHeight: '620px', border: '0' }} />
+        </div>
+      )}
 
       {/* CARD: ATUALIZAÇÃO DIRETA DO GIT NO SHELL */}
       <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 sm:p-5 space-y-3">

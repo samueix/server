@@ -46,7 +46,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<string>('--:--:--');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [activeSubTab, setActiveSubTab] = useState<'native' | 'overview' | 'queries' | 'blocked' | 'clients' | 'upstreams'>('native');
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'queries' | 'blocked' | 'clients' | 'upstreams'>('overview');
   const [showClearModal, setShowClearModal] = useState<boolean>(false);
   const [clearShellCmd, setClearShellCmd] = useState<string>('');
   const [isClearing, setIsClearing] = useState<boolean>(false);
@@ -405,16 +405,6 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-3.5">
         <div className="flex items-center gap-1.5 overflow-x-auto">
           <button
-            onClick={() => setActiveSubTab('native')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
-              activeSubTab === 'native'
-                ? 'bg-[#FF5A36] text-white'
-                : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-            }`}
-          >
-            Painel AdGuard (integrado)
-          </button>
-          <button
             onClick={() => setActiveSubTab('overview')}
             className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
               activeSubTab === 'overview'
@@ -467,52 +457,17 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </button>
         </div>
 
-        {activeSubTab !== 'native' && (
-          <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 text-[#717188] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Filtrar domínio, cliente ou regra..."
-              className="w-full pl-9 pr-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Tab 0: Native AdGuard Panel Embedded */}
-      {activeSubTab === 'native' && (
-        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 border-b-2 border-[#1A1A2E] bg-[#FFF7E8]">
-            <span className="text-xs font-mono font-bold text-[#1A1A2E]">Painel nativo do AdGuard Home integrado (todas as rotas/funções)</span>
-            <a
-              href={(() => {
-                if (typeof window === 'undefined') return ':8081/#';
-                const host = window.location.hostname || '127.0.0.1';
-                const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-                return `${window.location.protocol}//${formattedHost}:8081/#`;
-              })()}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline"
-            >
-              Abrir em nova aba
-            </a>
-          </div>
-          <iframe
-            src={(() => {
-              if (typeof window === 'undefined') return ':8081/#';
-              const host = window.location.hostname || '127.0.0.1';
-              const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-              return `${window.location.protocol}//${formattedHost}:8081/#`;
-            })()}
-            title="AdGuard Home"
-            className="w-full bg-white"
-            style={{ height: '78vh', minHeight: '720px', border: '0' }}
+        <div className="relative w-full sm:w-64">
+          <Search className="w-4 h-4 text-[#717188] absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filtrar domínio, cliente ou regra..."
+            className="w-full pl-9 pr-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
           />
         </div>
-      )}
+      </div>
 
       {/* Tab 1: Overview */}
       {activeSubTab === 'overview' && (
