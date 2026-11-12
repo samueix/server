@@ -270,7 +270,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
       {showAdGuardPanel && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
-            <span className="text-xs font-mono font-black text-[#1A1A2E]">AdGuard Home integrado — edite/verifique filtros, clientes, DNS e todas as rotas aqui</span>
+            <span className="text-xs font-mono font-black text-[#1A1A2E]">AdGuard Home integrado — edite/verifique filtros, listas, clientes, DNS e todas as rotas aqui</span>
             <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
           </div>
           <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '75vh', minHeight: '680px', border: '0' }} />
