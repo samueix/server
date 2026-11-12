@@ -31,7 +31,7 @@ mkdir -p data
 if [ ! -f .env ]; then
     echo "📝 Criando .env a partir de .env.example..."
     cp .env.example .env
-    echo "⚠️ Por favor, edite o arquivo .env com a sua GEMINI_API_KEY e credenciais do AdGuard se necessário."
+    echo "⚠️ Por favor, edite o arquivo .env com OPENCODE_BIN, OPENCODE_MODEL e credenciais do AdGuard se necessário."
 fi
 
 # 6. Configurar serviço Systemd (opcional)

@@ -33,17 +33,16 @@ import {
   saveAnalyzedDomain, 
   DomainAnalysis 
 } from './server/db.js';
-import { analyzeDomainWithGemini } from './server/gemini.js';
+import { analyzeDomainWithOpencode } from './server/opencode.js';
 import { listDirectory, readTargetFile, createTargetFile, saveTargetFile, assertPathSecurity } from './server/fileExplorer.js';
 import { 
   getTokenQuotaMetrics, 
-  listAntigravitySessions, 
-  getAntigravitySession, 
-  createAntigravitySession, 
-  deleteAntigravitySession, 
-  askAntigravityAgent,
-  executeAntigravityCli
-} from './server/antigravity.js';
+  listOpencodeSessions, 
+  getOpencodeSession, 
+  createOpencodeSession, 
+  deleteOpencodeSession, 
+  askOpencodeAgent
+} from './server/opencode.js';
 import { runShellCommand } from './server/terminalRunner.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { 
@@ -871,8 +870,8 @@ export function createApp() {
     }
   });
 
-  // Rotas do Google Antigravity & AI Tokens
-  app.get('/api/antigravity/tokens', requireAdminAuth, (req, res) => {
+  // Rotas do Opencode & AI Tokens
+  app.get('/api/opencode/tokens', requireAdminAuth, (req, res) => {
     try {
       const metrics = getTokenQuotaMetrics();
       return res.json(metrics);
@@ -881,63 +880,50 @@ export function createApp() {
     }
   });
 
-  app.get('/api/antigravity/sessions', requireAdminAuth, (req, res) => {
+  app.get('/api/opencode/sessions', requireAdminAuth, (req, res) => {
     try {
-      const sessions = listAntigravitySessions();
+      const sessions = listOpencodeSessions();
       return res.json(sessions);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });
 
-  app.get('/api/antigravity/sessions/:id', requireAdminAuth, (req, res) => {
+  app.get('/api/opencode/sessions/:id', requireAdminAuth, (req, res) => {
     try {
-      const data = getAntigravitySession(req.params.id);
+      const data = getOpencodeSession(req.params.id);
       return res.json(data);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });
 
-  app.post('/api/antigravity/sessions/new', requireAdminAuth, (req, res) => {
+  app.post('/api/opencode/sessions/new', requireAdminAuth, (req, res) => {
     try {
       const title = (req.body?.title as string) || '';
-      const session = createAntigravitySession(title);
+      const session = createOpencodeSession(title);
       return res.json(session);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });
 
-  app.delete('/api/antigravity/sessions/:id', requireAdminAuth, (req, res) => {
+  app.delete('/api/opencode/sessions/:id', requireAdminAuth, (req, res) => {
     try {
-      const deleted = deleteAntigravitySession(req.params.id);
+      const deleted = deleteOpencodeSession(req.params.id);
       return res.json({ success: deleted });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
   });
 
-  app.post('/api/antigravity/chat', requireAdminAuth, async (req, res) => {
+  app.post('/api/opencode/chat', requireAdminAuth, async (req, res) => {
     try {
       const { sessionId, prompt } = req.body || {};
       if (!prompt || typeof prompt !== 'string') {
         return res.status(400).json({ error: 'Prompt é obrigatório.' });
       }
-      const result = await askAntigravityAgent(sessionId || '', prompt);
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/antigravity/cli-exec', requireAdminAuth, async (req, res) => {
-    try {
-      const { command } = req.body || {};
-      if (!command) {
-        return res.status(400).json({ error: 'Comando CLI é obrigatório.' });
-      }
-      const result = await executeAntigravityCli(command);
+      const result = await askOpencodeAgent(sessionId || '', prompt);
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -1412,8 +1398,8 @@ export function createApp() {
         }
       }
 
-      console.log(`[AI Analyzer] Chamando Gemini para analisar novo domínio: ${clean}`);
-      const analysis = await analyzeDomainWithGemini(clean);
+      console.log(`[AI Analyzer] Chamando Opencode para analisar novo domínio: ${clean}`);
+      const analysis = await analyzeDomainWithOpencode(clean);
       analysis.is_blocked_by_adguard = true;
 
       // Preserve previous block count if available
@@ -1464,8 +1450,8 @@ export function createApp() {
         if (cached && cached.organization !== 'Pendente de Análise') {
           results.push(cached);
         } else {
-          console.log(`[AI Batch Analyzer] Processando com Gemini: ${dom}`);
-          const analysis = await analyzeDomainWithGemini(dom);
+          console.log(`[AI Batch Analyzer] Processando com Opencode: ${dom}`);
+          const analysis = await analyzeDomainWithOpencode(dom);
           analysis.is_blocked_by_adguard = true;
           saveAnalyzedDomain(analysis);
           results.push(analysis);

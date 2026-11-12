@@ -59,7 +59,7 @@ export const AdGuardAiDashboard: React.FC = () => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [isAnalyzingBatch, setIsAnalyzingBatch] = useState<boolean>(false);
   const [analyzingDomains, setAnalyzingDomains] = useState<Record<string, boolean>>({});
-  const [geminiKeyWarning, setGeminiKeyWarning] = useState<boolean>(false);
+  const [aiAnalysisWarning, setAiAnalysisWarning] = useState<boolean>(false);
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(1); // 1 segundo (polling rápido contínuo)
   const [lastUpdated, setLastUpdated] = useState<string>('--:--:--');
   const [prevQueriesCount, setPrevQueriesCount] = useState<number>(stats?.num_dns_queries || 0);
@@ -147,8 +147,8 @@ export const AdGuardAiDashboard: React.FC = () => {
         if (selectedDomainForDetail && selectedDomainForDetail.domain === domainName) {
           setSelectedDomainForDetail(res.analysis);
         }
-        if (res.analysis.explanation?.includes('GEMINI_API_KEY') || res.analysis.organization?.includes('API Key')) {
-          setGeminiKeyWarning(true);
+        if (res.analysis.explanation?.includes('opencode') || res.analysis.organization?.includes('indisponível')) {
+          setAiAnalysisWarning(true);
         }
       }
     } catch (err) {
@@ -166,8 +166,8 @@ export const AdGuardAiDashboard: React.FC = () => {
         if (selectedDomainForDetail && selectedDomainForDetail.domain === domainName) {
           setSelectedDomainForDetail(res.analysis);
         }
-        if (res.analysis.explanation?.includes('GEMINI_API_KEY') || res.analysis.organization?.includes('API Key')) {
-          setGeminiKeyWarning(true);
+        if (res.analysis.explanation?.includes('opencode') || res.analysis.organization?.includes('indisponível')) {
+          setAiAnalysisWarning(true);
         }
       }
     } catch (err) {
@@ -186,9 +186,9 @@ export const AdGuardAiDashboard: React.FC = () => {
       setDomains(domainList);
       if (batchRes && Array.isArray(batchRes.results)) {
         const hasMissingKey = batchRes.results.some((r: any) => 
-          r.explanation?.includes('GEMINI_API_KEY') || r.organization?.includes('API Key')
+          r.explanation?.includes('opencode') || r.organization?.includes('indisponível')
         );
-        if (hasMissingKey) setGeminiKeyWarning(true);
+        if (hasMissingKey) setAiAnalysisWarning(true);
       }
     } catch (err) {
       console.error('Erro na análise em lote:', err);
@@ -329,7 +329,7 @@ export const AdGuardAiDashboard: React.FC = () => {
                 <span className="text-[#1A1A2E]/30">·</span>
                 <span className="text-[#00A6FB] font-semibold">Camada direta frontend</span>
                 <span className="text-[#1A1A2E]/30">·</span>
-                <span className="text-[#FF5A36] font-semibold">IA Gemini & cache local</span>
+                <span className="text-[#FF5A36] font-semibold">IA Opencode & cache local</span>
               </p>
             </div>
           </div>
@@ -480,22 +480,22 @@ export const AdGuardAiDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Aviso amigável caso a GEMINI_API_KEY não esteja configurada */}
-      {geminiKeyWarning && (
+      {/* Aviso amigável caso a OPENCODE_BIN não esteja configurada */}
+      {aiAnalysisWarning && (
         <div className="p-3.5 rounded-xl bg-[#EFF8FF] border-2 border-[#00A6FB] shadow-[4px_4px_0px_#1A1A2E] text-xs text-[#1A1A2E] flex items-start justify-between gap-3">
           <div className="flex items-start gap-2.5">
             <Sparkles className="w-4 h-4 text-[#00A6FB] shrink-0 mt-0.5" />
             <div className="space-y-1">
               <span className="font-bold text-[#00A6FB] block font-title">
-                IA Gemini 3.8 Flash · Chave de API não configurada
+                IA Opencode · análise indisponível
               </span>
               <p className="text-[#4A4A68] leading-relaxed">
-                A variável <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-[#00A6FB]/30 text-[#00A6FB] font-bold">GEMINI_API_KEY</code> não foi inserida no arquivo <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-[#00A6FB]/30 text-[#00A6FB] font-bold">.env</code> do seu Ubuntu Server. O painel continua funcionando perfeitamente com todas as regras locais e o cache do banco SQLite, mas para habilitar a geração de novos dossiês inteligentes com IA para domínios desconhecidos, adicione a chave no seu <code className="font-mono">.env</code>.
+                A variável <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-[#00A6FB]/30 text-[#00A6FB] font-bold">OPENCODE_BIN</code> não foi inserida no arquivo <code className="font-mono bg-white px-1.5 py-0.5 rounded border border-[#00A6FB]/30 text-[#00A6FB] font-bold">.env</code> do seu Ubuntu Server. O painel continua funcionando perfeitamente com todas as regras locais e o cache do banco SQLite, mas para habilitar a geração de novos dossiês inteligentes com IA para domínios desconhecidos, adicione as variáveis OPENCODE_BIN e OPENCODE_MODEL no seu <code className="font-mono">.env</code>.
               </p>
             </div>
           </div>
           <button
-            onClick={() => setGeminiKeyWarning(false)}
+            onClick={() => setAiAnalysisWarning(false)}
             className="p-1 rounded-md text-[#4A4A68] hover:text-[#1A1A2E] hover:bg-white/80 transition"
             title="Fechar aviso"
           >
@@ -892,7 +892,7 @@ export const AdGuardAiDashboard: React.FC = () => {
                               }}
                               disabled={analyzingDomains[item.domain]}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs bg-[#FFF7E8] hover:bg-[#FFC857] text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] transition font-mono font-bold disabled:opacity-50"
-                              title="Analisar heurística e classificação com IA Gemini 3.8 Flash"
+                              title="Analisar heurística e classificação com Opencode"
                             >
                               <Sparkles className={`w-3.5 h-3.5 text-[#FF5A36] ${analyzingDomains[item.domain] ? 'animate-spin' : ''}`} />
                               <span>{analyzingDomains[item.domain] ? 'Analisando...' : 'Analisar com IA'}</span>

@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { getAuthHeaders } from '../../services/authService';
 
-interface AntigravityMessage {
+interface OpencodeMessage {
   id: string;
   sessionId: string;
   role: 'user' | 'assistant' | 'system';
@@ -34,7 +34,7 @@ interface AntigravityMessage {
   timestamp: string;
 }
 
-interface AntigravitySession {
+interface OpencodeSession {
   id: string;
   title: string;
   createdAt: string;
@@ -45,7 +45,7 @@ interface AntigravitySession {
   totalTokens: number;
   messageCount: number;
   lastMessagePreview?: string;
-  messages?: AntigravityMessage[];
+  messages?: OpencodeMessage[];
 }
 
 interface TokenQuotaMetrics {
@@ -63,12 +63,12 @@ interface TokenQuotaMetrics {
   historyByDay: { date: string; tokens: number; requests: number }[];
 }
 
-export const AntigravityTab: React.FC = () => {
+export const OpencodeTab: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'chat' | 'tokens' | 'history'>('chat');
   const [metrics, setMetrics] = useState<TokenQuotaMetrics | null>(null);
-  const [sessions, setSessions] = useState<AntigravitySession[]>([]);
+  const [sessions, setSessions] = useState<OpencodeSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
-  const [messages, setMessages] = useState<AntigravityMessage[]>([]);
+  const [messages, setMessages] = useState<OpencodeMessage[]>([]);
   
   const [prompt, setPrompt] = useState<string>('');
   const [sending, setSending] = useState<boolean>(false);
@@ -82,7 +82,7 @@ export const AntigravityTab: React.FC = () => {
 
   const fetchMetrics = async () => {
     try {
-      const res = await fetch('/api/antigravity/tokens', {
+      const res = await fetch('/api/opencode/tokens', {
         headers: { 'Accept': 'application/json', ...getAuthHeaders() }
       });
       if (res.ok) {
@@ -95,7 +95,7 @@ export const AntigravityTab: React.FC = () => {
   const fetchSessions = async () => {
     setLoadingHistory(true);
     try {
-      const res = await fetch('/api/antigravity/sessions', {
+      const res = await fetch('/api/opencode/sessions', {
         headers: { 'Accept': 'application/json', ...getAuthHeaders() }
       });
       if (res.ok) {
@@ -114,7 +114,7 @@ export const AntigravityTab: React.FC = () => {
   const loadSessionMessages = async (sessionId: string) => {
     setCurrentSessionId(sessionId);
     try {
-      const res = await fetch(`/api/antigravity/sessions/${sessionId}`, {
+      const res = await fetch(`/api/opencode/sessions/${sessionId}`, {
         headers: { 'Accept': 'application/json', ...getAuthHeaders() }
       });
       if (res.ok) {
@@ -126,10 +126,10 @@ export const AntigravityTab: React.FC = () => {
 
   const handleStartNewSession = async () => {
     try {
-      const res = await fetch('/api/antigravity/sessions/new', {
+      const res = await fetch('/api/opencode/sessions/new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ title: 'Nova Sessão com Agente Antigravity' })
+        body: JSON.stringify({ title: 'Nova Sessão com Agente Opencode' })
       });
       if (res.ok) {
         const newSess = await res.json();
@@ -144,7 +144,7 @@ export const AntigravityTab: React.FC = () => {
   const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
-      await fetch(`/api/antigravity/sessions/${sessionId}`, {
+      await fetch(`/api/opencode/sessions/${sessionId}`, {
         method: 'DELETE',
         headers: { ...getAuthHeaders() }
       });
@@ -165,7 +165,7 @@ export const AntigravityTab: React.FC = () => {
     setPrompt('');
 
     // Adiciona temporariamente mensagem local do usuário
-    const tempUserMsg: AntigravityMessage = {
+    const tempUserMsg: OpencodeMessage = {
       id: 'temp_' + Date.now(),
       sessionId: currentSessionId,
       role: 'user',
@@ -175,7 +175,7 @@ export const AntigravityTab: React.FC = () => {
     setMessages(prev => [...prev, tempUserMsg]);
 
     try {
-      const res = await fetch('/api/antigravity/chat', {
+      const res = await fetch('/api/opencode/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -250,16 +250,16 @@ export const AntigravityTab: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-base font-black text-[#1A1A2E] font-title">
-                Lux — Agente IA do Ubuntu Server
+                Opencode — Agente IA do Ubuntu Server
               </h1>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#D1FADF] border border-[#12B76A] text-[#12B76A]">
                 <Sparkles className="w-3 h-3" />
-                gemini-3.8-flash (Google GenAI)
+                opencode/big-pickle
               </span>
             </div>
             <p className="text-xs text-[#4A4A68] font-medium mt-0.5">
               Assistente inteligente e engenheiro DevOps do host samuelserver para diagnóstico de rede, AdGuard DNS, UFW e automações.
-              Console interativo do Agente Antigravity, monitoramento de tokens consumidos, limites de quota e histórico de sessões.
+              Console interativo do Agente Opencode, monitoramento de tokens consumidos, limites de quota e histórico de sessões.
             </p>
           </div>
         </div>
@@ -367,7 +367,7 @@ export const AntigravityTab: React.FC = () => {
                         <div className="flex items-center justify-between gap-2 border-b border-[#E2DFD8] pb-1.5 text-[11px] font-mono text-[#717188]">
                           <span className="font-bold flex items-center gap-1 text-[#00A6FB]">
                             <Sparkles className="w-3 h-3" />
-                            Antigravity Agent
+                            Opencode Agent
                           </span>
                           <div className="flex items-center gap-2">
                             {msg.tokensUsed && (
@@ -423,7 +423,7 @@ export const AntigravityTab: React.FC = () => {
               {sending && (
                 <div className="flex items-center gap-2 p-3 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] max-w-xs text-xs font-mono font-bold text-[#717188]">
                   <RefreshCw className="w-4 h-4 animate-spin text-[#FF5A36]" />
-                  <span>Antigravity processando sua solicitação...</span>
+                  <span>Opencode processando sua solicitação...</span>
                 </div>
               )}
 
@@ -451,7 +451,7 @@ export const AntigravityTab: React.FC = () => {
                   type="text"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Pergunte ao Antigravity sobre seu servidor Ubuntu, Nginx, AdGuard ou Tailscale..."
+                  placeholder="Pergunte ao Opencode sobre seu servidor Ubuntu, Nginx, AdGuard ou Tailscale..."
                   className="flex-1 p-2.5 bg-[#FFF7E8]/60 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] placeholder-[#717188] focus:outline-none focus:border-[#FF5A36] focus:bg-white"
                 />
                 <button
@@ -508,7 +508,7 @@ export const AntigravityTab: React.FC = () => {
               <div className="p-2.5 bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg space-y-1.5 text-[11px] font-mono">
                 <div className="flex justify-between">
                   <span className="text-[#717188]">Modelo Ativo:</span>
-                  <span className="font-bold text-[#1A1A2E]">gemini-3.8-flash</span>
+                  <span className="font-bold text-[#1A1A2E]">opencode/big-pickle</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#717188]">Limite RPM (Req/Min):</span>
@@ -561,7 +561,7 @@ export const AntigravityTab: React.FC = () => {
                 4.000.000
               </div>
               <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                gemini-3.8-flash Quota Base
+                opencode/big-pickle Quota Base
               </span>
             </div>
 
@@ -639,7 +639,7 @@ export const AntigravityTab: React.FC = () => {
                 Histórico de Diálogos & Sessões Anteriores
               </h2>
               <p className="text-xs text-[#717188]">
-                Todas as interações e análises do Agente Antigravity salvas no banco de dados local.
+                Todas as interações e análises do Agente Opencode salvas no banco de dados local.
               </p>
             </div>
             <button

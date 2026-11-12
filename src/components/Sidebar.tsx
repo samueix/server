@@ -49,7 +49,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'monitoring', label: 'Monitoramento', icon: Activity },
   { id: 'adguard', label: 'AdGuard Home', icon: Shield },
   { id: 'ping', label: 'Ping / Latência', icon: Radio },
-  { id: 'antigravity', label: 'Lux & IA (Ubuntu)', icon: Bot, badge: 'Lux AI', adminOnly: true },
+  { id: 'opencode', label: 'Opencode & IA (Ubuntu)', icon: Bot, badge: 'Opencode', adminOnly: true },
   { id: 'files', label: 'Arquivos', icon: Folder, adminOnly: true },
   { id: 'security', label: 'Segurança & Ataques', icon: ShieldAlert, badge: 'Auditor', adminOnly: true },
   { id: 'credentials', label: 'Credenciais & APIs', icon: Key, badge: 'Config', adminOnly: true },
@@ -137,13 +137,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Pinguim Lux do Ubuntu */}
+      {/* Pinguim Opencode do Ubuntu */}
       <div className="mt-2 p-2 rounded-lg bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center gap-2.5">
         <div className="w-8 h-8 rounded-md bg-[#FFF7E8] border border-[#1A1A2E] flex items-center justify-center p-0.5 shrink-0">
-          <img src="/download.gif" alt="Lux" className="w-7 h-7 object-contain" />
+          <img src="/download.gif" alt="Opencode" className="w-7 h-7 object-contain" />
         </div>
         <div className="leading-tight min-w-0">
-          <span className="text-[11px] font-black font-title text-[#1A1A2E] block truncate">Ubuntu Lux</span>
+          <span className="text-[11px] font-black font-title text-[#1A1A2E] block truncate">Opencode</span>
           <span className="text-[10px] font-mono font-bold text-[#12B76A] block">Sistema Ativo</span>
         </div>
       </div>

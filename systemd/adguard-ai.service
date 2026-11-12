@@ -12,7 +12,11 @@ Environment=PORT=3000
 Environment=ADGUARD_URL=http://127.0.0.1:8081
 Environment=ADGUARD_USERNAME=samuel
 Environment=ADGUARD_PASSWORD=sua_senha_adguard
-Environment=GEMINI_API_KEY=sua_chave_gemini_aqui
+Environment=OPENCODE_BIN=/home/samuel/.opencode/bin/opencode
+Environment=OPENCODE_HOME=/home/samuel
+Environment=OPENCODE_DIR=/home/samuel/opencode
+Environment=OPENCODE_MODEL=opencode/big-pickle
+Environment=OPENCODE_AGENT=plan
 
 ExecStart=/usr/bin/npm start
 Restart=always

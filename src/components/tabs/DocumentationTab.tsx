@@ -95,7 +95,7 @@ export const DocumentationTab: React.FC = () => {
       whatYouCanDo: [
         'Verificar consultas totais, permitidas e bloqueadas em 24h ou 2h com tooltip sincronizado.',
         'Consultar servidores upstream ativos (Cloudflare DNS, Quad9, Google) e seus tempos de resposta.',
-        'Ativar Dossiê Inteligente com IA Gemini para explicar a finalidade de qualquer domínio bloqueado.'
+        'Ativar Dossiê Inteligente com IA Opencode para explicar a finalidade de qualquer domínio bloqueado.'
       ],
       indicators: [
         { label: 'Taxa de Bloqueio (%)', desc: 'Percentual de requisições de DNS que foram retidas por listas de bloqueio.' },
@@ -125,23 +125,23 @@ export const DocumentationTab: React.FC = () => {
       troubleshooting: 'Se o gateway local aparecer como inativo, confirme se o roteador aceita ICMP ping ou responde na porta 53/80.'
     },
     {
-      id: 'antigravity',
-      name: '5. Lux & IA (Ubuntu)',
+      id: 'opencode',
+      name: '5. Opencode & IA (Ubuntu)',
       icon: Bot,
-      summary: 'Agente inteligente oficial do Ubuntu Server impulsionado pelo modelo Gemini 3.8 Flash.',
+      summary: 'Agente inteligente oficial do Ubuntu Server impulsionado pela CLI local do opencode.',
       purpose: 'Auxiliar na administração, geração de scripts e diagnóstico avançado do host samuelserver com raciocínio DevOps.',
       whatYouCanDo: [
-        'Conversar com o Agente Lux sobre diagnósticos de rede, firewall, Nginx e automações.',
+        'Conversar com o Opencode sobre diagnósticos de rede, firewall, Nginx e automações.',
         'Acompanhar cota de tokens consumidos, histórico diário e limites de requisição por minuto (RPM/TPM).',
         'Salvar e alternar entre múltiplas sessões de auditoria com histórico persistido em disco.'
       ],
       indicators: [
         { label: 'Tokens Usados Hoje', desc: 'Total acumulado de tokens de entrada e saída consumidos na data atual.' },
-        { label: 'Quota Diária', desc: 'Percentual de uso da quota gratuita recomendada pelo Google GenAI SDK.' }
+        { label: 'Quota Diária', desc: 'Percentual de uso da quota de tokens processados pelo agente opencode.' }
       ],
-      apis: 'POST /api/antigravity/message, GET /api/antigravity/metrics, GET /api/antigravity/sessions',
+      apis: 'POST /api/opencode/chat, GET /api/opencode/tokens, GET /api/opencode/sessions',
       permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Certifique-se de configurar a variável GEMINI_API_KEY no arquivo /opt/server-panel/.env para ativar o agente em produção.'
+      troubleshooting: 'Certifique-se de configurar OPENCODE_BIN e OPENCODE_MODEL no arquivo /opt/server-panel/.env para ativar o agente em produção.'
     },
     {
       id: 'files',
@@ -186,7 +186,7 @@ export const DocumentationTab: React.FC = () => {
       name: '8. Credenciais & APIs',
       icon: Key,
       summary: 'Central de chaves de API, variáveis de ambiente e gerenciamento de senhas de acesso.',
-      purpose: 'Centralizar e atualizar parâmetros de conexão (AdGuard, n8n, Gemini) e senhas do painel sem editar arquivos manualmente.',
+      purpose: 'Centralizar e atualizar parâmetros de conexão (AdGuard, n8n, Opencode) e senhas do painel sem editar arquivos manualmente.',
       whatYouCanDo: [
         'Alterar as credenciais de login do Administrador e Operador.',
         'Configurar credenciais da API do AdGuard Home e tokens do n8n.',
@@ -363,12 +363,12 @@ export const DocumentationTab: React.FC = () => {
                 Manual Operacional & Documentação Técnica do Sistema
               </h1>
               <p className="text-xs text-[#4A4A68] font-medium">
-                Ubuntu Server 24.04 LTS (samuelserver) • Nginx • AdGuard Home • Tailscale • Lux AI
+                Ubuntu Server 24.04 LTS (samuelserver) • Nginx • AdGuard Home • Tailscale • Opencode AI
               </p>
             </div>
           </div>
           <span className="text-xs font-mono font-bold text-[#FF5A36] bg-[#FFF7E8] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] self-start sm:self-auto">
-            Versão v2.5 (Dual-Stack & Lux AI)
+            Versão v2.6 (Dual-Stack & Opencode AI)
           </span>
         </div>
 
@@ -476,7 +476,7 @@ export const DocumentationTab: React.FC = () => {
                 O que é o Ubuntu Server Panel?
               </h3>
               <p className="text-[#4A4A68] leading-relaxed">
-                É um painel operacional completo e soberano desenvolvido especificamente para o servidor doméstico <code className="font-bold text-[#1A1A2E]">samuelserver</code>. Ele resolve o problema de fragmentação administrativa, unificando em uma única interface responsiva a telemetria do sistema, o bloqueador de DNS AdGuard Home, o firewall UFW, o terminal, o explorador de arquivos e o agente inteligente Lux AI.
+                É um painel operacional completo e soberano desenvolvido especificamente para o servidor doméstico <code className="font-bold text-[#1A1A2E]">samuelserver</code>. Ele resolve o problema de fragmentação administrativa, unificando em uma única interface responsiva a telemetria do sistema, o bloqueador de DNS AdGuard Home, o firewall UFW, o terminal, o explorador de arquivos e o agente inteligente Opencode.
               </p>
             </div>
 

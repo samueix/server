@@ -13,6 +13,10 @@ services:
       - ADGUARD_URL=http://192.168.100.23:8081
       - ADGUARD_USERNAME=samuel
       - ADGUARD_PASSWORD=sua_senha_adguard
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENCODE_BIN=/home/samuel/.opencode/bin/opencode
+      - OPENCODE_HOME=/home/samuel
+      - OPENCODE_DIR=/home/samuel/opencode
+      - OPENCODE_MODEL=opencode/big-pickle
+      - OPENCODE_AGENT=plan
     volumes:
       - ./data:/app/data

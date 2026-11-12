@@ -23,7 +23,7 @@ const N8nTab = React.lazy(() => import('./components/tabs/N8nTab').then(m => ({ 
 const FilesTab = React.lazy(() => import('./components/tabs/FilesTab').then(m => ({ default: m.FilesTab })));
 const SecurityTab = React.lazy(() => import('./components/tabs/SecurityTab').then(m => ({ default: m.SecurityTab })));
 const CredentialsTab = React.lazy(() => import('./components/tabs/CredentialsTab').then(m => ({ default: m.CredentialsTab })));
-const AntigravityTab = React.lazy(() => import('./components/tabs/AntigravityTab').then(m => ({ default: m.AntigravityTab })));
+const OpencodeTab = React.lazy(() => import('./components/tabs/OpencodeTab').then(m => ({ default: m.OpencodeTab })));
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -643,10 +643,10 @@ export default function App() {
               </Suspense>
             )}
 
-            {activeTab === 'antigravity' && (
+            {activeTab === 'opencode' && (
               <Suspense fallback={<TabLoadingFallback />}>
-                <TabErrorBoundary tabName="Google Antigravity & IA">
-                  <AntigravityTab />
+                <TabErrorBoundary tabName="Opencode & IA">
+                  <OpencodeTab />
                 </TabErrorBoundary>
               </Suspense>
             )}
