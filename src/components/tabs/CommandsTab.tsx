@@ -13,7 +13,6 @@ import {
   CheckCircle2, 
   AlertCircle,
   Sparkles,
-  Bot,
   GitPullRequest,
   BookOpen,
   ArrowRight,
@@ -23,7 +22,6 @@ import {
   Minimize2
 } from 'lucide-react';
 import { executeTerminalCommand, TerminalExecResponse } from '../../services/terminalService';
-import { getAuthHeaders } from '../../services/authService';
 import { CommandAnatomyModal } from '../CommandAnatomyModal';
 
 export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`;
@@ -109,21 +107,7 @@ export const CommandsTab: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Estado visual de tela cheia expandida
-
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
-  const [showOpencodeCli, setShowOpencodeCli] = useState<boolean>(false);
-  const [opencodeInput, setOpencodeInput] = useState<string>('');
-  const [opencodeModel, setOpencodeModel] = useState<string>('opencode/big-pickle');
-  const [opencodeModels, setOpencodeModels] = useState<string[]>(['opencode/big-pickle']);
-  const [opencodeSessionId, setOpencodeSessionId] = useState<string>('');
-  const [opencodeCwd, setOpencodeCwd] = useState<string>('/opt/server-panel');
-  const [opencodeRunning, setOpencodeRunning] = useState<boolean>(false);
-  const [opencodeHistory, setOpencodeHistory] = useState<Array<{id:string; cmd:string; stdout:string; stderr:string; exitCode:number; cwd:string; ts:string}>>([]);
-  const [opencodeSessions, setOpencodeSessions] = useState<Array<{id:string; title:string; updated:string}>>([]);
-  const [showOpencodeSessions, setShowOpencodeSessions] = useState<boolean>(false);
-  const [loadingOpencodeSessions, setLoadingOpencodeSessions] = useState<boolean>(false);
-  const opencodeEndRef = useRef<HTMLDivElement | null>(null);
-
 
   // Estados de confirmação dupla (Etapa 1 e Etapa 2)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
@@ -155,107 +139,6 @@ export const CommandsTab: React.FC = () => {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [isFullScreen]);
-
-  useEffect(() => {
-    if (!showOpencodeCli) return;
-    (async () => {
-      try {
-        const res = await fetch('/api/opencode/models', { headers: { 'Accept': 'application/json', ...getAuthHeaders() } });
-        if (res.ok) {
-          const j = await res.json();
-          if (Array.isArray(j.models) && j.models.length) setOpencodeModels(j.models);
-          if (j.defaultModel) setOpencodeModel(prev => prev || j.defaultModel);
-        }
-      } catch {}
-    })();
-  }, [showOpencodeCli]);
-
-  useEffect(() => {
-    if (showOpencodeCli) opencodeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [opencodeHistory, opencodeRunning, showOpencodeCli]);
-
-  const loadOpencodeSessions = async () => {
-    setLoadingOpencodeSessions(true);
-    try {
-      const res = await executeTerminalCommand('/home/samuel/.opencode/bin/opencode session list', opencodeCwd);
-      const out = (res.stdout || '').split(/\r?\n/);
-      const parsed: Array<{id:string; title:string; updated:string}> = [];
-      for (const line of out) {
-        const m = line.match(/^(ses_[A-Za-z0-9]+)\s+(.*?)\s{2,}(.+)$/);
-        if (m) parsed.push({ id: m[1].trim(), title: m[2].trim(), updated: m[3].trim() });
-      }
-      setOpencodeSessions(parsed);
-      setShowOpencodeSessions(true);
-    } catch (e: any) {
-      setOpencodeHistory(prev => [...prev, {
-        id: `${Date.now()}-${Math.random()}`,
-        cmd: '/home/samuel/.opencode/bin/opencode session list',
-        stdout: '',
-        stderr: e?.message || 'Falha ao listar sessões',
-        exitCode: 1,
-        cwd: opencodeCwd,
-        ts: new Date().toLocaleTimeString('pt-BR')
-      }].slice(-200));
-    } finally {
-      setLoadingOpencodeSessions(false);
-    }
-  };
-
-  const buildOpencodeCommand = (raw: string): string => {
-    const input = raw.trim();
-    const bin = '/home/samuel/.opencode/bin/opencode';
-    const modelArg = opencodeModel ? ` -m ${opencodeModel}` : '';
-    const dirArg = opencodeCwd ? ` --dir ${JSON.stringify(opencodeCwd)}` : '';
-    const sessionArg = opencodeSessionId ? ` -s ${JSON.stringify(opencodeSessionId)}` : '';
-    // comandos diretos do opencode (ex: opencode models, opencode session list, opencode run ...)
-    if (/^opencode(\s|$)/.test(input)) {
-      return input.replace(/^opencode(\s|$)/, bin + '$1');
-    }
-    // ajuda/listagem rápida local
-    if (input === '/help') return `${bin} --help`;
-    if (input === '/models') return `${bin} models`;
-    if (input === '/sessions') return `${bin} session list`;
-    // prompt/comando para o agente (suporta /slash skills dentro da mensagem)
-    const safeMsg = input.replace(/'/g, "'\\''");
-    return `${bin} run${sessionArg}${modelArg}${dirArg} --format default -- '${safeMsg}'`;
-  };
-
-  const runOpencodeCli = async (custom?: string) => {
-    const raw = (custom ?? opencodeInput).trim();
-    if (!raw || opencodeRunning) return;
-    const cmd = buildOpencodeCommand(raw);
-    setOpencodeRunning(true);
-    if (!custom) setOpencodeInput('');
-    try {
-      const result = await executeTerminalCommand(cmd, opencodeCwd);
-      if (result.cwd) setOpencodeCwd(result.cwd);
-      // tenta capturar session id se CLI imprimir
-      const outAll = `${result.stdout || ''}\n${result.stderr || ''}`;
-      const sid = outAll.match(/ses_[A-Za-z0-9]+/);
-      if (sid) setOpencodeSessionId(sid[0]);
-      setOpencodeHistory(prev => [...prev, {
-        id: `${Date.now()}-${Math.random()}`,
-        cmd,
-        stdout: result.stdout || '',
-        stderr: result.stderr || '',
-        exitCode: result.exitCode ?? (result.success ? 0 : 1),
-        cwd: result.cwd || opencodeCwd,
-        ts: new Date().toLocaleTimeString('pt-BR')
-      }].slice(-200));
-    } catch (e: any) {
-      setOpencodeHistory(prev => [...prev, {
-        id: `${Date.now()}-${Math.random()}`,
-        cmd,
-        stdout: '',
-        stderr: e?.message || 'Falha ao executar opencode',
-        exitCode: 1,
-        cwd: opencodeCwd,
-        ts: new Date().toLocaleTimeString('pt-BR')
-      }].slice(-200));
-    } finally {
-      setOpencodeRunning(false);
-    }
-  };
 
   // Inicia o processo de confirmação dupla antes de executar
   const requestExecution = (cmdToRun?: string) => {
@@ -380,15 +263,6 @@ export const CommandsTab: React.FC = () => {
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
-            onClick={() => setShowOpencodeCli(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#00A6FB] ${showOpencodeCli ? 'bg-[#E0F2FE] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#E0F2FE] text-[#1A1A2E]'}`}
-            title="Abrir/fechar CLI do Opencode integrado ao shell"
-          >
-            <Bot className="w-3.5 h-3.5 text-[#00A6FB]" />
-            <span>{showOpencodeCli ? 'Ocultar Opencode CLI' : 'Opencode CLI'}</span>
-          </button>
-
-          <button
             onClick={() => setAnatomyCommand(commandInput || 'uptime')}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
             title="Aprender como o comando digitado funciona"
@@ -407,85 +281,6 @@ export const CommandsTab: React.FC = () => {
           </button>
         </div>
       </div>
-
-      {/* OPENCODE CLI (TERMINAL REAL) */}
-      {showOpencodeCli && (
-        <div className="bg-[#0D0D15] border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#181828] gap-2 flex-wrap">
-            <div className="flex items-center gap-2">
-              <Bot className="w-4 h-4 text-[#00A6FB]" />
-              <span className="text-xs font-mono font-black text-[#F1F5F9]">Opencode CLI (real) — comandos/prompts e /skills direto no agente</span>
-              <span className="text-[11px] font-mono text-[#94A3B8]">cwd: {opencodeCwd}{opencodeSessionId ? ` · sessão: ${opencodeSessionId}` : ''}</span>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <select value={opencodeModel} onChange={(e)=>setOpencodeModel(e.target.value)} className="text-[11px] font-mono font-bold bg-[#0D0D15] text-[#F1F5F9] border border-[#2E2E48] rounded px-2 py-1 max-w-[240px]">
-                {opencodeModels.map(m => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <button onClick={()=>runOpencodeCli('/models')} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">/models</button>
-              <button onClick={loadOpencodeSessions} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Sessões antigas</button>
-              <button onClick={()=>runOpencodeCli('/sessions')} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">/sessions</button>
-              <button onClick={()=>{setOpencodeHistory([]); setOpencodeSessionId(''); setShowOpencodeSessions(false);}} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Nova sessão</button>
-            </div>
-          </div>
-          {showOpencodeSessions && (
-            <div className="border-b border-[#2E2E48] bg-[#121422] p-3 max-h-48 overflow-y-auto">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-mono font-bold text-[#F1F5F9]">Sessões antigas (clique para continuar)</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={loadOpencodeSessions} className="text-[11px] font-mono text-[#94A3B8] hover:text-white">{loadingOpencodeSessions ? 'Carregando...' : 'Atualizar'}</button>
-                  <button onClick={()=>setShowOpencodeSessions(false)} className="text-[11px] font-mono text-[#94A3B8] hover:text-white">Fechar</button>
-                </div>
-              </div>
-              {opencodeSessions.length === 0 ? (
-                <div className="text-[11px] font-mono text-[#94A3B8]">{loadingOpencodeSessions ? 'Buscando sessões...' : 'Nenhuma sessão encontrada.'}</div>
-              ) : (
-                <div className="space-y-1">
-                  {opencodeSessions.map(sess => (
-                    <button key={sess.id} onClick={()=>{ setOpencodeSessionId(sess.id); setShowOpencodeSessions(false); }} className={`w-full text-left px-2 py-1.5 rounded border text-[11px] font-mono ${opencodeSessionId===sess.id ? 'border-[#00A6FB] bg-[#0b2740] text-[#E0F2FE]' : 'border-[#2E2E48] hover:border-[#00A6FB] text-[#E2E8F0]'}`}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[#38BDF8] truncate">{sess.id}</span>
-                        <span className="text-[#64748B] shrink-0">{sess.updated}</span>
-                      </div>
-                      <div className="text-[#94A3B8] truncate">{sess.title}</div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <div className="h-80 overflow-y-auto p-3 space-y-3 font-mono text-[13px] bg-[#0D0D15]">
-            {opencodeHistory.length === 0 && (
-              <div className="text-[#94A3B8] text-xs space-y-1">
-                <div>Terminal do <code className="text-[#38BDF8]">opencode</code> CLI real (executa no servidor). Prompts editam código aqui.</div>
-                <div>• <code className="text-[#12B76A]">/help</code> <code className="text-[#12B76A]">/models</code> • <code className="text-[#12B76A]">Sessões antigas</code> para retomar • prompt: <code className="text-[#12B76A]">edite server.ts para ...</code></div>
-                <div>• slash/skills no prompt: <code className="text-[#12B76A]">/commit</code>, <code className="text-[#12B76A]">/review</code> etc. • direto: <code className="text-[#12B76A]">opencode models</code></div>
-              </div>
-            )}
-            {opencodeHistory.map(item => (
-              <div key={item.id} className="space-y-1.5 border-b border-[#222238] pb-3">
-                <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
-                  <span className="text-[#12B76A]">➜</span>
-                  <span className="text-[#FFC857]">{item.cwd}</span>
-                  <span className="text-[#F1F5F9]">$ {item.cmd}</span>
-                  <span className="text-[#64748B] ml-auto">{item.ts}</span>
-                </div>
-                {item.stdout && <pre className="text-[#E2E8F0] whitespace-pre-wrap break-words leading-relaxed pl-3 pr-2 py-2 border-l-4 border-[#00A6FB] bg-[#121422] rounded-r-md">{item.stdout}</pre>}
-                {item.stderr && <pre className="text-[#FCA5A5] whitespace-pre-wrap break-words leading-relaxed pl-3 pr-2 py-2 border-l-4 border-[#F04438] bg-[#2A1518] rounded-r-md">{item.stderr}</pre>}
-                <div className={`text-xs font-bold ${item.exitCode===0 ? 'text-[#12B76A]' : 'text-[#F87171]'}`}>exit {item.exitCode}</div>
-              </div>
-            ))}
-            {opencodeRunning && <div className="text-xs text-[#94A3B8] flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin text-[#00A6FB]"/>Executando opencode CLI...</div>}
-            <div ref={opencodeEndRef} />
-          </div>
-          <div className="border-t border-[#2E2E48] p-2.5 bg-[#181828]">
-            <div className="flex items-start gap-2">
-              <span className="text-[#12B76A] font-black pt-2 select-none">$</span>
-              <textarea value={opencodeInput} onChange={(e)=>setOpencodeInput(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); runOpencodeCli(); } else if(e.key==='Enter' && !e.shiftKey && !opencodeInput.includes('\n')){ e.preventDefault(); runOpencodeCli(); } }} placeholder='Prompt ou comando opencode (Enter/Ctrl+Enter). Suporta /slash skills, ex: "corrija o bug em X" ou "/commit" ou "opencode models"' className="flex-1 bg-[#0D0D15] text-[#F1F5F9] border-2 border-[#2E2E48] rounded-lg p-2.5 text-xs font-mono min-h-[44px] max-h-40 resize-y focus:outline-none" />
-              <button onClick={()=>runOpencodeCli()} disabled={opencodeRunning || !opencodeInput.trim()} className="self-end flex items-center gap-1.5 px-4 py-2.5 bg-[#00A6FB] hover:bg-[#0284c7] disabled:opacity-50 text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-black"><Play className="w-3.5 h-3.5 fill-white"/>Rodar</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* CARD: ATUALIZAÇÃO DIRETA DO GIT NO SHELL */}
       <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 sm:p-5 space-y-3">
