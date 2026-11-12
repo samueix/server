@@ -126,20 +126,21 @@ export const DocumentationTab: React.FC = () => {
     },
     {
       id: 'opencode',
-      name: '5. Opencode & IA (Ubuntu)',
+      name: '5. Lux e Opencode (Ubuntu)',
       icon: Bot,
-      summary: 'Agente inteligente oficial do Ubuntu Server impulsionado pela CLI local do opencode.',
+      summary: 'Agente inteligente oficial do Ubuntu Server impulsionado pelo Lux e pela CLI local do opencode.',
       purpose: 'Auxiliar na administração, geração de scripts e diagnóstico avançado do host samuelserver com raciocínio DevOps.',
       whatYouCanDo: [
-        'Conversar com o Opencode sobre diagnósticos de rede, firewall, Nginx e automações.',
-        'Acompanhar cota de tokens consumidos, histórico diário e limites de requisição por minuto (RPM/TPM).',
-        'Salvar e alternar entre múltiplas sessões de auditoria com histórico persistido em disco.'
+        'Conversar com o Lux + Opencode sobre diagnósticos de rede, firewall, Nginx e automações.',
+        'Selecionar modelos de IA disponíveis dinamicamente via CLI opencode models.',
+        'Acompanhar cota de tokens (prompt, resposta e total), histórico diário e limites de requisição por minuto (RPM/TPM).',
+        'Salvar e alternar entre múltiplas sessões com modelo persistido e histórico em disco.'
       ],
       indicators: [
-        { label: 'Tokens Usados Hoje', desc: 'Total acumulado de tokens de entrada e saída consumidos na data atual.' },
-        { label: 'Quota Diária', desc: 'Percentual de uso da quota de tokens processados pelo agente opencode.' }
+        { label: 'Tokens Usados Hoje', desc: 'Total acumulado de tokens de entrada (prompt) e saída (resposta) consumidos na data atual.' },
+        { label: 'Quota Diária', desc: 'Percentual de uso da quota de tokens processados pelo agente Lux + Opencode.' }
       ],
-      apis: 'POST /api/opencode/chat, GET /api/opencode/tokens, GET /api/opencode/sessions',
+      apis: 'GET /api/opencode/models, POST /api/opencode/chat, GET /api/opencode/tokens, GET /api/opencode/sessions, PATCH /api/opencode/sessions/:id',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Certifique-se de configurar OPENCODE_BIN e OPENCODE_MODEL no arquivo /opt/server-panel/.env para ativar o agente em produção.'
     },

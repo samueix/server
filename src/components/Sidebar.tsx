@@ -50,7 +50,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'monitoring', label: 'Monitoramento', icon: Activity },
   { id: 'adguard', label: 'AdGuard Home', icon: Shield },
   { id: 'ping', label: 'Ping / Latência', icon: Radio },
-  { id: 'opencode', label: 'Opencode & IA (Ubuntu)', icon: Bot, badge: 'Opencode', adminOnly: true },
+  { id: 'opencode', label: 'Lux e Opencode', icon: Bot, badge: 'Lux + Opencode', adminOnly: true },
   { id: 'browser', label: 'Navegador Remoto', icon: Monitor, badge: 'Playwright', adminOnly: true },
   { id: 'files', label: 'Arquivos', icon: Folder, adminOnly: true },
   { id: 'security', label: 'Segurança & Ataques', icon: ShieldAlert, badge: 'Auditor', adminOnly: true },

@@ -40,8 +40,12 @@ import {
   listOpencodeSessions, 
   getOpencodeSession, 
   createOpencodeSession, 
+  updateOpencodeSessionModel,
   deleteOpencodeSession, 
-  askOpencodeAgent
+  askOpencodeAgent,
+  listOpencodeModels,
+  sanitizeModel,
+  OPENCODE_MODEL
 } from './server/opencode.js';
 import { runShellCommand } from './server/terminalRunner.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
@@ -883,6 +887,15 @@ export function createApp() {
   });
 
   // Rotas do Opencode & AI Tokens
+  app.get('/api/opencode/models', requireAdminAuth, async (req, res) => {
+    try {
+      const models = await listOpencodeModels();
+      return res.json({ models, defaultModel: OPENCODE_MODEL });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message, models: [OPENCODE_MODEL], defaultModel: OPENCODE_MODEL });
+    }
+  });
+
   app.get('/api/opencode/tokens', requireAdminAuth, (req, res) => {
     try {
       const metrics = getTokenQuotaMetrics();
@@ -913,8 +926,26 @@ export function createApp() {
   app.post('/api/opencode/sessions/new', requireAdminAuth, (req, res) => {
     try {
       const title = (req.body?.title as string) || '';
-      const session = createOpencodeSession(title);
+      const model = (req.body?.model as string) || undefined;
+      const session = createOpencodeSession(title, model);
       return res.json(session);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/opencode/sessions/:id', requireAdminAuth, (req, res) => {
+    try {
+      const { model } = req.body || {};
+      const validModel = sanitizeModel(model);
+      if (!validModel) {
+        return res.status(400).json({ error: 'Modelo inválido. Use o formato provedor/modelo.' });
+      }
+      const updated = updateOpencodeSessionModel(req.params.id, validModel);
+      if (!updated) {
+        return res.status(404).json({ error: 'Sessão não encontrada.' });
+      }
+      return res.json({ success: true, session: updated });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -931,11 +962,11 @@ export function createApp() {
 
   app.post('/api/opencode/chat', requireAdminAuth, async (req, res) => {
     try {
-      const { sessionId, prompt } = req.body || {};
+      const { sessionId, prompt, model } = req.body || {};
       if (!prompt || typeof prompt !== 'string') {
         return res.status(400).json({ error: 'Prompt é obrigatório.' });
       }
-      const result = await askOpencodeAgent(sessionId || '', prompt);
+      const result = await askOpencodeAgent(sessionId || '', prompt, model);
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

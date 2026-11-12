@@ -7,8 +7,8 @@ import type { DomainAnalysis } from './db.js';
 const OPENCODE_BIN = process.env.OPENCODE_BIN || '/home/samuel/.opencode/bin/opencode';
 const OPENCODE_HOME = process.env.OPENCODE_HOME || '/home/samuel';
 const OPENCODE_DIR = process.env.OPENCODE_DIR || '/home/samuel/opencode';
-const OPENCODE_MODEL = process.env.OPENCODE_MODEL || 'opencode/big-pickle';
-const OPENCODE_AGENT = process.env.OPENCODE_AGENT || 'plan';
+export const OPENCODE_MODEL = process.env.OPENCODE_MODEL || 'opencode/big-pickle';
+export const OPENCODE_AGENT = process.env.OPENCODE_AGENT || 'plan';
 
 export interface OpencodeMessage {
   id: string;
@@ -38,6 +38,8 @@ export interface OpencodeSession {
 export interface TokenQuotaMetrics {
   tokensToday: number;
   tokensTotal: number;
+  promptTokensTotal: number;
+  completionTokensTotal: number;
   dailyTokenLimit: number;
   currentRpm: number;
   maxRpm: number;
@@ -47,7 +49,7 @@ export interface TokenQuotaMetrics {
   sessionsCount: number;
   modelInUse: string;
   lastActive: string;
-  historyByDay: { date: string; tokens: number; requests: number }[];
+  historyByDay: { date: string; tokens: number; promptTokens: number; completionTokens: number; requests: number }[];
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -145,6 +147,71 @@ function recordTokenUsage(promptTokens: number, completionTokens: number) {
   persistData();
 }
 
+/**
+ * Sanitiza identificador de modelo para evitar injeções ou valores inesperados.
+ * Aceita apenas o padrão provider/model, ex: opencode/big-pickle, anthropic/claude-3-5-sonnet
+ */
+export function sanitizeModel(model?: string): string | undefined {
+  if (!model || typeof model !== 'string') return undefined;
+  const trimmed = model.trim();
+  if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed)) {
+    return trimmed;
+  }
+  return undefined;
+}
+
+let cachedModels: { models: string[]; timestamp: number } | null = null;
+
+/**
+ * Executa a CLI do opencode com argumento 'models' para listar os modelos disponíveis
+ * Faz cache em memória por 60s com fallback para [OPENCODE_MODEL]
+ */
+export async function listOpencodeModels(): Promise<string[]> {
+  const now = Date.now();
+  if (cachedModels && now - cachedModels.timestamp < 60000 && cachedModels.models.length > 0) {
+    return cachedModels.models;
+  }
+
+  const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+  try {
+    const collected = await spawnCollect(OPENCODE_BIN, ['models'], {
+      env: buildChildEnv(),
+      timeoutMs: 15000,
+      uid: isRoot ? 1000 : undefined,
+      gid: isRoot ? 1000 : undefined
+    });
+
+    const raw = (collected.stdout || '') + '\n' + (collected.stderr || '');
+    // Remove códigos ANSI coloridos da saída do terminal
+    const clean = raw.replace(/\x1b\[[0-9;]*m/g, '');
+    const lines = clean.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    const validModels = new Set<string>();
+    // Sempre garante o modelo default
+    validModels.add(OPENCODE_MODEL);
+
+    for (const line of lines) {
+      // Pega o primeiro token da linha
+      const firstToken = line.split(/\s+/)[0];
+      if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(firstToken)) {
+        validModels.add(firstToken);
+      }
+    }
+
+    const sorted = Array.from(validModels).sort((a, b) => {
+      if (a === OPENCODE_MODEL) return -1;
+      if (b === OPENCODE_MODEL) return 1;
+      return a.localeCompare(b);
+    });
+
+    cachedModels = { models: sorted, timestamp: now };
+    return sorted;
+  } catch (err) {
+    console.warn('[Opencode] Falha ao listar modelos via CLI, usando fallback:', err);
+    return [OPENCODE_MODEL];
+  }
+}
+
 interface OpencodeRunResult {
   text: string;
   sessionId?: string;
@@ -217,10 +284,11 @@ function spawnCollect(
 
 async function runOpencode(
   prompt: string,
-  opts: { sessionId?: string; timeoutMs?: number } = {}
+  opts: { sessionId?: string; timeoutMs?: number; model?: string } = {}
 ): Promise<OpencodeRunResult> {
+  const chosenModel = sanitizeModel(opts.model) || OPENCODE_MODEL;
   const args = ['run', '--format', 'json', '--dir', OPENCODE_DIR, '--agent', OPENCODE_AGENT];
-  if (OPENCODE_MODEL) args.push('--model', OPENCODE_MODEL);
+  if (chosenModel) args.push('--model', chosenModel);
   if (opts.sessionId) args.push('-s', opts.sessionId);
   args.push(prompt);
 
@@ -297,11 +365,15 @@ async function runOpencode(
 
 export function getTokenQuotaMetrics(): TokenQuotaMetrics {
   const todayKey = getTodayKey();
-  const todayRecord = dailyTokenRecords[todayKey] || { tokens: 0, requests: 0 };
+  const todayRecord = dailyTokenRecords[todayKey] || { tokens: 0, promptTokens: 0, completionTokens: 0, requests: 0 };
 
   let totalAllTime = 0;
+  let totalPromptAllTime = 0;
+  let totalCompletionAllTime = 0;
   for (const r of Object.values(dailyTokenRecords)) {
     totalAllTime += r.tokens || 0;
+    totalPromptAllTime += r.promptTokens || 0;
+    totalCompletionAllTime += r.completionTokens || 0;
   }
 
   const dailyTokenLimit = 4000000;
@@ -316,12 +388,16 @@ export function getTokenQuotaMetrics(): TokenQuotaMetrics {
     .map(r => ({
       date: r.date,
       tokens: r.tokens,
+      promptTokens: r.promptTokens || 0,
+      completionTokens: r.completionTokens || 0,
       requests: r.requests
     }));
 
   return {
     tokensToday: todayRecord.tokens,
     tokensTotal: totalAllTime,
+    promptTokensTotal: totalPromptAllTime,
+    completionTokensTotal: totalCompletionAllTime,
     dailyTokenLimit,
     currentRpm: Math.min(maxRpm, todayRecord.requests > 0 ? 1 : 0),
     maxRpm,
@@ -347,15 +423,16 @@ export function getOpencodeSession(id: string): { session: OpencodeSession | nul
   return { session, messages };
 }
 
-export function createOpencodeSession(title?: string): OpencodeSession {
+export function createOpencodeSession(title?: string, model?: string): OpencodeSession {
   const id = 'sess_' + crypto.randomUUID().slice(0, 8);
   const now = new Date().toISOString();
+  const effectiveModel = sanitizeModel(model) || OPENCODE_MODEL;
   const newSession: OpencodeSession = {
     id,
     title: title || 'Nova Sessão com Opencode',
     createdAt: now,
     updatedAt: now,
-    model: OPENCODE_MODEL,
+    model: effectiveModel,
     totalPromptTokens: 0,
     totalCompletionTokens: 0,
     totalTokens: 0,
@@ -370,6 +447,18 @@ export function createOpencodeSession(title?: string): OpencodeSession {
   return newSession;
 }
 
+export function updateOpencodeSessionModel(id: string, model: string): OpencodeSession | null {
+  const session = sessionsStore.get(id);
+  if (!session) return null;
+  const validModel = sanitizeModel(model);
+  if (!validModel) return null;
+  session.model = validModel;
+  session.updatedAt = new Date().toISOString();
+  sessionsStore.set(id, session);
+  persistData();
+  return session;
+}
+
 export function deleteOpencodeSession(id: string): boolean {
   const existed = sessionsStore.delete(id);
   messagesStore.delete(id);
@@ -379,11 +468,17 @@ export function deleteOpencodeSession(id: string): boolean {
 
 export async function askOpencodeAgent(
   sessionId: string,
-  userPrompt: string
+  userPrompt: string,
+  model?: string
 ): Promise<{ reply: OpencodeMessage; session: OpencodeSession; metrics: TokenQuotaMetrics }> {
   let session = sessionId ? sessionsStore.get(sessionId) : undefined;
   if (!session) {
-    session = createOpencodeSession(userPrompt.slice(0, 36) + '...');
+    session = createOpencodeSession(userPrompt.slice(0, 36) + '...', model);
+  }
+
+  const effectiveModel = sanitizeModel(model) || session.model || OPENCODE_MODEL;
+  if (session.model !== effectiveModel) {
+    session.model = effectiveModel;
   }
 
   const userMsgId = 'msg_' + crypto.randomUUID().slice(0, 8);
@@ -399,7 +494,10 @@ export async function askOpencodeAgent(
   msgs.push(userMsg);
   messagesStore.set(session.id, msgs);
 
-  const result = await runOpencode(userPrompt, { sessionId: session.opencodeSessionId });
+  const result = await runOpencode(userPrompt, {
+    sessionId: session.opencodeSessionId,
+    model: effectiveModel
+  });
 
   let assistantReplyText = result.text;
   if (!assistantReplyText) {
@@ -420,7 +518,7 @@ export async function askOpencodeAgent(
     sessionId: session.id,
     role: 'assistant',
     content: assistantReplyText,
-    reasoning: `Processado pelo opencode (${OPENCODE_MODEL}, agente ${OPENCODE_AGENT}).`,
+    reasoning: `Processado pelo opencode (${effectiveModel}, agente ${OPENCODE_AGENT}).`,
     tokensUsed: totalTokensForTurn,
     timestamp: new Date().toISOString()
   };

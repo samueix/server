@@ -646,7 +646,7 @@ export default function App() {
 
             {activeTab === 'opencode' && (
               <Suspense fallback={<TabLoadingFallback />}>
-                <TabErrorBoundary tabName="Opencode & IA">
+                <TabErrorBoundary tabName="Lux e Opencode">
                   <OpencodeTab />
                 </TabErrorBoundary>
               </Suspense>

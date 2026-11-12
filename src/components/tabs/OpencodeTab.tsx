@@ -31,6 +31,9 @@ interface OpencodeMessage {
   content: string;
   reasoning?: string;
   tokensUsed?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  model?: string;
   timestamp: string;
 }
 
@@ -51,6 +54,8 @@ interface OpencodeSession {
 interface TokenQuotaMetrics {
   tokensToday: number;
   tokensTotal: number;
+  promptTokensTotal?: number;
+  completionTokensTotal?: number;
   dailyTokenLimit: number;
   currentRpm: number;
   maxRpm: number;
@@ -60,7 +65,7 @@ interface TokenQuotaMetrics {
   sessionsCount: number;
   modelInUse: string;
   lastActive: string;
-  historyByDay: { date: string; tokens: number; requests: number }[];
+  historyByDay: { date: string; tokens: number; promptTokens?: number; completionTokens?: number; requests: number }[];
 }
 
 export const OpencodeTab: React.FC = () => {
@@ -70,6 +75,11 @@ export const OpencodeTab: React.FC = () => {
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
   const [messages, setMessages] = useState<OpencodeMessage[]>([]);
   
+  // Modelos disponíveis via CLI opencode
+  const [models, setModels] = useState<string[]>(['opencode/big-pickle']);
+  const [defaultModel, setDefaultModel] = useState<string>('opencode/big-pickle');
+  const [selectedModel, setSelectedModel] = useState<string>('opencode/big-pickle');
+
   const [prompt, setPrompt] = useState<string>('');
   const [sending, setSending] = useState<boolean>(false);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
@@ -79,6 +89,24 @@ export const OpencodeTab: React.FC = () => {
   const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  const fetchModels = async () => {
+    try {
+      const res = await fetch('/api/opencode/models', {
+        headers: { 'Accept': 'application/json', ...getAuthHeaders() }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json.models) && json.models.length > 0) {
+          setModels(json.models);
+        }
+        if (json.defaultModel) {
+          setDefaultModel(json.defaultModel);
+          setSelectedModel(prev => prev || json.defaultModel);
+        }
+      }
+    } catch {}
+  };
 
   const fetchMetrics = async () => {
     try {
@@ -99,10 +127,10 @@ export const OpencodeTab: React.FC = () => {
         headers: { 'Accept': 'application/json', ...getAuthHeaders() }
       });
       if (res.ok) {
-        const json = await res.json();
+        const json: OpencodeSession[] = await res.json();
         setSessions(json);
         if (!currentSessionId && json.length > 0) {
-          loadSessionMessages(json[0].id);
+          loadSessionMessages(json[0].id, json[0].model);
         }
       }
     } catch {}
@@ -111,8 +139,14 @@ export const OpencodeTab: React.FC = () => {
     }
   };
 
-  const loadSessionMessages = async (sessionId: string) => {
+  const loadSessionMessages = async (sessionId: string, sessionModel?: string) => {
     setCurrentSessionId(sessionId);
+    if (sessionModel) {
+      setSelectedModel(sessionModel);
+    } else {
+      const found = sessions.find(s => s.id === sessionId);
+      if (found?.model) setSelectedModel(found.model);
+    }
     try {
       const res = await fetch(`/api/opencode/sessions/${sessionId}`, {
         headers: { 'Accept': 'application/json', ...getAuthHeaders() }
@@ -120,8 +154,30 @@ export const OpencodeTab: React.FC = () => {
       if (res.ok) {
         const json = await res.json();
         setMessages(json.messages || []);
+        if (json.session?.model) {
+          setSelectedModel(json.session.model);
+        }
       }
     } catch {}
+  };
+
+  const handleModelChange = async (newModel: string) => {
+    setSelectedModel(newModel);
+    if (currentSessionId) {
+      try {
+        const res = await fetch(`/api/opencode/sessions/${currentSessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ model: newModel })
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.session) {
+            setSessions(prev => prev.map(s => s.id === currentSessionId ? { ...s, model: newModel } : s));
+          }
+        }
+      } catch {}
+    }
   };
 
   const handleStartNewSession = async () => {
@@ -129,12 +185,13 @@ export const OpencodeTab: React.FC = () => {
       const res = await fetch('/api/opencode/sessions/new', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ title: 'Nova Sessão com Agente Opencode' })
+        body: JSON.stringify({ title: 'Nova Sessão com Lux e Opencode', model: selectedModel })
       });
       if (res.ok) {
         const newSess = await res.json();
         setSessions(prev => [newSess, ...prev]);
         setCurrentSessionId(newSess.id);
+        if (newSess.model) setSelectedModel(newSess.model);
         setMessages([]);
         setActiveSubTab('chat');
       }
@@ -184,7 +241,8 @@ export const OpencodeTab: React.FC = () => {
         },
         body: JSON.stringify({
           sessionId: currentSessionId,
-          prompt: textToSend
+          prompt: textToSend,
+          model: selectedModel
         })
       });
 
@@ -195,6 +253,9 @@ export const OpencodeTab: React.FC = () => {
 
       const json = await res.json();
       setCurrentSessionId(json.session.id);
+      if (json.session?.model) {
+        setSelectedModel(json.session.model);
+      }
       setMessages(prev => {
         const withoutTemp = prev.filter(m => !m.id.startsWith('temp_'));
         return [...withoutTemp, tempUserMsg, json.reply];
@@ -209,6 +270,7 @@ export const OpencodeTab: React.FC = () => {
   };
 
   useEffect(() => {
+    fetchModels();
     fetchMetrics();
     fetchSessions();
   }, []);
@@ -250,15 +312,15 @@ export const OpencodeTab: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-base font-black text-[#1A1A2E] font-title">
-                Opencode — Agente IA do Ubuntu Server
+                Lux e Opencode — Agente IA do Ubuntu Server
               </h1>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#D1FADF] border border-[#12B76A] text-[#12B76A]">
                 <Sparkles className="w-3 h-3" />
-                opencode/big-pickle
+                {selectedModel}
               </span>
             </div>
             <p className="text-xs text-[#4A4A68] font-medium mt-0.5">
-              Assistente inteligente e engenheiro DevOps do host samuelserver para diagnóstico de rede, AdGuard DNS, UFW e automações.
+              Assistente inteligente Lux integrado ao Opencode CLI no host samuelserver para diagnóstico de rede, AdGuard DNS, UFW e automações.
               Console interativo do Agente Opencode, monitoramento de tokens consumidos, limites de quota e histórico de sessões.
             </p>
           </div>
@@ -304,20 +366,41 @@ export const OpencodeTab: React.FC = () => {
           {/* Coluna Central do Chat */}
           <div className="lg:col-span-8 flex flex-col h-[680px] bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
             {/* Header do Chat */}
-            <div className="p-3.5 bg-[#FFF7E8] border-b-2 border-[#1A1A2E] flex items-center justify-between">
+            <div className="p-3.5 bg-[#FFF7E8] border-b-2 border-[#1A1A2E] flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#12B76A] animate-pulse" />
                 <span className="text-xs font-bold font-title text-[#1A1A2E]">
                   Sessão Ativa: {sessions.find(s => s.id === currentSessionId)?.title || 'Nova Conversa'}
                 </span>
               </div>
-              <button
-                onClick={handleStartNewSession}
-                className="flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-[#FFEECB] border-2 border-[#1A1A2E] rounded text-xs font-mono font-bold text-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-              >
-                <PlusCircle className="w-3.5 h-3.5 text-[#FF5A36]" />
-                <span>Nova Conversa</span>
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Seletor de Modelo de IA */}
+                <div className="flex items-center gap-1.5 bg-white border-2 border-[#1A1A2E] rounded-lg px-2 py-1 shadow-[1px_1px_0px_#1A1A2E]">
+                  <Sparkles className="w-3.5 h-3.5 text-[#FF5A36] shrink-0" />
+                  <label htmlFor="model-select" className="sr-only">Modelo de IA</label>
+                  <select
+                    id="model-select"
+                    aria-label="Modelo de IA"
+                    value={selectedModel}
+                    onChange={(e) => handleModelChange(e.target.value)}
+                    className="bg-transparent text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none cursor-pointer"
+                  >
+                    {models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={handleStartNewSession}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-white hover:bg-[#FFEECB] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
+                >
+                  <PlusCircle className="w-3.5 h-3.5 text-[#FF5A36]" />
+                  <span>Nova Conversa</span>
+                </button>
+              </div>
             </div>
 
             {/* Lista de Mensagens */}
@@ -364,15 +447,15 @@ export const OpencodeTab: React.FC = () => {
                     >
                       {/* Assistant Header com Badge de Tokens e Raciocínio */}
                       {msg.role === 'assistant' && (
-                        <div className="flex items-center justify-between gap-2 border-b border-[#E2DFD8] pb-1.5 text-[11px] font-mono text-[#717188]">
+                        <div className="flex items-center justify-between gap-2 border-b border-[#E2DFD8] pb-1.5 text-[11px] font-mono text-[#717188] flex-wrap">
                           <span className="font-bold flex items-center gap-1 text-[#00A6FB]">
                             <Sparkles className="w-3 h-3" />
-                            Opencode Agent
+                            Lux (Opencode)
                           </span>
-                          <div className="flex items-center gap-2">
-                            {msg.tokensUsed && (
-                              <span className="bg-[#FFF7E8] px-1.5 py-0.5 rounded border border-[#1A1A2E] text-[10px] font-bold">
-                                {msg.tokensUsed} tokens
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {msg.tokensUsed != null && (
+                              <span className="bg-[#FFF7E8] px-2 py-0.5 rounded border border-[#1A1A2E] text-[10px] font-bold text-[#1A1A2E]">
+                                {msg.promptTokens != null ? `P: ${msg.promptTokens} · R: ${msg.completionTokens} · ` : ''}{msg.tokensUsed} tokens
                               </span>
                             )}
                             <button
@@ -423,7 +506,7 @@ export const OpencodeTab: React.FC = () => {
               {sending && (
                 <div className="flex items-center gap-2 p-3 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[2px_2px_0px_#1A1A2E] max-w-xs text-xs font-mono font-bold text-[#717188]">
                   <RefreshCw className="w-4 h-4 animate-spin text-[#FF5A36]" />
-                  <span>Opencode processando sua solicitação...</span>
+                  <span>Lux e Opencode processando sua solicitação...</span>
                 </div>
               )}
 
@@ -451,7 +534,7 @@ export const OpencodeTab: React.FC = () => {
                   type="text"
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Pergunte ao Opencode sobre seu servidor Ubuntu, Nginx, AdGuard ou Tailscale..."
+                  placeholder="Pergunte ao Lux e Opencode sobre seu servidor Ubuntu, Nginx, AdGuard ou Tailscale..."
                   className="flex-1 p-2.5 bg-[#FFF7E8]/60 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] placeholder-[#717188] focus:outline-none focus:border-[#FF5A36] focus:bg-white"
                 />
                 <button
@@ -506,9 +589,18 @@ export const OpencodeTab: React.FC = () => {
               </div>
 
               <div className="p-2.5 bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg space-y-1.5 text-[11px] font-mono">
-                <div className="flex justify-between">
+                <div className="flex justify-between items-center gap-2">
                   <span className="text-[#717188]">Modelo Ativo:</span>
-                  <span className="font-bold text-[#1A1A2E]">opencode/big-pickle</span>
+                  <select
+                    aria-label="Modelo de IA no resumo lateral"
+                    value={selectedModel}
+                    onChange={(e) => handleModelChange(e.target.value)}
+                    className="font-bold text-[#1A1A2E] bg-white border border-[#1A1A2E] rounded px-1.5 py-0.5 text-[10px] focus:outline-none cursor-pointer max-w-[170px] truncate"
+                  >
+                    {models.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-[#717188]">Limite RPM (Req/Min):</span>
@@ -556,22 +648,22 @@ export const OpencodeTab: React.FC = () => {
             </div>
 
             <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl">
-              <span className="text-xs font-mono font-bold text-[#717188] block">Limite Diário de Tokens</span>
+              <span className="text-xs font-mono font-bold text-[#717188] block">Tokens de Prompt (Total)</span>
               <div className="text-3xl font-black font-title text-[#00A6FB] mt-1">
-                4.000.000
+                {metrics?.promptTokensTotal != null ? metrics.promptTokensTotal.toLocaleString('pt-BR') : '0'}
               </div>
               <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                opencode/big-pickle Quota Base
+                Entrada enviada ao agente
               </span>
             </div>
 
             <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl">
-              <span className="text-xs font-mono font-bold text-[#717188] block">Requisições por Minuto</span>
+              <span className="text-xs font-mono font-bold text-[#717188] block">Tokens de Resposta (Total)</span>
               <div className="text-3xl font-black font-title text-[#FF5A36] mt-1">
-                15 RPM
+                {metrics?.completionTokensTotal != null ? metrics.completionTokensTotal.toLocaleString('pt-BR') : '0'}
               </div>
               <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                Taxa Máxima de Chamadas
+                Geração concluída pelo modelo
               </span>
             </div>
 
@@ -581,8 +673,39 @@ export const OpencodeTab: React.FC = () => {
                 {metrics ? metrics.tokensTotal.toLocaleString('pt-BR') : '--'}
               </div>
               <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                Tokens em todas as sessões
+                Sessões: {metrics?.sessionsCount ?? 0} registradas
               </span>
+            </div>
+          </div>
+
+          {/* Cards secundários de limites e status */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div className="p-4 bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-xs font-mono text-[#717188] font-bold block">Teto Diário do Modelo</span>
+                <span className="text-lg font-black font-mono text-[#1A1A2E]">4.000.000 tokens/dia</span>
+              </div>
+              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-[#FFF7E8] border border-[#1A1A2E] rounded text-[#B54708]">
+                {selectedModel}
+              </span>
+            </div>
+
+            <div className="p-4 bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-xs font-mono text-[#717188] font-bold block">Taxa RPM / TPM</span>
+                <span className="text-lg font-black font-mono text-[#12B76A]">15 RPM · 1.000.000 TPM</span>
+              </div>
+              <Zap className="w-5 h-5 text-[#FF5A36]" />
+            </div>
+
+            <div className="p-4 bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl flex items-center justify-between">
+              <div>
+                <span className="text-xs font-mono text-[#717188] font-bold block">Última Atividade</span>
+                <span className="text-sm font-black font-mono text-[#1A1A2E]">
+                  {metrics?.lastActive ? new Date(metrics.lastActive).toLocaleString('pt-BR') : 'Em espera'}
+                </span>
+              </div>
+              <RefreshCw className="w-4 h-4 text-[#717188]" />
             </div>
           </div>
 
@@ -598,14 +721,16 @@ export const OpencodeTab: React.FC = () => {
                   <tr>
                     <th className="py-2.5 px-3.5">Data</th>
                     <th className="py-2.5 px-3.5">Requisições</th>
-                    <th className="py-2.5 px-3.5 text-right">Tokens Consumidos</th>
+                    <th className="py-2.5 px-3.5 text-right">Tokens Prompt</th>
+                    <th className="py-2.5 px-3.5 text-right">Tokens Resposta</th>
+                    <th className="py-2.5 px-3.5 text-right">Total Consumido</th>
                     <th className="py-2.5 px-3.5 text-right">% do Limite Diário</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2DFD8]">
                   {(!metrics?.historyByDay || metrics.historyByDay.length === 0) ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-[#717188]">
+                      <td colSpan={6} className="py-8 text-center text-[#717188]">
                         Nenhum consumo registrado ainda. Inicie um diálogo na aba "Agente Interativo".
                       </td>
                     </tr>
@@ -614,6 +739,12 @@ export const OpencodeTab: React.FC = () => {
                       <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
                         <td className="py-2.5 px-3.5 font-bold">{row.date}</td>
                         <td className="py-2.5 px-3.5">{row.requests} chamada(s)</td>
+                        <td className="py-2.5 px-3.5 text-right tabular-nums text-[#717188]">
+                          {(row.promptTokens ?? 0).toLocaleString('pt-BR')}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-right tabular-nums text-[#717188]">
+                          {(row.completionTokens ?? 0).toLocaleString('pt-BR')}
+                        </td>
                         <td className="py-2.5 px-3.5 text-right font-black tabular-nums">
                           {row.tokens.toLocaleString('pt-BR')}
                         </td>
@@ -639,7 +770,7 @@ export const OpencodeTab: React.FC = () => {
                 Histórico de Diálogos & Sessões Anteriores
               </h2>
               <p className="text-xs text-[#717188]">
-                Todas as interações e análises do Agente Opencode salvas no banco de dados local.
+                Todas as interações e análises do Lux e Opencode salvas no banco de dados local.
               </p>
             </div>
             <button
@@ -677,9 +808,14 @@ export const OpencodeTab: React.FC = () => {
                 >
                   <div className="space-y-1">
                     <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-xs font-black font-title text-[#1A1A2E] line-clamp-1">
-                        {sess.title}
-                      </h3>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3 className="text-xs font-black font-title text-[#1A1A2E] line-clamp-1">
+                          {sess.title}
+                        </h3>
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EBF5FF] text-[#00A6FB] border border-[#B2DDFF]">
+                          {sess.model || 'opencode/big-pickle'}
+                        </span>
+                      </div>
                       <button
                         onClick={(e) => handleDeleteSession(sess.id, e)}
                         className="p-1 hover:bg-[#FEE4E2] text-[#717188] hover:text-[#F04438] rounded transition"
@@ -693,9 +829,11 @@ export const OpencodeTab: React.FC = () => {
                     </p>
                   </div>
 
-                  <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[#717188] pt-2 border-t border-[#E2DFD8]">
-                    <span>{sess.messageCount} mensagens</span>
-                    <span className="text-[#12B76A]">{sess.totalTokens} tokens</span>
+                  <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[#717188] pt-2 border-t border-[#E2DFD8] flex-wrap gap-1">
+                    <span>{sess.messageCount} msgs</span>
+                    <span className="text-[#12B76A]">
+                      P: {sess.totalPromptTokens || 0} · R: {sess.totalCompletionTokens || 0} · Total: {sess.totalTokens || 0}
+                    </span>
                     <span>{new Date(sess.updatedAt).toLocaleDateString('pt-BR')}</span>
                   </div>
                 </div>
@@ -707,3 +845,4 @@ export const OpencodeTab: React.FC = () => {
     </div>
   );
 };
+
