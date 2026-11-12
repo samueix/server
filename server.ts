@@ -68,6 +68,18 @@ import {
   getProcessesList 
 } from './server/systemMonitor.js';
 import { getAllMonitoredServices } from './server/servicesMonitor.js';
+import {
+  attachBrowserWebSocket,
+  getBrowserHistory,
+  getBrowserState,
+  issueWsTicket,
+  navigateBrowser,
+  pauseBrowser,
+  resumeBrowser,
+  startBrowser,
+  stopBrowser,
+  takeScreenshot
+} from './server/browserSession.js';
 
 // Configuração dinâmica de porta (Cloud Run injeta PORT), fallback para 3000
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
@@ -1007,6 +1019,65 @@ export function createApp() {
   // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
   let cachedWorkingBackendBase: string | null = null;
 
+  // ===== Navegador Remoto (Chromium + Playwright/CDP) =====
+  app.get('/api/browser/status', requireAdminAuth, (_req, res) => {
+    res.json({ success: true, state: getBrowserState() });
+  });
+
+  app.post('/api/browser/start', requireAdminAuth, async (_req, res) => {
+    try {
+      const state = await startBrowser();
+      res.json({ success: true, state });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Falha ao iniciar o navegador.' });
+    }
+  });
+
+  app.post('/api/browser/stop', requireAdminAuth, async (_req, res) => {
+    try {
+      await stopBrowser();
+      res.json({ success: true, state: getBrowserState() });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Falha ao parar o navegador.' });
+    }
+  });
+
+  app.post('/api/browser/pause', requireAdminAuth, (_req, res) => {
+    res.json({ success: true, state: pauseBrowser() });
+  });
+
+  app.post('/api/browser/resume', requireAdminAuth, (_req, res) => {
+    res.json({ success: true, state: resumeBrowser() });
+  });
+
+  app.post('/api/browser/navigate', requireAdminAuth, async (req, res) => {
+    try {
+      const state = await navigateBrowser(String(req.body?.url || ''));
+      res.json({ success: true, state });
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err?.message || 'Falha ao navegar.' });
+    }
+  });
+
+  app.get('/api/browser/screenshot', requireAdminAuth, async (_req, res) => {
+    try {
+      const buffer = await takeScreenshot();
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Cache-Control', 'no-store');
+      res.send(buffer);
+    } catch (err: any) {
+      res.status(400).json({ success: false, error: err?.message || 'Falha ao capturar screenshot.' });
+    }
+  });
+
+  app.get('/api/browser/history', requireAdminAuth, (_req, res) => {
+    res.json({ success: true, history: getBrowserHistory() });
+  });
+
+  app.post('/api/browser/ws-ticket', requireAdminAuth, (_req, res) => {
+    res.json({ success: true, ...issueWsTicket() });
+  });
+
   // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/system, /api/cpu, /api/network, etc.)
   app.all('/api/*', async (req, res, next) => {
     // Rotas tratadas internamente pelo server.ts
@@ -1681,6 +1752,7 @@ export async function startServer() {
   return new Promise<any>((resolve) => {
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
+      attachBrowserWebSocket(server);
       resolve(server);
     });
   });

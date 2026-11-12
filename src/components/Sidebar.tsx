@@ -18,7 +18,8 @@ import {
   Folder,
   ShieldAlert,
   Key,
-  Bot
+  Bot,
+  Monitor
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 
@@ -50,6 +51,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'adguard', label: 'AdGuard Home', icon: Shield },
   { id: 'ping', label: 'Ping / Latência', icon: Radio },
   { id: 'opencode', label: 'Opencode & IA (Ubuntu)', icon: Bot, badge: 'Opencode', adminOnly: true },
+  { id: 'browser', label: 'Navegador Remoto', icon: Monitor, badge: 'Playwright', adminOnly: true },
   { id: 'files', label: 'Arquivos', icon: Folder, adminOnly: true },
   { id: 'security', label: 'Segurança & Ataques', icon: ShieldAlert, badge: 'Auditor', adminOnly: true },
   { id: 'credentials', label: 'Credenciais & APIs', icon: Key, badge: 'Config', adminOnly: true },

@@ -24,6 +24,7 @@ const FilesTab = React.lazy(() => import('./components/tabs/FilesTab').then(m =>
 const SecurityTab = React.lazy(() => import('./components/tabs/SecurityTab').then(m => ({ default: m.SecurityTab })));
 const CredentialsTab = React.lazy(() => import('./components/tabs/CredentialsTab').then(m => ({ default: m.CredentialsTab })));
 const OpencodeTab = React.lazy(() => import('./components/tabs/OpencodeTab').then(m => ({ default: m.OpencodeTab })));
+const RemoteBrowserTab = React.lazy(() => import('./components/tabs/RemoteBrowserTab').then(m => ({ default: m.RemoteBrowserTab })));
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -647,6 +648,14 @@ export default function App() {
               <Suspense fallback={<TabLoadingFallback />}>
                 <TabErrorBoundary tabName="Opencode & IA">
                   <OpencodeTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'browser' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Navegador Remoto">
+                  <RemoteBrowserTab />
                 </TabErrorBoundary>
               </Suspense>
             )}

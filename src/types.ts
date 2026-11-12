@@ -4,8 +4,9 @@ export type TransportType = 'websocket' | 'polling';
 export type NavigationTab = 
   | 'overview' 
   | 'monitoring' 
-  | 'opencode'
-  | 'files'
+  | 'opencode' 
+  | 'browser'
+  | 'files' 
   | 'security'
   | 'credentials'
   | 'processes' 
