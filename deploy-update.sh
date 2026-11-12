@@ -78,12 +78,21 @@ trap rollback ERR
 
 # 4. Atualizar repositório Git de forma segura
 echo "📥 Atualizando código fonte do repositório Git..."
+# Executa git como dono do repositório (evita falha de chave SSH quando rodando como root)
+REPO_OWNER=$(stat -c '%U' "${APP_DIR}" 2>/dev/null || echo samuel)
+if [ "$(id -u)" -eq 0 ] && [ "${REPO_OWNER}" != "root" ]; then
+    GIT=(sudo -u "${REPO_OWNER}" -H git)
+    NPM=(sudo -u "${REPO_OWNER}" -H npm)
+else
+    GIT=(git)
+    NPM=(npm)
+fi
 # Ignora arquivos de configuração não versionados para não barrar o merge
-git stash --include-untracked 2>/dev/null || true
-git fetch origin main
-git checkout main
-git pull --ff-only origin main || git pull origin main
-git stash pop 2>/dev/null || true
+"${GIT[@]}" stash --include-untracked 2>/dev/null || true
+"${GIT[@]}" fetch origin main
+"${GIT[@]}" checkout main
+"${GIT[@]}" pull --ff-only origin main || "${GIT[@]}" pull origin main
+"${GIT[@]}" stash pop 2>/dev/null || true
 
 # Restaura configs preservadas
 [ -f /tmp/server-panel-config-tmp/.env ] && cp -a /tmp/server-panel-config-tmp/.env "${APP_DIR}/.env" 2>/dev/null || true
@@ -92,12 +101,12 @@ git stash pop 2>/dev/null || true
 # 5. Instalar dependências se necessário
 if [ -f package-lock.json ]; then
     echo "📦 Verificando integridade das dependências npm..."
-    npm install --prefer-offline --no-audit
+    "${NPM[@]}" install --prefer-offline --no-audit --legacy-peer-deps
 fi
 
 # 6. Compilar nova versão (Frontend e Backend)
 echo "🔨 Compilando nova versão do painel (npm run build)..."
-npm run build
+"${NPM[@]}" run build
 
 if [ ! -d "dist" ] || [ ! -f "dist/server.cjs" ]; then
     echo "❌ Erro: Diretório dist ou arquivo dist/server.cjs não foi gerado!"

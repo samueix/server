@@ -184,8 +184,13 @@ const DANGEROUS_PATTERNS = [
   /dd\s+if=.*of=\/dev\/(sd[a-z]|nvme)/i
 ];
 
-// A macro oficial de atualização do painel é uma sequência pré-aprovada de manutenção
+// Macros oficiais de atualização do painel (sequências pré-aprovadas de manutenção)
 const CANONICAL_GIT_UPDATE_PREFIX = 'cd /opt/server-panel && git pull origin main && npm run build';
+const CANONICAL_GIT_UPDATE_COMMANDS = [
+  'cd /opt/server-panel && git pull origin main && npm run build',
+  'cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh',
+  'cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && bash deploy-update.sh'
+];
 
 /**
  * Mascara qualquer token, chave secreta ou parâmetro de senha para o log de auditoria
@@ -323,8 +328,9 @@ export function isCommandAllowed(commandString: string): { allowed: boolean; rea
     }
   }
 
-  // Permite a macro canônica de deploy e compilação do painel
-  if (trimmed.startsWith(CANONICAL_GIT_UPDATE_PREFIX)) {
+  // Permite macros canônicas de deploy e atualização do painel
+  const normalizedCommand = trimmed.replace(/\s+/g, ' ').trim();
+  if (CANONICAL_GIT_UPDATE_COMMANDS.some(cmd => normalizedCommand === cmd || normalizedCommand.startsWith(cmd))) {
     return { allowed: true };
   }
 
