@@ -15,8 +15,6 @@ import {
   ShieldAlert, 
   Zap, 
   Layers, 
-  ChevronDown, 
-  ChevronUp, 
   PlusCircle, 
   AlertCircle,
   ExternalLink,
@@ -69,7 +67,6 @@ interface TokenQuotaMetrics {
 }
 
 export const OpencodeTab: React.FC = () => {
-  const [activeSubTab, setActiveSubTab] = useState<'chat' | 'tokens' | 'history'>('chat');
   const [metrics, setMetrics] = useState<TokenQuotaMetrics | null>(null);
   const [sessions, setSessions] = useState<OpencodeSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('');
@@ -86,7 +83,6 @@ export const OpencodeTab: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [expandedReasoning, setExpandedReasoning] = useState<Record<string, boolean>>({});
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -193,7 +189,6 @@ export const OpencodeTab: React.FC = () => {
         setCurrentSessionId(newSess.id);
         if (newSess.model) setSelectedModel(newSess.model);
         setMessages([]);
-        setActiveSubTab('chat');
       }
     } catch {}
   };
@@ -287,12 +282,6 @@ export const OpencodeTab: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const toggleReasoning = (msgId: string) => {
-    setExpandedReasoning(prev => ({
-      ...prev,
-      [msgId]: !prev[msgId]
-    }));
-  };
 
   const QUICK_PROMPTS = [
     { label: 'Diagnóstico de RAM e CPU', prompt: 'Analise o status de hardware e processos em segundo plano no Ubuntu Server samuelserver e sugira otimizações.' },
@@ -326,42 +315,10 @@ export const OpencodeTab: React.FC = () => {
           </div>
         </div>
 
-        {/* Sub-Tabs Selector */}
-        <div className="flex items-center border-2 border-[#1A1A2E] rounded-lg overflow-hidden shadow-[2px_2px_0px_#1A1A2E] bg-white self-start md:self-auto">
-          <button
-            onClick={() => setActiveSubTab('chat')}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition ${
-              activeSubTab === 'chat' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
-            }`}
-          >
-            <Bot className="w-3.5 h-3.5" />
-            <span>Agente Interativo</span>
-          </button>
 
-          <button
-            onClick={() => { setActiveSubTab('tokens'); fetchMetrics(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition border-l-2 border-[#1A1A2E] ${
-              activeSubTab === 'tokens' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5" />
-            <span>Tokens & Limites</span>
-          </button>
-
-          <button
-            onClick={() => { setActiveSubTab('history'); fetchSessions(); }}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold transition border-l-2 border-[#1A1A2E] ${
-              activeSubTab === 'history' ? 'bg-[#FF5A36] text-white' : 'hover:bg-[#FFF7E8] text-[#1A1A2E]'
-            }`}
-          >
-            <History className="w-3.5 h-3.5" />
-            <span>Conversas Anteriores</span>
-          </button>
-        </div>
       </div>
 
-      {/* SUB-ABA 1: AGENTE INTERATIVO (CHAT & CLI) */}
-      {activeSubTab === 'chat' && (
+      {/* AGENTE INTERATIVO */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           {/* Coluna Central do Chat */}
           <div className="lg:col-span-8 flex flex-col h-[680px] bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
@@ -469,21 +426,10 @@ export const OpencodeTab: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Raciocínio (Reasoning) recolhível */}
                       {msg.reasoning && (
-                        <div className="border border-[#FFEECB] rounded bg-[#FFF7E8] p-2 text-[11px] font-mono text-[#B54708]">
-                          <button
-                            onClick={() => toggleReasoning(msg.id)}
-                            className="flex items-center justify-between w-full font-bold"
-                          >
-                            <span>🧠 Raciocínio & Diagnóstico Técnico</span>
-                            {expandedReasoning[msg.id] ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                          </button>
-                          {expandedReasoning[msg.id] && (
-                            <p className="mt-1 text-[#4A4A68] text-[10px] leading-relaxed">
-                              {msg.reasoning}
-                            </p>
-                          )}
+                        <div className="border border-[#FFEECB] rounded bg-[#FFF7E8] p-2 text-[11px] font-mono text-[#4A4A68] leading-relaxed whitespace-pre-wrap">
+                          <span className="font-bold text-[#B54708] block mb-1">Raciocínio técnico</span>
+                          {msg.reasoning}
                         </div>
                       )}
 
@@ -631,218 +577,6 @@ export const OpencodeTab: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
-
-      {/* SUB-ABA 2: CONSUMO DE TOKENS & LIMITES DE QUOTA */}
-      {activeSubTab === 'tokens' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl">
-              <span className="text-xs font-mono font-bold text-[#717188] block">Tokens Usados Hoje</span>
-              <div className="text-3xl font-black font-title text-[#1A1A2E] mt-1">
-                {metrics ? metrics.tokensToday.toLocaleString('pt-BR') : '--'}
-              </div>
-              <span className="text-[11px] font-mono text-[#12B76A] font-bold block mt-1">
-                {metrics ? `${metrics.quotaPercentUsed}% do limite diário` : '0%'}
-              </span>
-            </div>
-
-            <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl">
-              <span className="text-xs font-mono font-bold text-[#717188] block">Tokens de Prompt (Total)</span>
-              <div className="text-3xl font-black font-title text-[#00A6FB] mt-1">
-                {metrics?.promptTokensTotal != null ? metrics.promptTokensTotal.toLocaleString('pt-BR') : '0'}
-              </div>
-              <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                Entrada enviada ao agente
-              </span>
-            </div>
-
-            <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl">
-              <span className="text-xs font-mono font-bold text-[#717188] block">Tokens de Resposta (Total)</span>
-              <div className="text-3xl font-black font-title text-[#FF5A36] mt-1">
-                {metrics?.completionTokensTotal != null ? metrics.completionTokensTotal.toLocaleString('pt-BR') : '0'}
-              </div>
-              <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                Geração concluída pelo modelo
-              </span>
-            </div>
-
-            <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl">
-              <span className="text-xs font-mono font-bold text-[#717188] block">Histórico Total Acumulado</span>
-              <div className="text-3xl font-black font-title text-[#7F56D9] mt-1">
-                {metrics ? metrics.tokensTotal.toLocaleString('pt-BR') : '--'}
-              </div>
-              <span className="text-[11px] font-mono text-[#717188] font-bold block mt-1">
-                Sessões: {metrics?.sessionsCount ?? 0} registradas
-              </span>
-            </div>
-          </div>
-
-          {/* Cards secundários de limites e status */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-            <div className="p-4 bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono text-[#717188] font-bold block">Teto Diário do Modelo</span>
-                <span className="text-lg font-black font-mono text-[#1A1A2E]">4.000.000 tokens/dia</span>
-              </div>
-              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-[#FFF7E8] border border-[#1A1A2E] rounded text-[#B54708]">
-                {selectedModel}
-              </span>
-            </div>
-
-            <div className="p-4 bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono text-[#717188] font-bold block">Taxa RPM / TPM</span>
-                <span className="text-lg font-black font-mono text-[#12B76A]">15 RPM · 1.000.000 TPM</span>
-              </div>
-              <Zap className="w-5 h-5 text-[#FF5A36]" />
-            </div>
-
-            <div className="p-4 bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl flex items-center justify-between">
-              <div>
-                <span className="text-xs font-mono text-[#717188] font-bold block">Última Atividade</span>
-                <span className="text-sm font-black font-mono text-[#1A1A2E]">
-                  {metrics?.lastActive ? new Date(metrics.lastActive).toLocaleString('pt-BR') : 'Em espera'}
-                </span>
-              </div>
-              <RefreshCw className="w-4 h-4 text-[#717188]" />
-            </div>
-          </div>
-
-          {/* Histórico Diário de Consumo */}
-          <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl space-y-3">
-            <h2 className="text-xs font-black font-title uppercase tracking-wider text-[#1A1A2E] border-b-2 border-[#1A1A2E] pb-2.5">
-              Registro Diário de Consumo de Tokens (Últimos 14 Dias)
-            </h2>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
-                <thead className="bg-[#FFF7E8] border-b-2 border-[#1A1A2E] font-black">
-                  <tr>
-                    <th className="py-2.5 px-3.5">Data</th>
-                    <th className="py-2.5 px-3.5">Requisições</th>
-                    <th className="py-2.5 px-3.5 text-right">Tokens Prompt</th>
-                    <th className="py-2.5 px-3.5 text-right">Tokens Resposta</th>
-                    <th className="py-2.5 px-3.5 text-right">Total Consumido</th>
-                    <th className="py-2.5 px-3.5 text-right">% do Limite Diário</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E2DFD8]">
-                  {(!metrics?.historyByDay || metrics.historyByDay.length === 0) ? (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-[#717188]">
-                        Nenhum consumo registrado ainda. Inicie um diálogo na aba "Agente Interativo".
-                      </td>
-                    </tr>
-                  ) : (
-                    metrics.historyByDay.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
-                        <td className="py-2.5 px-3.5 font-bold">{row.date}</td>
-                        <td className="py-2.5 px-3.5">{row.requests} chamada(s)</td>
-                        <td className="py-2.5 px-3.5 text-right tabular-nums text-[#717188]">
-                          {(row.promptTokens ?? 0).toLocaleString('pt-BR')}
-                        </td>
-                        <td className="py-2.5 px-3.5 text-right tabular-nums text-[#717188]">
-                          {(row.completionTokens ?? 0).toLocaleString('pt-BR')}
-                        </td>
-                        <td className="py-2.5 px-3.5 text-right font-black tabular-nums">
-                          {row.tokens.toLocaleString('pt-BR')}
-                        </td>
-                        <td className="py-2.5 px-3.5 text-right text-[#12B76A] font-bold">
-                          {((row.tokens / 4000000) * 100).toFixed(2)}%
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SUB-ABA 3: CONVERSAS ANTERIORES (HISTÓRICO) */}
-      {activeSubTab === 'history' && (
-        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5 space-y-4">
-          <div className="flex items-center justify-between border-b-2 border-[#1A1A2E] pb-3">
-            <div>
-              <h2 className="text-sm font-black font-title uppercase tracking-wider text-[#1A1A2E]">
-                Histórico de Diálogos & Sessões Anteriores
-              </h2>
-              <p className="text-xs text-[#717188]">
-                Todas as interações e análises do Lux e Opencode salvas no banco de dados local.
-              </p>
-            </div>
-            <button
-              onClick={handleStartNewSession}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Nova Conversa</span>
-            </button>
-          </div>
-
-          {loadingHistory ? (
-            <div className="py-12 text-center text-[#717188]">
-              <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-[#FF5A36]" />
-              <span className="font-mono text-xs font-bold">Carregando histórico...</span>
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="py-12 text-center text-[#717188] space-y-2">
-              <MessageSquare className="w-8 h-8 mx-auto text-[#717188]" />
-              <span className="font-bold text-sm text-[#1A1A2E] block">Nenhuma conversa registrada</span>
-              <p className="text-xs font-mono">Envie uma mensagem na aba "Agente Interativo" para criar a primeira sessão.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-              {sessions.map((sess) => (
-                <div
-                  key={sess.id}
-                  onClick={() => {
-                    loadSessionMessages(sess.id);
-                    setActiveSubTab('chat');
-                  }}
-                  className={`p-4 rounded-xl border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] hover:shadow-[5px_5px_0px_#1A1A2E] hover:-translate-y-0.5 transition cursor-pointer flex flex-col justify-between space-y-3 ${
-                    sess.id === currentSessionId ? 'bg-[#FFF7E8]' : 'bg-white'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h3 className="text-xs font-black font-title text-[#1A1A2E] line-clamp-1">
-                          {sess.title}
-                        </h3>
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-[#EBF5FF] text-[#00A6FB] border border-[#B2DDFF]">
-                          {sess.model || 'opencode/big-pickle'}
-                        </span>
-                      </div>
-                      <button
-                        onClick={(e) => handleDeleteSession(sess.id, e)}
-                        className="p-1 hover:bg-[#FEE4E2] text-[#717188] hover:text-[#F04438] rounded transition"
-                        title="Excluir sessão"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    <p className="text-[11px] font-mono text-[#717188] line-clamp-2">
-                      {sess.lastMessagePreview || 'Sessão aberta sem mensagens.'}
-                    </p>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[10px] font-mono font-bold text-[#717188] pt-2 border-t border-[#E2DFD8] flex-wrap gap-1">
-                    <span>{sess.messageCount} msgs</span>
-                    <span className="text-[#12B76A]">
-                      P: {sess.totalPromptTokens || 0} · R: {sess.totalCompletionTokens || 0} · Total: {sess.totalTokens || 0}
-                    </span>
-                    <span>{new Date(sess.updatedAt).toLocaleDateString('pt-BR')}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 };
-

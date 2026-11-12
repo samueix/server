@@ -550,8 +550,8 @@ export const RemoteBrowserTab: React.FC = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-        <div className="xl:col-span-3 space-y-2">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2 space-y-2">
           <div
             tabIndex={0}
             onKeyDown={handleKeyDown}
@@ -617,44 +617,9 @@ export const RemoteBrowserTab: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <div className="p-3 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold font-title text-[#1A1A2E]">
-              <History className="w-4 h-4 text-[#FF5A36]" /> Histórico
-            </div>
-            <div className="max-h-[420px] overflow-y-auto space-y-1">
-              {history.length === 0 && (
-                <p className="text-[10px] font-mono text-[#4A4A68]">Nenhuma ação ainda.</p>
-              )}
-              {history.map((entry, index) => (
-                <div
-                  key={`${entry.ts}-${index}`}
-                  className="px-2 py-1 rounded bg-[#FFF7E8] border border-[#1A1A2E]/20 text-[10px] font-mono text-[#1A1A2E]"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-bold uppercase">{entry.type}</span>
-                    <span className="text-[#4A4A68]">{formatTime(entry.ts)}</span>
-                  </div>
-                  <div className="truncate text-[#4A4A68]" title={entry.detail}>
-                    {entry.detail}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="p-3 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-1">
-            <div className="text-[11px] font-bold font-title text-[#1A1A2E]">Sessão</div>
-            <p className="text-[10px] font-mono text-[#4A4A68] break-all">
-              {state.title || state.url || 'Sem página carregada'}
-            </p>
-            <p className="text-[10px] font-mono text-[#4A4A68]">
-              Início: {formatTime(state.startedAt)} | Última ação: {formatTime(state.lastActionAt)}
-            </p>
-            <p className="text-[10px] font-mono text-[#4A4A68]">
-              Perfil efêmero, histórico em memória, screenshots sob demanda.
-            </p>
-          </div>
+        <div className="p-3 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-1 h-fit">
+          <div className="text-[11px] font-bold font-title text-[#1A1A2E]">Sessão ativa</div>
+          <p className="text-[10px] font-mono text-[#4A4A68] break-all">{state.title || state.url || 'Sem página carregada'}</p>
         </div>
       </div>
     </div>

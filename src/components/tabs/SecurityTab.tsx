@@ -95,9 +95,7 @@ export const SecurityTab: React.FC = () => {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedIp, setCopiedIp] = useState<string | null>(null);
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
-  const [filterType, setFilterType] = useState<'all' | 'public' | 'local' | 'blocked' | 'ufw'>('all');
 
   const fetchSecurityStatus = async (isManual = false) => {
     if (isManual) setRefreshing(true);
@@ -207,22 +205,10 @@ export const SecurityTab: React.FC = () => {
     setTimeout(() => setCopiedIp(null), 2000);
   };
 
-  const copyBlockCommand = (ip: string) => {
-    const cmd = `sudo ufw insert 1 deny from ${ip} comment 'Bloqueado via Server Panel'`;
-    navigator.clipboard.writeText(cmd);
-    setCopiedCmd(ip);
-    setTimeout(() => setCopiedCmd(null), 2500);
-  };
 
   const isUnderAttack = data?.isUnderAttack || data?.threatLevel === 'SOB ATAQUE';
   const isModerate = data?.threatLevel === 'MODERADO';
 
-  const filteredAttackers = (data?.attackSources || []).filter(item => {
-    if (filterType === 'public') return item.ipType === 'public' || !item.ipType;
-    if (filterType === 'local') return item.ipType === 'local' || item.ipType === 'tailscale';
-    if (filterType === 'blocked') return item.status === 'bloqueado';
-    return true;
-  });
 
   const hourlyList = data?.hourlyDistribution || [];
   const maxHourlyCount = Math.max(1, ...hourlyList.map(h => h.count));
@@ -338,15 +324,12 @@ export const SecurityTab: React.FC = () => {
           </code>
           <button
             onClick={() => {
-              const cmd = 'sudo truncate -s 0 /var/log/auth.log && sudo truncate -s 0 /var/log/btmp && sudo systemctl restart ssh';
-              navigator.clipboard.writeText(cmd);
-              setCopiedCmd('clear_cmd');
-              setTimeout(() => setCopiedCmd(null), 2500);
+              navigator.clipboard.writeText('sudo truncate -s 0 /var/log/auth.log && sudo truncate -s 0 /var/log/btmp && sudo systemctl restart ssh');
             }}
             className="px-3 py-1.5 bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-1.5 shrink-0"
           >
-            {copiedCmd === 'clear_cmd' ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5 text-white" />}
-            <span>{copiedCmd === 'clear_cmd' ? 'Copiado!' : 'Copiar Comando'}</span>
+            <Copy className="w-3.5 h-3.5 text-white" />
+            <span>Copiar Comando</span>
           </button>
         </div>
       </div>
@@ -533,67 +516,13 @@ export const SecurityTab: React.FC = () => {
             <div className="flex items-center gap-2">
               <Ban className="w-4 h-4 text-[#FF5A36]" />
               <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                {filterType === 'ufw' ? 'Regras Ativas do Firewall UFW' : 'Detalhamento dos IPs Hostis & Tentativas de Invasão'}
+                'IPs hostis e tentativas de invasão'
               </h2>
-            </div>
-
-            {/* Filtros de IPs e UFW */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                onClick={() => setFilterType('all')}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
-                  filterType === 'all'
-                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
-                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
-                }`}
-              >
-                Todos ({data?.attackSources?.length || 0})
-              </button>
-              <button
-                onClick={() => setFilterType('public')}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
-                  filterType === 'public'
-                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
-                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
-                }`}
-              >
-                WAN Externa
-              </button>
-              <button
-                onClick={() => setFilterType('local')}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
-                  filterType === 'local'
-                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
-                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
-                }`}
-              >
-                LAN / Local
-              </button>
-              <button
-                onClick={() => setFilterType('blocked')}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
-                  filterType === 'blocked'
-                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
-                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
-                }`}
-              >
-                Bloqueados ({data?.blockedIpsInUfw?.length || 0})
-              </button>
-              <button
-                onClick={() => setFilterType('ufw')}
-                className={`px-2.5 py-1 rounded text-[11px] font-mono font-bold border ${
-                  filterType === 'ufw'
-                    ? 'bg-[#1A1A2E] text-white border-[#1A1A2E]'
-                    : 'bg-white text-[#1A1A2E] border-[#1A1A2E] hover:bg-[#FFEECB]'
-                }`}
-              >
-                Regras UFW ({data?.ufwRules?.length || 0})
-              </button>
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            {filterType === 'ufw' ? (
+            {false ? (
               <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
                 <thead className="bg-[#FFF7E8]/60 border-b-2 border-[#1A1A2E] font-black text-xs">
                   <tr>
@@ -606,7 +535,7 @@ export const SecurityTab: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2DFD8]">
-                  {(!data?.ufwRules || data.ufwRules.length === 0) ? (
+                  {((data?.ufwRules || []).length === 0) ? (
                     <tr>
                       <td colSpan={6} className="py-10 text-center text-[#717188]">
                         <ShieldCheck className="w-8 h-8 text-[#12B76A] mx-auto mb-2" />
@@ -615,7 +544,7 @@ export const SecurityTab: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    data.ufwRules.map((rule, idx) => (
+                    (data?.ufwRules || []).map((rule, idx) => (
                       <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
                         <td className="py-2.5 px-3.5 font-bold tabular-nums">[{rule.number}]</td>
                         <td className="py-2.5 px-3.5 font-bold">{rule.to}</td>
@@ -659,7 +588,7 @@ export const SecurityTab: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#E2DFD8]">
-                  {filteredAttackers.length === 0 ? (
+                  {(data?.attackSources || []).length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-12 text-center text-[#717188]">
                         <ShieldCheck className="w-8 h-8 text-[#12B76A] mx-auto mb-2" />
@@ -668,7 +597,7 @@ export const SecurityTab: React.FC = () => {
                       </td>
                     </tr>
                   ) : (
-                    filteredAttackers.map((item, idx) => {
+                    (data?.attackSources || []).map((item, idx) => {
                       const isBlocked = item.status === 'bloqueado';
                       const locLabel = item.city && item.city !== 'Desconhecida' && item.city !== 'WAN'
                         ? `${item.city}, ${item.country}`
@@ -754,14 +683,6 @@ export const SecurityTab: React.FC = () => {
                               >
                                 {managingIp === item.ip ? 'Aplicando...' : isBlocked ? 'Desbloquear' : 'Banir no UFW'}
                               </button>
-
-                              <button
-                                onClick={() => copyBlockCommand(item.ip)}
-                                className="p-1 hover:bg-[#FFEECB] rounded border border-[#1A1A2E] transition"
-                                title="Copiar comando UFW"
-                              >
-                                {copiedCmd === item.ip ? <Check className="w-3 h-3 text-[#12B76A]" /> : <Copy className="w-3 h-3 text-[#1A1A2E]" />}
-                              </button>
                             </div>
                           </td>
                         </tr>
@@ -812,6 +733,62 @@ export const SecurityTab: React.FC = () => {
               sudo ufw insert 1 deny from [IP_DO_ATACANTE]
             </code>
           </div>
+        </div>
+      </div>
+
+      {/* CASO DE ATAQUE - ATENÇÃO MÁXIMA (DETALHADO) */}
+      <div className="p-5 bg-[#FEF3F2] border-2 border-[#F04438] shadow-[4px_4px_0px_#F04438] rounded-xl space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b-2 border-[#F04438]/40 pb-3">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-lg bg-[#F04438] border-2 border-[#1A1A2E] flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-sm font-black font-title text-[#1A1A2E] uppercase tracking-wide">Atenção: análise detalhada de caso de ataque/intrusão</h2>
+              <p className="text-xs text-[#4A4A68] mt-0.5">Consolidado técnico para triagem, contenção e auditoria. Validar origem antes de qualquer bloqueio para evitar impacto em acessos legítimos.</p>
+            </div>
+          </div>
+          <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono font-bold border ${data?.isUnderAttack || data?.threatLevel === 'SOB ATAQUE' ? 'bg-[#FEE4E2] text-[#B42318] border-[#F04438]' : data?.threatLevel === 'MODERADO' ? 'bg-[#FEF0C7] text-[#B54708] border-[#F79009]' : 'bg-[#D1FADF] text-[#027A48] border-[#12B76A]'}`}>
+            {data?.threatLevel || 'NORMAL'} · {data?.isUnderAttack ? 'ação recomendada agora' : 'monitoramento contínuo'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg"><div className="text-[11px] font-mono font-bold text-[#717188]">Janela temporal</div><div className="text-lg font-black text-[#1A1A2E] mt-1">{data?.totalFailedAttempts24h ?? 0} falhas / 24h</div><div className="text-[11px] text-[#4A4A68] mt-1">{data?.failedAttemptsLastHour ?? 0} na última hora · pico: {maxHourlyCount}/h · SSH/painel: {data?.sshStatus || 'n/d'} · Nginx: {data?.nginxStatus || 'n/d'}</div></div>
+          <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg"><div className="text-[11px] font-mono font-bold text-[#717188]">Origem e superfície</div><div className="text-lg font-black text-[#1A1A2E] mt-1">{data?.externalThreatsCount ?? 0} externas</div><div className="text-[11px] text-[#4A4A68] mt-1">{data?.lanAttemptsCount ?? 0} LAN/Tailscale · {data?.attackSources?.length ?? 0} fontes únicas · scans web: {data?.totalScansDetected ?? 0}</div></div>
+          <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg"><div className="text-[11px] font-mono font-bold text-[#717188]">Contenção (UFW)</div><div className="text-lg font-black text-[#1A1A2E] mt-1">{data?.blockedIpsInUfw?.length ?? 0} IPs bloqueados</div><div className="text-[11px] text-[#4A4A68] mt-1">Regras ativas: {data?.ufwRules?.length ?? 0} · Firewall: {data?.ufwActive ? 'ativo' : 'verificar estado'} · ação por origem disponível na tabela</div></div>
+          <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg"><div className="text-[11px] font-mono font-bold text-[#717188]">Contexto de verificação</div><div className="text-sm font-black text-[#1A1A2E] mt-1 break-words">{data?.lastChecked ? new Date(data.lastChecked).toLocaleString('pt-BR') : '--'}</div><div className="text-[11px] text-[#4A4A68] mt-1">Usuários alvo: {(data?.targetAccounts || []).map(a=>`${a.user} (${a.attempts})`).join(', ') || 'sem recorrência'}</div></div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg space-y-2">
+            <div className="flex items-center gap-2 text-xs font-black font-title text-[#1A1A2E] uppercase"><AlertTriangle className="w-4 h-4 text-[#F04438]" /> Vetores, indícios e impacto potencial</div>
+            <ul className="text-xs text-[#4A4A68] space-y-1.5 list-disc pl-4">
+              <li><strong>Força bruta / autenticação:</strong> tentativas repetidas contra SSH/painel por IP e usuário; risco de comprometimento por credencial fraca ou vazada.</li>
+              <li><strong>Motivos observados:</strong> senha incorreta, usuário inexistente, conexão abortada; cada motivo ajuda a separar erro humano de ataque automatizado.</li>
+              <li><strong>Varredura web:</strong> {data?.totalScansDetected ?? 0} evento(s) buscando rotas sensíveis (.env, wp-login, endpoints administrativos); indica reconhecimento de superfície.</li>
+              <li><strong>Distribuição temporal:</strong> pico de {maxHourlyCount} tentativa(s)/hora nas últimas 12h — correlacionar com janelas de manutenção, deploys ou acessos legítimos.</li>
+              <li><strong>Origem crítica atual:</strong> {data?.attackSources?.[0] ? `${data.attackSources[0].flag || ''} ${data.attackSources[0].ip} (${data.attackSources[0].ipTypeLabel || 'origem'}) · ${data.attackSources[0].count} tentativas · ${data.attackSources[0].service} · usuário ${data.attackSources[0].targetUser} · ${data.attackSources[0].failureReasonLabel || data.attackSources[0].status}` : 'nenhuma origem crítica identificada no momento'}.</li>
+              <li><strong>Risco:</strong> acesso não autorizado, escalonamento pós-comprometimento, exfiltração/alteração de dados e indisponibilidade de serviços.</li>
+            </ul>
+          </div>
+          <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg space-y-2">
+            <div className="flex items-center gap-2 text-xs font-black font-title text-[#1A1A2E] uppercase"><ShieldCheck className="w-4 h-4 text-[#12B76A]" /> Resposta, contenção e endurecimento (prioridade)</div>
+            <ol className="text-xs text-[#4A4A68] space-y-1.5 list-decimal pl-4">
+              <li><strong>Validação imediata:</strong> confirmar se IP/geolocalização/horário pertencem a acesso legítimo (LAN, Tailscale, seu provedor); nunca bloquear IP administrativo por engano.</li>
+              <li><strong>Contenção:</strong> banir no UFW origens externas maliciosas/reincidentes e verificar regra efetiva; reavaliar bloqueios existentes ({data?.blockedIpsInUfw?.length ?? 0}).</li>
+              <li><strong>Erradicação/endurecimento:</strong> usar chaves SSH, desabilitar login por senha/root quando viável, senhas fortes/únicas no painel e serviços, manter UFW ativo e expor apenas portas necessárias.</li>
+              <li><strong>Monitoramento contínuo:</strong> acompanhar reincidência, novos usuários alvo, mudanças de padrão e scans; repetir triagem após alterações de rede/firewall.</li>
+              <li><strong>Evidências para auditoria:</strong> registrar IP, país/cidade/ASN, serviço, usuário alvo, motivo, contagem, timestamps e ação tomada (bloqueio/desbloqueio).</li>
+              <li><strong>Escalonamento:</strong> se houver sucesso de login suspeito, alteração não autorizada ou persistência, isolar acesso, rotacionar credenciais/chaves e revisar integridade do host.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div className="p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E]">
+          <div className="font-black font-mono mb-1">Contenção rápida (UFW) — aplicar com cautela</div>
+          <code className="block p-2 rounded bg-white border border-[#1A1A2E] font-mono text-[11px] select-all">sudo ufw insert 1 deny from &lt;IP_ATACANTE&gt; comment 'ataque detectado no painel'</code>
+          <div className="text-[11px] text-[#4A4A68] mt-1">Reverter se necessário: <code className="font-mono">sudo ufw delete deny from &lt;IP_ATACANTE&gt;</code>. Sempre confirmar que a origem não é confiável antes de aplicar.</div>
         </div>
       </div>
 
