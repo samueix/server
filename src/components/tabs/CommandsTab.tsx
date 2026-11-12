@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { executeTerminalCommand, TerminalExecResponse } from '../../services/terminalService';
 import { CommandAnatomyModal } from '../CommandAnatomyModal';
+import { OpencodeTab } from './OpencodeTab';
 
 export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`;
 
@@ -108,13 +109,7 @@ export const CommandsTab: React.FC = () => {
 
   // Estado visual de tela cheia expandida
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
-  const [showAdGuardPanel, setShowAdGuardPanel] = useState<boolean>(false);
-  const adguardPanelUrl = (() => {
-    if (typeof window === 'undefined') return ':8081/#';
-    const host = window.location.hostname || '127.0.0.1';
-    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-    return `${window.location.protocol}//${formattedHost}:8081/#`;
-  })();
+  const [showOpencodePanel, setShowOpencodePanel] = useState<boolean>(false);
 
   // Estados de confirmação dupla (Etapa 1 e Etapa 2)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
@@ -270,12 +265,12 @@ export const CommandsTab: React.FC = () => {
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
-            onClick={() => setShowAdGuardPanel(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#12B76A] ${showAdGuardPanel ? 'bg-[#D1FADF] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#ECFDF3] text-[#1A1A2E]'}`}
-            title="Abrir painel nativo do AdGuard Home integrado ao shell"
+            onClick={() => setShowOpencodePanel(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#00A6FB] ${showOpencodePanel ? 'bg-[#E0F2FE] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#E0F2FE] text-[#1A1A2E]'}`}
+            title="Abrir/fechar agente Opencode integrado ao shell"
           >
-            <Shield className="w-3.5 h-3.5 text-[#12B76A]" />
-            <span>{showAdGuardPanel ? 'Ocultar AdGuard' : 'Painel AdGuard'}</span>
+            <Sparkles className="w-3.5 h-3.5 text-[#00A6FB]" />
+            <span>{showOpencodePanel ? 'Ocultar Opencode' : 'Opencode'}</span>
           </button>
 
           <button
@@ -298,17 +293,18 @@ export const CommandsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* PAINEL ADGUARD INTEGRADO AO SHELL */}
-      {showAdGuardPanel && (
+      {/* OPENCODE INTEGRADO AO SHELL */}
+      {showOpencodePanel && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#E0F2FE]">
             <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-[#12B76A]" />
-              <span className="text-xs font-mono font-black text-[#1A1A2E]">AdGuard Home integrado — edite/verifique filtros, clientes, DNS e todas as rotas aqui enquanto usa o shell abaixo</span>
+              <Sparkles className="w-4 h-4 text-[#00A6FB]" />
+              <span className="text-xs font-mono font-black text-[#1A1A2E]">Opencode integrado ao Shell — execute comandos/agente, consulte sessões e modelos sem sair desta aba</span>
             </div>
-            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
           </div>
-          <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '68vh', minHeight: '620px', border: '0' }} />
+          <div className="p-3 max-h-[75vh] overflow-auto">
+            <OpencodeTab />
+          </div>
         </div>
       )}
 

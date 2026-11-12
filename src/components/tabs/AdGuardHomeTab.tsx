@@ -46,18 +46,19 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [lastUpdated, setLastUpdated] = useState<string>('--:--:--');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [activeSubTab, setActiveSubTab] = useState<'native' | 'overview' | 'queries' | 'blocked' | 'clients' | 'upstreams'>('native');
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'queries' | 'blocked' | 'clients' | 'upstreams'>('overview');
   const [showClearModal, setShowClearModal] = useState<boolean>(false);
+  const [clearShellCmd, setClearShellCmd] = useState<string>('');
+  const [isClearing, setIsClearing] = useState<boolean>(false);
+  const [clearMessage, setClearMessage] = useState<string | null>(null);
+  const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
+  const [showAdGuardPanel, setShowAdGuardPanel] = useState<boolean>(false);
   const adguardPanelUrl = (() => {
     if (typeof window === 'undefined') return ':8081/#';
     const host = window.location.hostname || '127.0.0.1';
     const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
     return `${window.location.protocol}//${formattedHost}:8081/#`;
   })();
-  const [clearShellCmd, setClearShellCmd] = useState<string>('');
-  const [isClearing, setIsClearing] = useState<boolean>(false);
-  const [clearMessage, setClearMessage] = useState<string | null>(null);
-  const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
 
   const openClearModal = async () => {
     setShowClearModal(true);
@@ -231,22 +232,14 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Link para o painel nativo do AdGuard Home */}
-          <a
-            href={(() => {
-              if (typeof window === 'undefined') return ':8081/#';
-              const host = window.location.hostname || '127.0.0.1';
-              const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-              return `${window.location.protocol}//${formattedHost}:8081/#`;
-            })()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FFEECB] text-[#1A1A2E] rounded-lg text-xs font-mono font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
-            title="Abrir painel oficial do AdGuard Home em :8081/#"
+          <button
+            onClick={() => setShowAdGuardPanel(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${showAdGuardPanel ? 'bg-[#D1FADF] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#ECFDF3] text-[#1A1A2E]'}`}
+            title="Abrir/fechar painel nativo do AdGuard Home integrado"
           >
-            <ExternalLink className="w-3.5 h-3.5 text-[#FF5A36]" />
-            <span>Painel nativo (:8081/#)</span>
-          </a>
+            <ShieldCheck className="w-3.5 h-3.5 text-[#12B76A]" />
+            <span>{showAdGuardPanel ? 'Ocultar Painel' : 'Painel AdGuard'}</span>
+          </button>
 
           <div className="text-right hidden sm:block">
             <span className="text-[10px] text-[#717188] font-mono font-bold block">Atualização</span>
@@ -272,6 +265,17 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </button>
         </div>
       </div>
+
+      {/* Painel nativo integrado (toggle) */}
+      {showAdGuardPanel && (
+        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
+            <span className="text-xs font-mono font-black text-[#1A1A2E]">AdGuard Home integrado — edite/verifique filtros, clientes, DNS e todas as rotas aqui</span>
+            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+          </div>
+          <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '75vh', minHeight: '680px', border: '0' }} />
+        </div>
+      )}
 
       {/* Offline Alert Banner */}
       {!isOnline && !isLoading && (
@@ -411,16 +415,6 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-3.5">
         <div className="flex items-center gap-1.5 overflow-x-auto">
           <button
-            onClick={() => setActiveSubTab('native')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
-              activeSubTab === 'native'
-                ? 'bg-[#FF5A36] text-white'
-                : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-            }`}
-          >
-            Painel completo (editar/listas)
-          </button>
-          <button
             onClick={() => setActiveSubTab('overview')}
             className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] transition shadow-[2px_2px_0px_#1A1A2E] ${
               activeSubTab === 'overview'
@@ -473,29 +467,17 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </button>
         </div>
 
-        {activeSubTab !== 'native' && (
-          <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 text-[#717188] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Filtrar domínio, cliente ou regra..."
-              className="w-full pl-9 pr-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
-            />
-          </div>
-        )}
-      </div>
-
-      {activeSubTab === 'native' && (
-        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
-            <span className="text-xs font-mono font-black text-[#1A1A2E]">Painel nativo do AdGuard Home integrado — gerencie filtros/listas, clientes, DNS e todas as rotas aqui</span>
-            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
-          </div>
-          <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '78vh', minHeight: '720px', border: '0' }} />
+        <div className="relative w-full sm:w-64">
+          <Search className="w-4 h-4 text-[#717188] absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Filtrar domínio, cliente ou regra..."
+            className="w-full pl-9 pr-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
+          />
         </div>
-      )}
+      </div>
 
       {/* Tab 1: Overview */}
       {activeSubTab === 'overview' && (
