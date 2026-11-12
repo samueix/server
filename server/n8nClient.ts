@@ -1,3 +1,5 @@
+import { getServerConfig } from './credentialsManager.js';
+
 export interface N8nWorkflowItem {
   id: string;
   name: string;
@@ -41,9 +43,27 @@ export function setN8nConfig(url?: string, apiKey?: string) {
   cachedWorkingN8nUrl = null;
 }
 
+function resolveN8nConfig(): { activeUrl: string; activeKey: string } {
+  let cfg: any = null;
+  try {
+    cfg = getServerConfig();
+  } catch {
+    cfg = null;
+  }
+  const activeUrl =
+    customN8nUrl ||
+    process.env.N8N_URL ||
+    cfg?.n8n?.url ||
+    DEFAULT_N8N_URL;
+  const activeKey =
+    customN8nApiKey !== null
+      ? customN8nApiKey
+      : (process.env.N8N_API_KEY || cfg?.n8n?.apiKey || '');
+  return { activeUrl: String(activeUrl).trim(), activeKey: String(activeKey || '').trim() };
+}
+
 export function getN8nConfig() {
-  const activeUrl = customN8nUrl || process.env.N8N_URL || DEFAULT_N8N_URL;
-  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || '');
+  const { activeUrl, activeKey } = resolveN8nConfig();
   return {
     url: activeUrl,
     hasApiKey: Boolean(activeKey)
@@ -51,8 +71,7 @@ export function getN8nConfig() {
 }
 
 export async function fetchN8nStatus(): Promise<N8nStatusInfo> {
-  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || '');
-  const activeUrl = customN8nUrl || process.env.N8N_URL || DEFAULT_N8N_URL;
+  const { activeUrl, activeKey } = resolveN8nConfig();
 
   // Lista de URLs prioritárias locais e rápidas
   const candidateUrls: string[] = [];
@@ -164,8 +183,9 @@ export async function fetchN8nStatus(): Promise<N8nStatusInfo> {
 }
 
 export async function toggleN8nWorkflow(workflowId: string, active: boolean): Promise<{ success: boolean; message: string }> {
-  const activeKey = customN8nApiKey !== null ? customN8nApiKey : (process.env.N8N_API_KEY || '');
-  const baseUrl = cachedWorkingN8nUrl || customN8nUrl || process.env.N8N_URL || 'http://127.0.0.1:5678';
+  const resolved = resolveN8nConfig();
+  const activeKey = resolved.activeKey;
+  const baseUrl = cachedWorkingN8nUrl || resolved.activeUrl || 'http://127.0.0.1:5678';
 
   if (!activeKey) {
     return { success: false, message: 'Chave de API do n8n não configurada.' };

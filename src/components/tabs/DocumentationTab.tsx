@@ -62,7 +62,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Uptime', desc: 'Tempo contínuo em dias/horas desde a última reinicialização do kernel do Ubuntu.' },
         { label: 'Carga da CPU (Load Average)', desc: 'Média de processos aguardando tempo de execução nos últimos 1, 5 e 15 minutos.' }
       ],
-      apis: 'GET /api/server, GET /api/status, GET /api/services/status',
+      apis: 'GET /api/system, GET /api/services, GET /api/health (telemetria via backend/proxy)',
       permissions: 'Disponível para usuários comuns e administradores.',
       troubleshooting: 'Se a tela exibir "Desconectado", verifique se o serviço server-panel está ativo via: sudo systemctl status server-panel.'
     },
@@ -82,7 +82,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Cache e Buffers', desc: 'RAM utilizada pelo kernel Linux para acelerar leitura de disco, liberada dinamicamente quando requisitada.' },
         { label: 'Swap', desc: 'Espaço em disco reservado para paginação virtual de memória.' }
       ],
-      apis: 'GET /api/server (parse direto de /proc/meminfo e /sys/class/thermal)',
+      apis: 'GET /api/system, GET /api/cpu, GET /api/memory, GET /api/disk, GET /api/network, GET /api/temperature',
       permissions: 'Público/Operador.',
       troubleshooting: 'Temperaturas acima de 75°C geram alerta automático. Verifique poeira ou rotação de cooler do processador.'
     },
@@ -101,7 +101,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Taxa de Bloqueio (%)', desc: 'Percentual de requisições de DNS que foram retidas por listas de bloqueio.' },
         { label: 'Upstream Latency', desc: 'Tempo em milissegundos que os provedores DNS externos levam para responder ao servidor.' }
       ],
-      apis: 'Proxy reverso local em http://127.0.0.1:8081/control (rotas /stats, /querylog, /status)',
+      apis: 'Proxy /adguard-api/* (AdGuard :8081) e rotas Node /api/adguard/status|stats|querylog|domains|analyze|sync|clear-history|config',
       permissions: 'Operador visualiza consultas; Administrador limpa histórico e configura regras.',
       troubleshooting: 'Se o AdGuard estiver inativo, execute: sudo systemctl restart AdGuardHome. Cheque logs em /opt/AdGuardHome/data/AdGuardHome.yaml.'
     },
@@ -140,7 +140,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Tokens Usados Hoje', desc: 'Total acumulado de tokens de entrada (prompt) e saída (resposta) consumidos na data atual.' },
         { label: 'Quota Diária', desc: 'Percentual de uso da quota de tokens processados pelo agente Lux + Opencode.' }
       ],
-      apis: 'GET /api/opencode/models, POST /api/opencode/chat, GET /api/opencode/tokens, GET /api/opencode/sessions, PATCH /api/opencode/sessions/:id',
+      apis: 'GET /api/opencode/models|tokens|sessions, GET/POST/PATCH/DELETE /api/opencode/sessions*, POST /api/opencode/chat',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Certifique-se de configurar OPENCODE_BIN e OPENCODE_MODEL no arquivo /opt/server-panel/.env para ativar o agente em produção.'
     },
@@ -159,7 +159,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Permissões (rwxr-xr-x)', desc: 'Privilégios de leitura, escrita e execução do usuário do sistema.' },
         { label: 'Bloqueio de Path Traversal', desc: 'Proteção de segurança que bloqueia acesso a arquivos confidenciais (/etc/shadow).' }
       ],
-      apis: 'GET /api/files/list, GET /api/files/read, POST /api/files/create, POST /api/files/save',
+      apis: 'GET /api/files/list|read|raw, POST /api/files/create|save',
       permissions: 'Restrito para Administradores autenticados com token Bearer.',
       troubleshooting: 'Caso não consiga salvar um arquivo, verifique se o usuário do processo tem permissão de escrita no diretório alvo.'
     },
@@ -178,7 +178,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Nível de Ameaça (Normal / Moderado / Sob Ataque)', desc: 'Classificação calculada baseada em ameaças externas reais.' },
         { label: 'Regras do UFW', desc: 'Listagem numerada de regras de firewall ativas em tempo real no kernel do Ubuntu.' }
       ],
-      apis: 'GET /api/security/attack-monitor, POST /api/security/block-ip, POST /api/security/unblock-ip, POST /api/security/clear-history',
+      apis: 'GET /api/security/*, POST /api/security/block-ip|unblock-ip|clear-history',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Para inspecionar regras diretamente no terminal, execute: sudo ufw status numbered.'
     },
@@ -215,7 +215,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'PID', desc: 'Identificador único do processo no sistema operacional.' },
         { label: 'Estado (R, S, Z)', desc: 'R (Executando), S (Dormindo/Aguardando), Z (Zumbi).' }
       ],
-      apis: 'GET /api/processes, POST /api/processes/kill',
+      apis: 'GET /api/processes (leitura/monitoramento)',
       permissions: 'Restrito para Administrador.',
       troubleshooting: 'Tenha cautela ao finalizar processos do sistema como sshd, systemd-journald ou nginx.'
     },
@@ -234,7 +234,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Ativo (Running)', desc: 'O serviço está em execução normal no systemd.' },
         { label: 'Inativo (Dead/Exited)', desc: 'O serviço está parado ou foi desabilitado intencionalmente.' }
       ],
-      apis: 'GET /api/services/status, POST /api/services/action',
+      apis: 'GET /api/services (monitoramento); ações avançadas via Terminal/systemctl quando autorizado',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Se um serviço falhar ao iniciar, consulte seus logs com: sudo journalctl -u NOME_DO_SERVICO -n 50.'
     },
@@ -253,7 +253,7 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Dual-Stack IPv4/IPv6', desc: 'Indica disponibilidade simultânea de IPv4 estático e IPv6 global.' },
         { label: 'Interface UP/DOWN', desc: 'Estado físico do link de rede ethernet ou Wi-Fi.' }
       ],
-      apis: 'GET /api/network, GET /api/network/interfaces',
+      apis: 'GET /api/network, GET /api/mac-vendor/:mac',
       permissions: 'Público/Operador.',
       troubleshooting: 'O endereço IPv6 global é dinâmico e sincronizado automaticamente pela interface wlo1.'
     },
@@ -271,7 +271,7 @@ export const DocumentationTab: React.FC = () => {
       indicators: [
         { label: 'Severidade (Info, Warning, Error)', desc: 'Classificação do nível de criticidade da mensagem registrada.' }
       ],
-      apis: 'GET /api/logs/query',
+      apis: 'GET /api/logs',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Para visualizar logs brutos contínuos no terminal: sudo journalctl -f.'
     },
@@ -289,7 +289,7 @@ export const DocumentationTab: React.FC = () => {
       indicators: [
         { label: 'Workflow Ativo', desc: 'Fluxo em execução aguardando gatilhos ou cron schedules.' }
       ],
-      apis: 'GET /api/n8n/status, GET /api/n8n/workflows',
+      apis: 'GET /api/n8n/status, POST /api/n8n/config, POST /api/n8n/workflows/:id/toggle',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Se o n8n estiver offline, execute: sudo systemctl start n8n ou verifique seu contêiner Docker.'
     },
@@ -326,19 +326,19 @@ export const DocumentationTab: React.FC = () => {
         { label: 'Kernel Version', desc: 'Versão do núcleo Linux em execução.' },
         { label: 'Hostname', desc: 'Nome de rede da máquina (samuelserver).' }
       ],
-      apis: 'GET /api/system/info, POST /api/system/reboot',
+      apis: 'GET /api/system (informações/snapshot); ações de energia não expostas na API atual',
       permissions: 'Restrito para Administradores.',
       troubleshooting: 'Após reiniciar o servidor, o painel restabelece a conexão automaticamente em ~45 segundos.'
     },
     {
       id: 'documentation',
-      name: '16. Documentação',
+      name: '17. Navegador Remoto',
       icon: BookOpen,
       summary: 'Manual operacional completo de infraestrutura, arquitetura e procedimentos de recuperação.',
       purpose: 'Servir como fonte definitiva de consulta técnica para operar, atualizar e recuperar o servidor doméstico.',
       whatYouCanDo: [
         'Copiar comandos operacionais em linha única com backup automático.',
-        'Consultar o manual específico de cada uma das 16 abas do sistema.',
+        'Consultar o manual específico de cada aba do sistema.',
         'Seguir guias de resolução passo a passo para emergências e incidentes.'
       ],
       indicators: [

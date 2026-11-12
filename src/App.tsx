@@ -579,7 +579,6 @@ export default function App() {
             {/* Offline Banner when telemetry server is unreachable (only on server tabs) */}
             {connectionStatus !== 'connected' && 
              activeTab !== 'adguard' && 
-             activeTab !== 'adguard_ai' && 
              activeTab !== 'ping' &&
              activeTab !== 'files' &&
              activeTab !== 'logs' &&
@@ -628,7 +627,7 @@ export default function App() {
               </Suspense>
             )}
 
-            {(activeTab === 'adguard' || activeTab === 'adguard_ai') && (
+            {activeTab === 'adguard' && (
               <Suspense fallback={<TabLoadingFallback />}>
                 <TabErrorBoundary tabName="AdGuard Home">
                   <AdGuardHomeTab userRole={currentUserRole} />

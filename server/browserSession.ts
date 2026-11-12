@@ -370,9 +370,17 @@ async function stopScreencast(): Promise<void> {
 async function startScreencast(): Promise<void> {
   if (screencastStarting) return;
   if (!activePage || !context || status !== 'running' || paused) return;
+  if (cdp) {
+    try {
+      await cdp.send('Page.stopScreencast' as any);
+    } catch {}
+    try {
+      await cdp.detach();
+    } catch {}
+    cdp = null;
+  }
   screencastStarting = true;
   try {
-    await stopScreencast();
     const page = activePage;
     const session = await context.newCDPSession(page);
     if (activePage !== page || status !== 'running' || paused) {
@@ -388,13 +396,17 @@ async function startScreencast(): Promise<void> {
       if (cdp !== session) return;
       const sessionId = params?.sessionId;
       if (sessionId !== undefined) {
-        session.send('Page.screencastFrameAck' as any, { sessionId } as any).catch(() => {});
+        try {
+          session.send('Page.screencastFrameAck' as any, { sessionId } as any).catch(() => {});
+        } catch {}
       }
       const now = Date.now();
       if (now - lastFrameSent < FRAME_MIN_INTERVAL_MS) return;
       lastFrameSent = now;
       try {
-        const frame = Buffer.from(String(params?.data || ''), 'base64');
+        const data = params?.data;
+        if (!data) return;
+        const frame = Buffer.from(typeof data === 'string' ? data : String(data), 'base64');
         if (frame.length === 0) return;
         broadcastFrame(frame);
       } catch {
@@ -407,13 +419,21 @@ async function startScreencast(): Promise<void> {
         fpsWindowStart = now;
       }
     });
-    await session.send('Page.startScreencast' as any, {
-      format: 'jpeg',
-      quality: 50,
-      maxWidth: VIEWPORT.width,
-      maxHeight: VIEWPORT.height,
-      everyNthFrame: 2
-    } as any);
+    try {
+      await session.send('Page.startScreencast' as any, {
+        format: 'jpeg',
+        quality: 45,
+        maxWidth: VIEWPORT.width,
+        maxHeight: VIEWPORT.height,
+        everyNthFrame: 2
+      } as any);
+    } catch {
+      await session.send('Page.startScreencast' as any, {
+        format: 'jpeg',
+        quality: 40,
+        everyNthFrame: 2
+      } as any);
+    }
   } finally {
     screencastStarting = false;
   }

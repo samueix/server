@@ -13,7 +13,6 @@ export type NavigationTab =
   | 'services' 
   | 'network' 
   | 'adguard'
-  | 'adguard_ai'
   | 'ping'
   | 'logs'
   | 'n8n'

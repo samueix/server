@@ -95,7 +95,21 @@ const CANONICAL_SERVICES = [
     aliases: ['n8n', 'n8n.service'],
     name: 'n8n Workflow Automation',
     porta: 5678,
-    descricao: 'Automação de fluxos e integrações'
+    descricao: 'Automação de fluxos e integrações (container Docker)'
+  },
+  {
+    canonical: 'cloudflared',
+    aliases: ['cloudflared', 'cloudflared.service'],
+    name: 'Cloudflare Tunnel',
+    porta: null,
+    descricao: 'Túnel Cloudflare (serviço systemd)'
+  },
+  {
+    canonical: 'cloudflared-update.timer',
+    aliases: ['cloudflared-update.timer'],
+    name: 'Cloudflared Update Timer',
+    porta: null,
+    descricao: 'Timer de atualização do cloudflared (systemd timer)'
   }
 ];
 
@@ -108,7 +122,8 @@ export function getSystemdServiceStatus(serviceName: string, aliases: string[] =
   for (const name of candidates) {
     const clean = name.replace(/[^a-zA-Z0-9_\-\.]/g, '');
     if (!clean) continue;
-    const unit = clean.endsWith('.service') ? clean : `${clean}.service`;
+    const isTimer = clean.endsWith('.timer') || serviceName.endsWith('.timer');
+    const unit = clean.endsWith('.service') || clean.endsWith('.timer') ? clean : `${clean}.service`;
 
     try {
       const stdout = execSync(
@@ -129,13 +144,14 @@ export function getSystemdServiceStatus(serviceName: string, aliases: string[] =
         const activeState = props['ActiveState'] || 'inactive';
         const subState = props['SubState'] || 'dead';
         
+        const timerOnline = isTimer && activeState === 'active' && (subState === 'waiting' || subState === 'running' || subState === 'elapsed');
         // Em serviços oneshot (como ufw), activeState é 'active' e subState é 'exited'. O serviço ESTÁ ATIVO!
-        const isOnline = activeState === 'active' && (
+        const isOnline = timerOnline || (activeState === 'active' && (
           subState === 'running' || 
           subState === 'listening' || 
           subState === 'active' || 
           subState === 'exited'
-        );
+        ));
         const isError = activeState === 'failed' || subState === 'failed';
 
         if (isOnline || isError) {

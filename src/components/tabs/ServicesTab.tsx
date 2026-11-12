@@ -113,9 +113,23 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
     key: 'n8n', 
     aliases: ['n8n', 'n8n workflow automation', 'n8n-server'], 
     name: 'n8n Workflow Automation', 
-    desc: 'Automação de fluxos e integrações de processos', 
+    desc: 'Automação de fluxos (container Docker em :5678)', 
     port: 5678, 
     isFuture: false 
+  },
+  { 
+    key: 'cloudflared', 
+    aliases: ['cloudflared', 'cloudflared.service'], 
+    name: 'Cloudflare Tunnel', 
+    desc: 'Túnel Cloudflare (serviço systemd, se instalado)', 
+    port: undefined 
+  },
+  { 
+    key: 'cloudflared-update.timer', 
+    aliases: ['cloudflared-update.timer', 'cloudflared-update'], 
+    name: 'Cloudflared Update Timer', 
+    desc: 'Timer systemd de atualização do cloudflared', 
+    port: undefined 
   }
 ];
 
