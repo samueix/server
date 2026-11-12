@@ -257,6 +257,7 @@ async function runOpencode(
     try {
       const evt = JSON.parse(trimmed);
       if (evt.sessionID && !sessionId) sessionId = evt.sessionID;
+      if (evt.part?.sessionID && !sessionId) sessionId = evt.part.sessionID;
       if (evt.type === 'text' && evt.part?.text) {
         texts.push(String(evt.part.text));
       }
@@ -264,11 +265,26 @@ async function runOpencode(
         promptTokens += Number(evt.part.tokens.input || 0);
         completionTokens += Number(evt.part.tokens.output || 0);
       }
+      if (evt.type === 'message' && evt.part?.tokens) {
+        promptTokens += Number(evt.part.tokens.input || 0);
+        completionTokens += Number(evt.part.tokens.output || 0);
+      }
     } catch {}
   }
 
   let text = texts.join('\n').trim();
-  if (!text) text = stdout.trim();
+  if (!text) {
+    // fallback: remove linhas JSON de eventos e coleta texto restante
+    const nonJson = stdout.split(/\r?\n/).filter(l => {
+      const t = l.trim();
+      if (!t) return false;
+      if (t.startsWith('{') && t.endsWith('}')) {
+        try { JSON.parse(t); return false; } catch { return true; }
+      }
+      return true;
+    }).join('\n').trim();
+    text = nonJson || '';
+  }
 
   return {
     text,

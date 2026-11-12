@@ -145,7 +145,15 @@ const ALLOWED_BINARIES = new Set([
   'python3',
   'docker',
   'docker-compose',
-  'crontab'
+  'crontab',
+
+  // Palavras-chave de shell para scripts/blocos (bash -c)
+  'if', 'then', 'else', 'elif', 'fi',
+  'for', 'while', 'until', 'do', 'done', 'in',
+  'case', 'esac', 'select', 'function',
+  'return', 'break', 'continue', 'local', 'declare', 'typeset', 'readonly',
+  'shift', 'set', 'eval', 'source', '.',
+  'wait', 'trap', 'exit', 'exec'
 ]);
 
 // Lista de arquivos confidenciais terminantemente proibidos de acesso via terminal
@@ -322,12 +330,27 @@ export function isCommandAllowed(commandString: string): { allowed: boolean; rea
 
   // Divide em linhas para suportar blocos colados (scripts multi-linha com comentários e comandos sequenciais)
   const lines = trimmed.split(/\r?\n/);
+  let heredocTerminator: string | null = null;
 
   for (const rawLine of lines) {
+    // Se estamos dentro de um heredoc, ignora até encontrar o terminador
+    if (heredocTerminator !== null) {
+      if (rawLine.replace(/\r$/, '') === heredocTerminator) {
+        heredocTerminator = null;
+      }
+      continue;
+    }
+
     const line = rawLine.trim();
     // Linhas em branco ou comentários puros do bash (# ...) são ignorados
     if (!line || line.startsWith('#')) {
       continue;
+    }
+
+    // Detecta início de heredoc (<<EOF, <<'EOF', <<"EOF", <<-EOF, etc.)
+    const heredocMatch = line.match(/<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/);
+    if (heredocMatch) {
+      heredocTerminator = heredocMatch[1];
     }
 
     // Divide comandos combinados por operadores lógicos ou pipes respeitando aspas e subshells
