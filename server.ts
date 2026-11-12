@@ -99,17 +99,18 @@ function timingSafeCompare(a?: string, b?: string): boolean {
   }
 }
 
-const DEFAULT_FALLBACK_PASS = '075561@Sam';
+const DEFAULT_ADMIN_PASS = 'adminx1';
+const DEFAULT_USER_PASS = '12345678';
 
 function getExpectedAdminPass(): string | null {
   const config = getServerConfig();
-  const pass = (config.auth?.adminPass || process.env.ADMIN_PASSWORD || DEFAULT_FALLBACK_PASS).trim();
+  const pass = (config.auth?.adminPass || process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASS).trim();
   return pass.length > 0 ? pass : null;
 }
 
 function getExpectedUserPass(): string | null {
   const config = getServerConfig();
-  const pass = (config.auth?.userPass || process.env.USER_PASSWORD || DEFAULT_FALLBACK_PASS).trim();
+  const pass = (config.auth?.userPass || process.env.USER_PASSWORD || DEFAULT_USER_PASS).trim();
   return pass.length > 0 ? pass : null;
 }
 
