@@ -146,6 +146,7 @@ const ALLOWED_BINARIES = new Set([
   'docker',
   'docker-compose',
   'crontab',
+  'opencode',
 
   // Palavras-chave de shell para scripts/blocos (bash -c)
   'if', 'then', 'else', 'elif', 'fi',

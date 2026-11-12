@@ -112,13 +112,13 @@ export const CommandsTab: React.FC = () => {
 
   const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
   const [showOpencodeCli, setShowOpencodeCli] = useState<boolean>(false);
-  const [opencodePrompt, setOpencodePrompt] = useState<string>('');
+  const [opencodeInput, setOpencodeInput] = useState<string>('');
   const [opencodeModel, setOpencodeModel] = useState<string>('opencode/big-pickle');
   const [opencodeModels, setOpencodeModels] = useState<string[]>(['opencode/big-pickle']);
   const [opencodeSessionId, setOpencodeSessionId] = useState<string>('');
-  const [opencodeSending, setOpencodeSending] = useState<boolean>(false);
-  const [opencodeCliHistory, setOpencodeCliHistory] = useState<Array<{id:string; role:'user'|'assistant'; content:string; model?:string; ts:string}>>([]);
-  const [opencodeError, setOpencodeError] = useState<string | null>(null);
+  const [opencodeCwd, setOpencodeCwd] = useState<string>('/opt/server-panel');
+  const [opencodeRunning, setOpencodeRunning] = useState<boolean>(false);
+  const [opencodeHistory, setOpencodeHistory] = useState<Array<{id:string; cmd:string; stdout:string; stderr:string; exitCode:number; cwd:string; ts:string}>>([]);
   const opencodeEndRef = useRef<HTMLDivElement | null>(null);
 
 
@@ -169,33 +169,61 @@ export const CommandsTab: React.FC = () => {
 
   useEffect(() => {
     if (showOpencodeCli) opencodeEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [opencodeCliHistory, opencodeSending, showOpencodeCli]);
+  }, [opencodeHistory, opencodeRunning, showOpencodeCli]);
+
+  const buildOpencodeCommand = (raw: string): string => {
+    const input = raw.trim();
+    const bin = '/home/samuel/.opencode/bin/opencode';
+    const modelArg = opencodeModel ? ` -m ${opencodeModel}` : '';
+    const dirArg = opencodeCwd ? ` --dir ${JSON.stringify(opencodeCwd)}` : '';
+    const sessionArg = opencodeSessionId ? ` -s ${JSON.stringify(opencodeSessionId)}` : '';
+    // comandos diretos do opencode (ex: opencode models, opencode session list, opencode run ...)
+    if (/^opencode(\s|$)/.test(input)) {
+      return input.replace(/^opencode(\s|$)/, bin + '$1');
+    }
+    // ajuda/listagem rápida local
+    if (input === '/help') return `${bin} --help`;
+    if (input === '/models') return `${bin} models`;
+    if (input === '/sessions') return `${bin} session list`;
+    // prompt/comando para o agente (suporta /slash skills dentro da mensagem)
+    const safeMsg = input.replace(/'/g, "'\\''");
+    return `${bin} run${sessionArg}${modelArg}${dirArg} --format default -- '${safeMsg}'`;
+  };
 
   const runOpencodeCli = async (custom?: string) => {
-    const text = (custom ?? opencodePrompt).trim();
-    if (!text || opencodeSending) return;
-    setOpencodeSending(true);
-    setOpencodeError(null);
-    if (!custom) setOpencodePrompt('');
-    const now = new Date().toLocaleTimeString('pt-BR');
-    setOpencodeCliHistory(prev => [...prev, { id: `u-${Date.now()}`, role: 'user', content: text, ts: now }]);
+    const raw = (custom ?? opencodeInput).trim();
+    if (!raw || opencodeRunning) return;
+    const cmd = buildOpencodeCommand(raw);
+    setOpencodeRunning(true);
+    if (!custom) setOpencodeInput('');
     try {
-      const res = await fetch('/api/opencode/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({ sessionId: opencodeSessionId, prompt: text, model: opencodeModel })
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || `Erro ${res.status} ao executar opencode CLI`);
-      if (j.session?.id) setOpencodeSessionId(j.session.id);
-      const content = j.reply?.content || '(sem saída)';
-      setOpencodeCliHistory(prev => [...prev, { id: j.reply?.id || `a-${Date.now()}`, role: 'assistant', content, model: j.reply?.model || opencodeModel, ts: new Date().toLocaleTimeString('pt-BR') }]);
+      const result = await executeTerminalCommand(cmd, opencodeCwd);
+      if (result.cwd) setOpencodeCwd(result.cwd);
+      // tenta capturar session id se CLI imprimir
+      const outAll = `${result.stdout || ''}\n${result.stderr || ''}`;
+      const sid = outAll.match(/ses_[A-Za-z0-9]+/);
+      if (sid) setOpencodeSessionId(sid[0]);
+      setOpencodeHistory(prev => [...prev, {
+        id: `${Date.now()}-${Math.random()}`,
+        cmd,
+        stdout: result.stdout || '',
+        stderr: result.stderr || '',
+        exitCode: result.exitCode ?? (result.success ? 0 : 1),
+        cwd: result.cwd || opencodeCwd,
+        ts: new Date().toLocaleTimeString('pt-BR')
+      }].slice(-200));
     } catch (e: any) {
-      const msg = e?.message || 'Falha ao comunicar com opencode';
-      setOpencodeError(msg);
-      setOpencodeCliHistory(prev => [...prev, { id: `e-${Date.now()}`, role: 'assistant', content: `Erro: ${msg}`, ts: new Date().toLocaleTimeString('pt-BR') }]);
+      setOpencodeHistory(prev => [...prev, {
+        id: `${Date.now()}-${Math.random()}`,
+        cmd,
+        stdout: '',
+        stderr: e?.message || 'Falha ao executar opencode',
+        exitCode: 1,
+        cwd: opencodeCwd,
+        ts: new Date().toLocaleTimeString('pt-BR')
+      }].slice(-200));
     } finally {
-      setOpencodeSending(false);
+      setOpencodeRunning(false);
     }
   };
 
@@ -350,43 +378,53 @@ export const CommandsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* OPENCODE CLI INTEGRADO AO SHELL */}
+      {/* OPENCODE CLI (TERMINAL REAL) */}
       {showOpencodeCli && (
         <div className="bg-[#0D0D15] border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#181828] gap-2 flex-wrap">
             <div className="flex items-center gap-2">
               <Bot className="w-4 h-4 text-[#00A6FB]" />
-              <span className="text-xs font-mono font-black text-[#F1F5F9]">Opencode CLI — rode prompts/comandos do agente aqui para analisar e editar código</span>
+              <span className="text-xs font-mono font-black text-[#F1F5F9]">Opencode CLI (real) — comandos/prompts e /skills direto no agente</span>
+              <span className="text-[11px] font-mono text-[#94A3B8]">cwd: {opencodeCwd}{opencodeSessionId ? ` · sessão: ${opencodeSessionId}` : ''}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <select value={opencodeModel} onChange={(e)=>setOpencodeModel(e.target.value)} className="text-[11px] font-mono font-bold bg-[#0D0D15] text-[#F1F5F9] border border-[#2E2E48] rounded px-2 py-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <select value={opencodeModel} onChange={(e)=>setOpencodeModel(e.target.value)} className="text-[11px] font-mono font-bold bg-[#0D0D15] text-[#F1F5F9] border border-[#2E2E48] rounded px-2 py-1 max-w-[240px]">
                 {opencodeModels.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
-              <button onClick={()=>{setOpencodeCliHistory([]); setOpencodeSessionId(''); setOpencodeError(null);}} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Nova sessão</button>
+              <button onClick={()=>runOpencodeCli('/models')} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">/models</button>
+              <button onClick={()=>runOpencodeCli('/sessions')} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">/sessions</button>
+              <button onClick={()=>{setOpencodeHistory([]); setOpencodeSessionId('');}} className="text-[11px] font-mono font-bold px-2 py-1 rounded border border-[#2E2E48] text-[#94A3B8] hover:text-white">Nova sessão</button>
             </div>
           </div>
-          <div className="h-72 overflow-y-auto p-3 space-y-3 font-mono text-[13px]">
-            {opencodeCliHistory.length === 0 && (
-              <div className="text-[#94A3B8] text-xs">Digite um pedido para o Opencode CLI (ex: "liste arquivos em src", "corrija o bug em server.ts", "adicione logs em ..."). Ele executa no servidor via opencode.</div>
+          <div className="h-80 overflow-y-auto p-3 space-y-3 font-mono text-[13px] bg-[#0D0D15]">
+            {opencodeHistory.length === 0 && (
+              <div className="text-[#94A3B8] text-xs space-y-1">
+                <div>Terminal do <code className="text-[#38BDF8]">opencode</code> (CLI real via bash). Digite prompt ou comando:</div>
+                <div>• <code className="text-[#12B76A]">/help</code> <code className="text-[#12B76A]">/models</code> <code className="text-[#12B76A]">/sessions</code> • prompt: <code className="text-[#12B76A]">edite server.ts para ...</code> • slash skill: <code className="text-[#12B76A]">/skill-name args</code></div>
+                <div>• comando direto: <code className="text-[#12B76A]">opencode run "mensagem"</code> ou <code className="text-[#12B76A]">opencode models</code></div>
+              </div>
             )}
-            {opencodeCliHistory.map(item => (
-              <div key={item.id} className="space-y-1">
-                <div className="flex items-center gap-2 text-xs font-bold">
-                  <span className={item.role==='user' ? 'text-[#12B76A]' : 'text-[#38BDF8]'}>{item.role==='user' ? '➜ prompt' : '● opencode'}</span>
-                  <span className="text-[#64748B]">{item.ts}</span>
-                  {item.model && <span className="text-[#FFC857]">{item.model}</span>}
+            {opencodeHistory.map(item => (
+              <div key={item.id} className="space-y-1.5 border-b border-[#222238] pb-3">
+                <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
+                  <span className="text-[#12B76A]">➜</span>
+                  <span className="text-[#FFC857]">{item.cwd}</span>
+                  <span className="text-[#F1F5F9]">$ {item.cmd}</span>
+                  <span className="text-[#64748B] ml-auto">{item.ts}</span>
                 </div>
-                <pre className={`whitespace-pre-wrap break-words p-2.5 rounded-md border-l-4 ${item.role==='user' ? 'text-[#E2E8F0] bg-[#121422] border-[#12B76A]' : 'text-[#E2E8F0] bg-[#111827] border-[#00A6FB]'}`}>{item.content}</pre>
+                {item.stdout && <pre className="text-[#E2E8F0] whitespace-pre-wrap break-words leading-relaxed pl-3 pr-2 py-2 border-l-4 border-[#00A6FB] bg-[#121422] rounded-r-md">{item.stdout}</pre>}
+                {item.stderr && <pre className="text-[#FCA5A5] whitespace-pre-wrap break-words leading-relaxed pl-3 pr-2 py-2 border-l-4 border-[#F04438] bg-[#2A1518] rounded-r-md">{item.stderr}</pre>}
+                <div className={`text-xs font-bold ${item.exitCode===0 ? 'text-[#12B76A]' : 'text-[#F87171]'}`}>exit {item.exitCode}</div>
               </div>
             ))}
-            {opencodeSending && <div className="text-xs text-[#94A3B8] flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin text-[#00A6FB]"/>Executando opencode...</div>}
-            {opencodeError && <div className="text-xs text-[#FCA5A5]">{opencodeError}</div>}
+            {opencodeRunning && <div className="text-xs text-[#94A3B8] flex items-center gap-2"><RefreshCw className="w-3.5 h-3.5 animate-spin text-[#00A6FB]"/>Executando opencode CLI...</div>}
             <div ref={opencodeEndRef} />
           </div>
           <div className="border-t border-[#2E2E48] p-2.5 bg-[#181828]">
-            <div className="flex gap-2">
-              <textarea value={opencodePrompt} onChange={(e)=>setOpencodePrompt(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); runOpencodeCli(); } }} placeholder='Prompt para o Opencode CLI (Ctrl+Enter para enviar). Ex: "edite X para fazer Y"...' className="flex-1 bg-[#0D0D15] text-[#F1F5F9] border-2 border-[#2E2E48] rounded-lg p-2.5 text-xs font-mono min-h-[52px] resize-y focus:outline-none" />
-              <button onClick={()=>runOpencodeCli()} disabled={opencodeSending || !opencodePrompt.trim()} className="self-end flex items-center gap-1.5 px-4 py-2.5 bg-[#00A6FB] hover:bg-[#0284c7] disabled:opacity-50 text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-black"><Play className="w-3.5 h-3.5 fill-white"/>Executar</button>
+            <div className="flex items-start gap-2">
+              <span className="text-[#12B76A] font-black pt-2 select-none">$</span>
+              <textarea value={opencodeInput} onChange={(e)=>setOpencodeInput(e.target.value)} onKeyDown={(e)=>{ if(e.key==='Enter' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); runOpencodeCli(); } else if(e.key==='Enter' && !e.shiftKey && !opencodeInput.includes('\n')){ e.preventDefault(); runOpencodeCli(); } }} placeholder='Prompt ou comando opencode (Enter/Ctrl+Enter). Suporta /slash skills, ex: "corrija o bug em X" ou "/commit" ou "opencode models"' className="flex-1 bg-[#0D0D15] text-[#F1F5F9] border-2 border-[#2E2E48] rounded-lg p-2.5 text-xs font-mono min-h-[44px] max-h-40 resize-y focus:outline-none" />
+              <button onClick={()=>runOpencodeCli()} disabled={opencodeRunning || !opencodeInput.trim()} className="self-end flex items-center gap-1.5 px-4 py-2.5 bg-[#00A6FB] hover:bg-[#0284c7] disabled:opacity-50 text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-black"><Play className="w-3.5 h-3.5 fill-white"/>Rodar</button>
             </div>
           </div>
         </div>
