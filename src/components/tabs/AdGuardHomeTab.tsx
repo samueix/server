@@ -52,6 +52,13 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const [isClearing, setIsClearing] = useState<boolean>(false);
   const [clearMessage, setClearMessage] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
+  const [showAdGuardPanel, setShowAdGuardPanel] = useState<boolean>(false);
+  const adguardPanelUrl = (() => {
+    if (typeof window === 'undefined') return ':8081/#';
+    const host = window.location.hostname || '127.0.0.1';
+    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    return `${window.location.protocol}//${formattedHost}:8081/#`;
+  })();
 
   const openClearModal = async () => {
     setShowClearModal(true);
@@ -225,22 +232,14 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Link para o painel nativo do AdGuard Home */}
-          <a
-            href={(() => {
-              if (typeof window === 'undefined') return ':8081/#';
-              const host = window.location.hostname || '127.0.0.1';
-              const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-              return `${window.location.protocol}//${formattedHost}:8081/#`;
-            })()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FFEECB] text-[#1A1A2E] rounded-lg text-xs font-mono font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
-            title="Abrir painel oficial do AdGuard Home em :8081/#"
+          <button
+            onClick={() => setShowAdGuardPanel(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${showAdGuardPanel ? 'bg-[#D1FADF] text-[#1A1A2E]' : 'bg-[#FFF7E8] hover:bg-[#ECFDF3] text-[#1A1A2E]'}`}
+            title="Abrir/fechar painel nativo do AdGuard Home integrado"
           >
-            <ExternalLink className="w-3.5 h-3.5 text-[#FF5A36]" />
-            <span>Painel nativo (:8081/#)</span>
-          </a>
+            <ShieldCheck className="w-3.5 h-3.5 text-[#12B76A]" />
+            <span>{showAdGuardPanel ? 'Ocultar Painel' : 'Painel AdGuard'}</span>
+          </button>
 
           <div className="text-right hidden sm:block">
             <span className="text-[10px] text-[#717188] font-mono font-bold block">Atualização</span>
@@ -266,6 +265,17 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           </button>
         </div>
       </div>
+
+      {/* Painel nativo do AdGuard integrado */}
+      {showAdGuardPanel && (
+        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
+            <span className="text-xs font-mono font-black text-[#1A1A2E]">Painel nativo do AdGuard Home integrado — edite filtros, listas, clientes, DNS e todas as rotas aqui</span>
+            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+          </div>
+          <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '75vh', minHeight: '680px', border: '0' }} />
+        </div>
+      )}
 
       {/* Offline Alert Banner */}
       {!isOnline && !isLoading && (
