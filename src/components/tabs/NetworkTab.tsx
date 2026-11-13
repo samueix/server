@@ -22,7 +22,7 @@ import {
   ShieldCheck,
   Cpu
 } from 'lucide-react';
-import { NetworkTelemetry, lookupMacVendor } from '../../services/api';
+import { NetworkTelemetry, lookupMacVendor, getWifiInfo, scanWifi, connectWifi, WifiInfoResponse } from '../../services/api';
 import { HistoryPoint, ActiveNetworkClient } from '../../types';
 import { SparklineChart } from '../SparklineChart';
 import { SERVER_IPV4, SERVER_IPV6, SSH_USER, getDynamicSshCommand } from '../../config';
@@ -60,6 +60,14 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
 
   // AdGuard clients extras
   const [adguardClients, setAdguardClients] = useState<ActiveNetworkClient[]>([]);
+
+  // Wi-Fi
+  const [wifiInfo, setWifiInfo] = useState<WifiInfoResponse | null>(null);
+  const [wifiLoading, setWifiLoading] = useState(false);
+  const [wifiMsg, setWifiMsg] = useState<string | null>(null);
+  const [wifiSsid, setWifiSsid] = useState('');
+  const [wifiPass, setWifiPass] = useState('');
+  const [wifiBusy, setWifiBusy] = useState(false);
 
   // Cache de fabricantes de MAC resolvidos automaticamente via API pública (api.macvendors.com)
   const [vendorMap, setVendorMap] = useState<Record<string, { vendor: string; isRandomized: boolean; status: 'loading' | 'found' | 'not_found' }>>({
@@ -136,6 +144,40 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
 
     fetchAdguardClients();
   }, []);
+
+
+  const fetchWifi = async (scanFirst = false) => {
+    try {
+      setWifiLoading(true);
+      if (scanFirst) {
+        try { await scanWifi(); } catch {}
+        await new Promise(r => setTimeout(r, 2500));
+      }
+      const data = await getWifiInfo();
+      setWifiInfo(data);
+      if (data?.ssid && !wifiSsid) setWifiSsid(data.ssid);
+    } catch (e: any) {
+      setWifiMsg(e?.message || 'Falha ao obter dados Wi-Fi');
+    } finally {
+      setWifiLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchWifi(false); const t = setInterval(() => fetchWifi(false), 30000); return () => clearInterval(t); }, []);
+
+  const handleWifiConnect = async () => {
+    if (!wifiSsid.trim()) { setWifiMsg('Informe o SSID.'); return; }
+    if (!confirm(`Salvar e aplicar Wi-Fi "${wifiSsid}" via netplan? Se você estiver acessando pelo Wi-Fi, a conexão pode cair brevemente. Se o Wi-Fi não subir, conecte o cabo Ethernet (enp1s0, DHCP) para acessar o painel e ajustar.`)) return;
+    try {
+      setWifiBusy(true); setWifiMsg(null);
+      const res = await connectWifi(wifiSsid.trim(), wifiPass);
+      setWifiMsg(res.message || (res.success ? 'Aplicado.' : 'Falha.'));
+      setWifiPass('');
+      setTimeout(() => fetchWifi(false), 5000);
+    } catch (e: any) {
+      setWifiMsg(e?.message || 'Falha ao conectar Wi-Fi');
+    } finally { setWifiBusy(false); }
+  };
 
   const interfaces = network?.interfaces || [];
   const netDownHistory = useMemo(() => history.map(h => h.netDown || 0), [history]);
@@ -684,6 +726,84 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
           })}
         </div>
       </div>
+
+      {/* 3.5 WI-FI E CONECTIVIDADE SEM FIO */}
+      <div className="p-4 sm:p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b-2 border-[#1A1A2E]/10 gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-center">
+              <Radio className="w-4 h-4 text-[#00A6FB]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold font-title text-[#1A1A2E]">Wi-Fi (wlo1) — potência, canal e redes vizinhas</h3>
+              <p className="text-xs text-[#4A4A68] font-medium">Dados reais via wpa_supplicant (/proc/net/wireless + scan)</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-mono font-bold px-3 py-1 rounded-full border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E] ${wifiInfo?.connected ? 'bg-[#D1FADF] text-[#12B76A]' : 'bg-[#FEE4E2] text-[#F04438]'}`}>
+              {wifiInfo?.connected ? `Conectado: ${wifiInfo.ssid || 'Wi-Fi'}` : 'Desconectado'}
+            </span>
+            <button onClick={() => fetchWifi(true)} disabled={wifiLoading} className="px-3 py-1.5 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs font-bold flex items-center gap-1.5 shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#FFEECB] disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${wifiLoading ? 'animate-spin' : ''}`} /> Atualizar/Scan
+            </button>
+          </div>
+        </div>
+
+        {wifiInfo && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 font-mono text-xs">
+            <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]"><span className="text-[10px] text-[#4A4A68] font-sans font-bold uppercase block">SSID / BSSID</span><span className="text-[#1A1A2E] font-bold break-all">{wifiInfo.ssid || '—'}</span><div className="text-[#4A4A68]">{wifiInfo.bssid || '—'}</div></div>
+            <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]"><span className="text-[10px] text-[#4A4A68] font-sans font-bold uppercase block">Sinal / Potência</span><span className="text-[#1A1A2E] font-bold">{wifiInfo.signal_dbm != null ? `${wifiInfo.signal_dbm} dBm` : '—'}{wifiInfo.signal_percent != null ? ` (${wifiInfo.signal_percent}%)` : ''}</span><div className="text-[#4A4A68]">Qualidade: {wifiInfo.signal_quality || '—'} • Link: {wifiInfo.link_quality ?? '—'} • Ruído: {wifiInfo.noise_dbm ?? '—'} dBm</div></div>
+            <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]"><span className="text-[10px] text-[#4A4A68] font-sans font-bold uppercase block">Canal / Frequência / Banda</span><span className="text-[#1A1A2E] font-bold">Canal {wifiInfo.channel ?? '—'} • {wifiInfo.frequency_mhz ?? '—'} MHz</span><div className="text-[#4A4A68]">{wifiInfo.band || '—'} {wifiInfo.wifi_generation ? `• Wi-Fi ${wifiInfo.wifi_generation}` : ''}</div></div>
+            <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]"><span className="text-[10px] text-[#4A4A68] font-sans font-bold uppercase block">Segurança / IP</span><span className="text-[#1A1A2E] font-bold">{wifiInfo.key_mgmt || '—'}</span><div className="text-[#4A4A68]">IP: {wifiInfo.ip_address || '—'} • Cifra: {wifiInfo.pairwise_cipher || '—'}</div></div>
+          </div>
+        )}
+
+        <div className="p-3 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-[#1A1A2E]"><ShieldCheck className="w-4 h-4 text-[#12B76A]" />Reconexão automática e fallback por cabo (Ethernet)</div>
+          <ul className="text-xs text-[#4A4A68] space-y-1 list-disc pl-5">
+            <li>Gerenciador: <b>{wifiInfo?.reconnection?.manager || 'wpa_supplicant + systemd-networkd (netplan)'}</b>. Wi-Fi persistido no netplan: <b>{wifiInfo?.reconnection?.netplan_persistent ? 'sim' : 'verificar'}</b> — se o sinal cair, o cliente Wi-Fi tenta reconectar automaticamente.</li>
+            <li>Ethernet <b>enp1s0</b> com DHCP opcional no netplan: estado atual {wifiInfo?.ethernet?.connected ? 'CONECTADO (cabo ativo)' : 'sem cabo/link'}. Se o Wi-Fi falhar, conecte o cabo no roteador/switch: a interface cabeada sobe por DHCP e você acessa o painel para ajustar o Wi-Fi.</li>
+            <li>Fluxo seguro: conecte o cabo → acesse <b>http://192.168.100.23</b> (ou Tailscale) → selecione SSID e senha abaixo → aplique → confirme conexão → remova o cabo. Aplicar pode causar breve queda se você estiver no Wi-Fi.</li>
+          </ul>
+        </div>
+
+        <div className="p-3 rounded-lg bg-white border-2 border-[#1A1A2E] space-y-2.5">
+          <div className="text-xs font-bold text-[#1A1A2E]">Conectar/alterar rede Wi-Fi (salva no netplan e aplica)</div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input value={wifiSsid} onChange={e=>setWifiSsid(e.target.value)} placeholder="SSID (nome da rede)" className="px-3 py-2 rounded-md bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] text-xs font-mono" />
+            <input value={wifiPass} onChange={e=>setWifiPass(e.target.value)} placeholder="Senha Wi-Fi" type="password" className="px-3 py-2 rounded-md bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] text-xs font-mono" />
+            <button onClick={handleWifiConnect} disabled={wifiBusy} className="px-3 py-2 rounded-md bg-[#00A6FB] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#0284c7] disabled:opacity-50">{wifiBusy ? 'Aplicando...' : 'Salvar e conectar'}</button>
+          </div>
+          <p className="text-[11px] text-[#4A4A68]">Dica: escolha uma rede vizinha listada abaixo para preencher o SSID. A senha não é exibida nem armazenada em logs/commits pelo painel.</p>
+          {wifiMsg && <div className="text-xs font-mono p-2 rounded bg-[#FFF7E8] border border-[#1A1A2E]">{wifiMsg}</div>}
+        </div>
+
+        <div className="overflow-x-auto rounded-lg border-2 border-[#1A1A2E]">
+          <table className="w-full text-xs font-mono text-left text-[#1A1A2E]">
+            <thead className="bg-[#FFF7E8] text-[#1A1A2E] border-b-2 border-[#1A1A2E] font-sans font-bold">
+              <tr>
+                <th className="py-2.5 px-3">SSID</th><th className="py-2.5 px-3">BSSID</th><th className="py-2.5 px-3">Canal</th><th className="py-2.5 px-3">Freq/Banda</th><th className="py-2.5 px-3">Potência</th><th className="py-2.5 px-3">Segurança</th><th className="py-2.5 px-3 text-center">Conexão</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y border-[#1A1A2E]/20 bg-white">
+              {(wifiInfo?.neighbors || []).length > 0 ? wifiInfo!.neighbors.map((n, idx) => (
+                <tr key={idx} className={`hover:bg-[#FFF7E8]/50 ${n.connected ? 'bg-[#ECFDF3]/60' : ''}`}>
+                  <td className="py-2.5 px-3 font-bold">{n.ssid || '(oculta)'}</td>
+                  <td className="py-2.5 px-3 text-[#4A4A68]">{n.bssid}</td>
+                  <td className="py-2.5 px-3 font-bold">{n.channel ?? '—'}</td>
+                  <td className="py-2.5 px-3">{n.frequency_mhz ?? '—'} MHz • {n.band}</td>
+                  <td className="py-2.5 px-3 font-bold">{n.signal_dbm != null ? `${n.signal_dbm} dBm` : '—'}{n.signal_percent != null ? ` (${n.signal_percent}%)` : ''}</td>
+                  <td className="py-2.5 px-3">{n.security}</td>
+                  <td className="py-2.5 px-3 text-center">{n.connected ? <span className="px-2 py-0.5 rounded-full text-[11px] bg-[#D1FADF] text-[#12B76A] border border-[#1A1A2E] font-bold">Atual</span> : <button onClick={()=>setWifiSsid(n.ssid && n.ssid!=='(oculta)' ? n.ssid : '')} className="px-2 py-0.5 rounded border border-[#1A1A2E] bg-[#FFF7E8] text-[11px] font-bold hover:bg-[#FFEECB]">Selecionar</button>}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan={7} className="py-6 text-center text-[#4A4A68] font-mono">Nenhuma rede vizinha no cache. Clique em “Atualizar/Scan”.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
 
       {/* 4. CLIENTES ATIVOS NA REDE */}
       <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">

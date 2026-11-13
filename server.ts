@@ -35,6 +35,7 @@ import {
 } from './server/db.js';
 import { analyzeDomainWithOpencode } from './server/opencode.js';
 import { listDirectory, readTargetFile, createTargetFile, saveTargetFile, assertPathSecurity } from './server/fileExplorer.js';
+import { getWifiInfo, triggerWifiScan, connectWifi } from './server/wifiMonitor.js';
 import { 
   getTokenQuotaMetrics, 
   listOpencodeSessions, 
@@ -775,6 +776,34 @@ export function createApp() {
         overall_status: 'DESCONECTADO',
         targets: []
       });
+    }
+  });
+
+  // Wi-Fi status, signal, neighbors and reconnect info
+  app.get('/api/wifi', requireAdminAuth, (_req, res) => {
+    try {
+      return res.json(getWifiInfo());
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Falha ao obter dados Wi-Fi' });
+    }
+  });
+
+  app.post('/api/wifi/scan', requireAdminAuth, (_req, res) => {
+    try {
+      const result = triggerWifiScan('wlo1');
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Falha ao iniciar scan Wi-Fi' });
+    }
+  });
+
+  app.post('/api/wifi/connect', requireAdminAuth, (req, res) => {
+    try {
+      const { ssid, password } = req.body || {};
+      const result = connectWifi(String(ssid || ''), String(password ?? ''));
+      return res.status(result.success ? 200 : 400).json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err?.message || 'Falha ao conectar Wi-Fi' });
     }
   });
 

@@ -897,3 +897,85 @@ export async function fetchPingTelemetry(signal?: AbortSignal): Promise<PingResp
   return await apiFetch<PingResponse>('/api/ping', signal);
 }
 
+export interface WifiNeighbor {
+  bssid: string;
+  ssid: string;
+  frequency_mhz: number | null;
+  channel: number | null;
+  band: string;
+  signal_dbm: number | null;
+  signal_percent: number | null;
+  security: string;
+  flags?: string;
+  connected?: boolean;
+}
+
+export interface WifiInfoResponse {
+  success: boolean;
+  interface: string;
+  connected: boolean;
+  state?: string;
+  ssid?: string | null;
+  bssid?: string | null;
+  ip_address?: string | null;
+  frequency_mhz?: number | null;
+  channel?: number | null;
+  band?: string | null;
+  wifi_generation?: string | null;
+  key_mgmt?: string | null;
+  pairwise_cipher?: string | null;
+  signal_dbm?: number | null;
+  noise_dbm?: number | null;
+  link_quality?: number | null;
+  signal_percent?: number | null;
+  signal_quality?: string | null;
+  neighbors: WifiNeighbor[];
+  neighbor_count: number;
+  ethernet: {
+    interface: string;
+    operstate: string;
+    carrier: boolean;
+    connected: boolean;
+    dhcp_configured: boolean;
+  };
+  reconnection: {
+    auto_reconnect_expected: boolean;
+    manager: string;
+    netplan_persistent: boolean;
+    ethernet_fallback_ready: boolean;
+    note: string;
+  };
+  timestamp?: string;
+  error?: string;
+}
+
+export async function apiPost<T = any>(endpoint: string, body?: any): Promise<T> {
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  const targetUrl = cleanEndpoint.startsWith('/api') ? cleanEndpoint : `${API.server}${cleanEndpoint}`;
+  const authHeaders = getAuthHeaders();
+  const response = await fetch(targetUrl, {
+    method: 'POST',
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', ...authHeaders },
+    body: JSON.stringify(body ?? {})
+  });
+  if (response.status === 401) {
+    notifyUnauthorized('Sessão expirada ou credenciais inválidas. Faça login novamente.');
+    throw new ApiError('Sessão expirada ou credenciais inválidas (401)', 401);
+  }
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new ApiError(data?.error || data?.message || `HTTP ${response.status}`, response.status);
+  return data as T;
+}
+
+export async function getWifiInfo(signal?: AbortSignal): Promise<WifiInfoResponse> {
+  return await apiFetch<WifiInfoResponse>('/api/wifi', signal);
+}
+
+export async function scanWifi(): Promise<{ success: boolean; ok?: boolean; output?: string }> {
+  return await apiPost('/api/wifi/scan');
+}
+
+export async function connectWifi(ssid: string, password: string): Promise<{ success: boolean; message: string }> {
+  return await apiPost('/api/wifi/connect', { ssid, password });
+}
+
