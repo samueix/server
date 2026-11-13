@@ -1676,10 +1676,10 @@ export function createApp() {
         });
       }
 
-      // Rate limit para api.macvendors.com: máximo 1 requisição por segundo
+      // Rate limit para api.macvendors.com (endpoint anônimo): máximo 1 requisição por segundo
       const timeSinceLast = Date.now() - lastMacVendorRequestTime;
-      if (timeSinceLast < 1050) {
-        await new Promise(r => setTimeout(r, 1050 - timeSinceLast));
+      if (timeSinceLast < 1100) {
+        await new Promise(r => setTimeout(r, 1100 - timeSinceLast));
       }
       lastMacVendorRequestTime = Date.now();
 
@@ -1688,14 +1688,17 @@ export function createApp() {
       const response = await fetch(targetApiUrl, {
         method: 'GET',
         headers: {
-          'Accept': '*/*',
-          'User-Agent': 'UbuntuServerMonitor/1.0'
+          'Accept': 'text/plain, */*',
+          'User-Agent': 'ServerPanel/1.0 (+https://samuelserver.duckdns.org)'
         },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(7000)
       });
 
       if (response.status === 200) {
         const vendorName = (await response.text()).trim();
+        if (!vendorName) {
+          throw new Error('Resposta vazia da API macvendors.com');
+        }
         macCache.set(oui, { vendor: vendorName, isRandomized, timestamp: Date.now() });
         return res.json({
           success: true,
@@ -1711,15 +1714,16 @@ export function createApp() {
       }
 
       if (response.status === 404) {
+        const errText = (await response.text().catch(() => '')).trim();
         macCache.set(oui, { vendor: null, isRandomized, timestamp: Date.now() });
         return res.status(404).json({
           success: false,
           found: false,
           mac: formattedFullMac,
           oui: formattedOui,
-          error: isRandomized 
-            ? 'Fabricante não encontrado: Este é um endereço MAC Privado/Aleatório (MAC Randomization do dispositivo)' 
-            : 'Fabricante não encontrado na base OUI/IEEE',
+          error: isRandomized
+            ? 'Fabricante não encontrado: este é um endereço MAC privado/aleatório (locally administered).'
+            : (errText || 'Fabricante não encontrado na base OUI/IEEE'),
           is_randomized: isRandomized,
           cached: false,
           provider: 'api.macvendors.com',
@@ -1728,14 +1732,17 @@ export function createApp() {
       }
 
       if (response.status === 429) {
+        const retryAfter = response.headers.get('retry-after');
         return res.status(429).json({
           success: false,
-          error: 'Limite de requisições por segundo atingido na API macvendors.com (1 req/s). Aguarde um instante.',
+          error: `Limite de requisições atingido na API macvendors.com${retryAfter ? ` (Retry-After: ${retryAfter}s)` : ' (1 req/s, 1000/dia sem chave)'}. Aguarde e tente novamente.`,
+          retry_after: retryAfter ? Number(retryAfter) : undefined,
           provider: 'api.macvendors.com'
         });
       }
 
-      throw new Error(`Resposta da API externa: HTTP ${response.status}`);
+      const detail = (await response.text().catch(() => '')).trim();
+      throw new Error(`Resposta da API externa: HTTP ${response.status}${detail ? ` - ${detail}` : ''}`);
     } catch (err: any) {
       return res.status(500).json({
         success: false,

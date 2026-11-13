@@ -96,13 +96,6 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
     port: undefined 
   },
   { 
-    key: 'fail2ban', 
-    aliases: ['fail2ban', 'fail2ban-server', 'fail2ban security'], 
-    name: 'Fail2Ban Security', 
-    desc: 'Proteção contra tentativas de ataque de força bruta', 
-    port: undefined 
-  },
-  { 
     key: 'tailscaled', 
     aliases: ['tailscaled', 'tailscale', 'tailscale vpn'], 
     name: 'Tailscale VPN', 
@@ -116,20 +109,6 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
     desc: 'Automação de fluxos (container Docker em :5678)', 
     port: 5678, 
     isFuture: false 
-  },
-  { 
-    key: 'cloudflared', 
-    aliases: ['cloudflared', 'cloudflared.service'], 
-    name: 'Cloudflare Tunnel', 
-    desc: 'Túnel Cloudflare (serviço systemd, se instalado)', 
-    port: undefined 
-  },
-  { 
-    key: 'cloudflared-update.timer', 
-    aliases: ['cloudflared-update.timer', 'cloudflared-update'], 
-    name: 'Cloudflared Update Timer', 
-    desc: 'Timer systemd de atualização do cloudflared', 
-    port: undefined 
   }
 ];
 
@@ -221,7 +200,6 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
       'Server Panel': 'server-panel',
       'Nginx Web Server': 'nginx',
       'Docker Engine': 'docker',
-      'Fail2Ban Security': 'fail2ban',
       'Tailscale VPN': 'tailscaled',
       'n8n Workflow Automation': 'n8n',
       'UFW Firewall': 'ufw',

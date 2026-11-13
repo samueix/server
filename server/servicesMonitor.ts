@@ -77,13 +77,6 @@ const CANONICAL_SERVICES = [
     descricao: 'Mecanismo de contêineres Docker'
   },
   {
-    canonical: 'fail2ban',
-    aliases: ['fail2ban', 'fail2ban-server'],
-    name: 'Fail2Ban Security',
-    porta: null,
-    descricao: 'Proteção contra ataques de força bruta'
-  },
-  {
     canonical: 'tailscaled',
     aliases: ['tailscaled', 'tailscale'],
     name: 'Tailscale VPN',
@@ -96,20 +89,6 @@ const CANONICAL_SERVICES = [
     name: 'n8n Workflow Automation',
     porta: 5678,
     descricao: 'Automação de fluxos e integrações (container Docker)'
-  },
-  {
-    canonical: 'cloudflared',
-    aliases: ['cloudflared', 'cloudflared.service'],
-    name: 'Cloudflare Tunnel',
-    porta: null,
-    descricao: 'Túnel Cloudflare (serviço systemd)'
-  },
-  {
-    canonical: 'cloudflared-update.timer',
-    aliases: ['cloudflared-update.timer'],
-    name: 'Cloudflared Update Timer',
-    porta: null,
-    descricao: 'Timer de atualização do cloudflared (systemd timer)'
   }
 ];
 
@@ -251,29 +230,7 @@ export function getSystemdServiceStatus(serviceName: string, aliases: string[] =
     } catch {}
   }
 
-  // 3.1 Verificação do Fail2Ban
-  if (serviceName.toLowerCase() === 'fail2ban') {
-    try {
-      const f2bOut = execSync('sudo fail2ban-client ping 2>/dev/null || fail2ban-client ping 2>/dev/null || true', { encoding: 'utf-8', timeout: 1000 }).trim();
-      if (f2bOut.toLowerCase().includes('pong')) {
-        return {
-          status: 'ONLINE',
-          ativo: true,
-          habilitado_boot: true,
-          installed: true,
-          sub_state: 'active (jail ativo)',
-          pid: null,
-          tempo_ativo: 'Ativo',
-          ultima_inicializacao: 'N/D',
-          cpu: 'N/D',
-          memory: 'N/D',
-          uptime: 'Ativo'
-        };
-      }
-    } catch {}
-  }
-
-  // 3.2 Verificação do Server Panel (o próprio serviço em execução)
+  // 3.1 Verificação do Server Panel (o próprio serviço em execução)
   if (serviceName.toLowerCase() === 'server-panel' || serviceName.toLowerCase() === 'server-monitor') {
     return {
       status: 'ONLINE',
