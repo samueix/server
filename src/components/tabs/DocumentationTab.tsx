@@ -1,358 +1,353 @@
 import React, { useState } from 'react';
-import { 
-  BookOpen, 
-  Terminal, 
-  Globe, 
-  Server, 
-  Shield, 
-  Network, 
-  Cpu, 
-  Copy, 
-  Check, 
-  Layers, 
-  Workflow, 
-  Lock,
-  ExternalLink,
-  ChevronRight,
-  Info,
-  Activity,
-  Radio,
-  Bot,
-  Folder,
-  ShieldAlert,
-  Key,
-  ScrollText,
-  GitBranch,
-  ShieldCheck,
-  AlertTriangle,
-  RotateCcw,
-  Zap,
-  HelpCircle,
-  Clock
+import {
+  Activity, BookOpen, Bot, Check, Copy, Cpu, Folder, GitBranch, Globe, Key, Layers,
+  Lock, Monitor, Network, Radio, RotateCcw, ScrollText, Server, Shield, ShieldAlert,
+  ShieldCheck, Terminal
 } from 'lucide-react';
-import { SERVER_IPV4, SERVER_IPV6, SSH_USER, getDynamicSshCommand } from '../../config';
+
+type DocTab = {
+  id: string;
+  name: string;
+  icon: React.ElementType;
+  summary: string;
+  purpose: string;
+  whatYouCanDo: string[];
+  indicators: { label: string; desc: string }[];
+  apis: string;
+  permissions: string;
+  troubleshooting: string;
+};
+
+const TABS_DOCUMENTATION: DocTab[] = [
+  {
+    id: 'overview',
+    name: '1. Visão Geral',
+    icon: Layers,
+    summary: 'Resumo consolidado de saúde do servidor, recursos e status principal.',
+    purpose: 'Apresentar rapidamente o estado geral do samuelserver (CPU, memória, disco, rede, serviços e alertas) em uma única tela.',
+    whatYouCanDo: [
+      'Conferir se o painel/backend está online e há quanto tempo o sistema está ativo.',
+      'Visualizar uso atual de CPU, RAM, disco e tráfego/rede.',
+      'Identificar rapidamente serviços críticos e sinais de degradação.'
+    ],
+    indicators: [
+      { label: 'Online / Offline', desc: 'Indica se o backend do painel responde às consultas de telemetria.' },
+      { label: 'Uso de CPU/RAM/Disco', desc: 'Percentuais atuais de consumo dos principais recursos do host.' },
+      { label: 'Uptime', desc: 'Tempo desde a última inicialização do sistema operacional.' }
+    ],
+    apis: 'Telemetria agregada do backend (ex.: status/saúde, sistema, serviços e rede conforme endpoints disponíveis).',
+    permissions: 'Visível para usuários autenticados (admin e operador, conforme política da UI).',
+    troubleshooting: 'Se ficar offline, verifique: sudo systemctl status server-panel e sudo journalctl -u server-panel -n 80.'
+  },
+  {
+    id: 'monitoring',
+    name: '2. Monitoramento',
+    icon: Activity,
+    summary: 'Telemetria detalhada de hardware, temperatura, memória e rede.',
+    purpose: 'Acompanhar métricas em tempo real e histórico recente para diagnosticar gargalos de desempenho.',
+    whatYouCanDo: [
+      'Observar variação de CPU, RAM, swap e carga do sistema.',
+      'Ver temperatura/sensores (quando disponíveis no hardware).',
+      'Acompanhar uso de disco e interfaces de rede.'
+    ],
+    indicators: [
+      { label: 'Load Average', desc: 'Carga média do sistema em janelas de tempo (processos em espera/execução).' },
+      { label: 'Memória disponível x usada', desc: 'Disponível considera cache/buffers reaproveitáveis; usada é o consumo efetivo.' },
+      { label: 'Temperatura', desc: 'Leitura dos sensores térmicos expostos pelo sistema (se suportado).' }
+    ],
+    apis: 'Rotas de telemetria do backend/monitor de sistema (status, métricas e sensores expostos pelo painel).',
+    permissions: 'Visível para usuários autenticados.',
+    troubleshooting: 'Sem dados de temperatura: confirme sensores no host (ex.: lm-sensors) e permissões de leitura.'
+  },
+  {
+    id: 'adguard',
+    name: '3. AdGuard Home',
+    icon: Shield,
+    summary: 'DNS, bloqueios, consultas e painel nativo integrado do AdGuard.',
+    purpose: 'Gerenciar e monitorar o AdGuard Home (DNS/bloqueio) e consultar estatísticas/logs/domínios.',
+    whatYouCanDo: [
+      'Ver status, estatísticas e consultas DNS recentes.',
+      'Abrir/ocultar o painel nativo integrado do AdGuard dentro da aba.',
+      'Sincronizar/consultar domínios analisados e acionar análises suportadas pela API do painel.'
+    ],
+    indicators: [
+      { label: 'Consultas / Bloqueios', desc: 'Volume de requisições DNS e quantas foram bloqueadas.' },
+      { label: 'Top domínios', desc: 'Domínios mais consultados ou bloqueados no período.' },
+      { label: 'Upstreams', desc: 'Resolvedores DNS externos configurados e seu comportamento.' }
+    ],
+    apis: 'GET /api/adguard/status, /api/adguard/stats, /api/adguard/querylog, /api/adguard/domains, POST /api/adguard/analyze, /api/adguard/analyze-batch, /api/adguard/sync, /api/adguard/clear-history (admin), GET/POST /api/adguard/config (admin), proxy /adguard-api/*.',
+    permissions: 'Consulta para usuários autenticados; ações administrativas exigem perfil admin.',
+    troubleshooting: 'Se indisponível: sudo systemctl status AdGuardHome e teste http://127.0.0.1:8081/. UFW deve permitir 8081/tcp se acesso LAN for necessário.'
+  },
+  {
+    id: 'ping',
+    name: '4. Ping / Latência',
+    icon: Radio,
+    summary: 'Medição de latência e disponibilidade de destinos de rede.',
+    purpose: 'Avaliar conectividade e qualidade do enlace com gateway e provedores externos.',
+    whatYouCanDo: [
+      'Executar/acompanhar medições de latência (RTT) e perda.',
+      'Comparar destinos comuns (gateway, DNS públicos, etc.) conforme implementado na aba.'
+    ],
+    indicators: [
+      { label: 'RTT (mín/méd/máx)', desc: 'Tempo de ida e volta das sondas de rede.' },
+      { label: 'Perda (%)', desc: 'Percentual de sondas sem resposta no intervalo medido.' }
+    ],
+    apis: 'GET /api/ping.',
+    permissions: 'Visível para usuários autenticados.',
+    troubleshooting: 'Perda no gateway pode indicar bloqueio de ICMP/porta no roteador; valide rede local e firewall.'
+  },
+  {
+    id: 'opencode',
+    name: '5. Lux e Opencode',
+    icon: Bot,
+    summary: 'Assistente IA integrado ao servidor via CLI/modelos Opencode.',
+    purpose: 'Auxiliar administração, diagnóstico e automações com contexto do host (quando autorizado).',
+    whatYouCanDo: [
+      'Conversar com o agente e solicitar diagnósticos/comandos orientados.',
+      'Listar modelos/sessões e retomar conversas (conforme API).',
+      'Acompanhar uso de tokens/sessões.'
+    ],
+    indicators: [
+      { label: 'Modelo ativo', desc: 'Modelo Opencode selecionado para a sessão.' },
+      { label: 'Sessões/Tokens', desc: 'Histórico de sessões e consumo reportado pelo backend.' }
+    ],
+    apis: 'GET /api/opencode/models, /api/opencode/tokens, /api/opencode/sessions, /api/opencode/sessions/:id; POST /api/opencode/sessions/new, /api/opencode/chat; DELETE /api/opencode/sessions/:id (admin).',
+    permissions: 'Restrito a administrador.',
+    troubleshooting: 'Se falhar, confira OPENCODE_BIN/OPENCODE_MODEL e configuração em /opt/server-panel/.env e server-config.json (não versionados).'
+  },
+  {
+    id: 'browser',
+    name: '6. Navegador Remoto',
+    icon: Monitor,
+    summary: 'Sessão de navegador headless controlada pelo painel (Chromium/Playwright).',
+    purpose: 'Permitir navegação/automação remota controlada para tarefas autorizadas no ambiente do servidor.',
+    whatYouCanDo: [
+      'Iniciar/parar/pausar/retomar sessão e navegar por URL.',
+      'Visualizar stream/screenshot e histórico de navegação (conforme UI).',
+      'Interagir com páginas quando a sessão estiver ativa.'
+    ],
+    indicators: [
+      { label: 'Status da sessão', desc: 'Running/stopped, URL/título atuais, clientes conectados e FPS/pausa.' },
+      { label: 'Timeout/recursos', desc: 'Sessão única e sujeita a limites (ex.: inatividade sem clientes) para economizar recursos.' }
+    ],
+    apis: 'GET /api/browser/status, /api/browser/screenshot, /api/browser/history; POST /api/browser/start, /api/browser/stop, /api/browser/pause, /api/browser/resume, /api/browser/navigate, /api/browser/ws-ticket (admin).',
+    permissions: 'Restrito a administrador.',
+    troubleshooting: 'Se não iniciar, valide Chromium/Playwright no host, perfil em /opt/server-panel/data/browser e logs: sudo journalctl -u server-panel -n 120.'
+  },
+  {
+    id: 'files',
+    name: '7. Arquivos',
+    icon: Folder,
+    summary: 'Gerenciador de arquivos do servidor com leitura/edição controlada.',
+    purpose: 'Navegar e manipular arquivos de forma administrativa sem SSH direto, dentro das regras de segurança do backend.',
+    whatYouCanDo: [
+      'Listar diretórios, ler/visualizar arquivos (texto/imagem/raw conforme suporte).',
+      'Criar e salvar arquivos quando permitido.'
+    ],
+    indicators: [
+      { label: 'Permissões e tamanho', desc: 'Metadados básicos do item no sistema de arquivos.' },
+      { label: 'Tipo', desc: 'Pasta, texto/código, imagem ou binário conforme detecção.' }
+    ],
+    apis: 'GET /api/files/list, /api/files/read, /api/files/raw; POST /api/files/create, /api/files/save (admin).',
+    permissions: 'Restrito a administrador.',
+    troubleshooting: 'Falhas de escrita/ leitura geralmente são permissão do usuário do serviço ou caminho inválido/protegido.'
+  },
+  {
+    id: 'security',
+    name: '8. Segurança & Ataques',
+    icon: ShieldAlert,
+    summary: 'Monitoramento de tentativas de acesso, eventos e regras de bloqueio.',
+    purpose: 'Auditar atividade suspeita (ex.: SSH/web), classificar risco e apoiar resposta com firewall.',
+    whatYouCanDo: [
+      'Visualizar eventos/ataques detectados e indicadores de ameaça.',
+      'Bloquear/desbloquear IPs e limpar histórico (ações admin, conforme disponível).',
+      'Consultar estado relacionado ao UFW/regras.'
+    ],
+    indicators: [
+      { label: 'Nível de ameaça', desc: 'Classificação baseada em eventos recentes detectados.' },
+      { label: 'IP/Origem/Motivo', desc: 'Origem geográfica estimada e tipo de tentativa registrada.' }
+    ],
+    apis: 'GET /api/security, /api/security/status, /api/security/attack-monitor; POST /api/security/block-ip, /api/security/unblock-ip, /api/security/clear-history (admin).',
+    permissions: 'Visualização autenticada; ações de bloqueio/limpeza restritas a admin.',
+    troubleshooting: 'Confirme UFW ativo (sudo ufw status) e fontes de log; alguns eventos dependem de permissões de leitura do backend.'
+  },
+  {
+    id: 'credentials',
+    name: '9. Credenciais & APIs',
+    icon: Key,
+    summary: 'Configuração de credenciais e integrações do painel.',
+    purpose: 'Centralizar parâmetros de autenticação e chaves de integração usadas pelo servidor/painel.',
+    whatYouCanDo: [
+      'Consultar e atualizar credenciais/configurações suportadas (admin).',
+      'Ajustar integrações como AdGuard/n8n/Opencode conforme campos disponíveis.'
+    ],
+    indicators: [
+      { label: 'Estado de configuração', desc: 'Presença/validade aparente das credenciais configuradas.' }
+    ],
+    apis: 'GET /api/credentials, POST /api/credentials (admin).',
+    permissions: 'Restrito a administrador.',
+    troubleshooting: 'Alterações persistem em arquivos locais não versionados (ex.: server-config.json/.env). Nunca exponha segredos em commits/logs.'
+  },
+  {
+    id: 'processes',
+    name: '10. Processos',
+    icon: Cpu,
+    summary: 'Lista de processos em execução e consumo de recursos.',
+    purpose: 'Identificar processos com alto uso de CPU/RAM e apoiar diagnóstico operacional.',
+    whatYouCanDo: [
+      'Listar e filtrar processos por nome/usuário/PID.',
+      'Ordenar por consumo de recursos (conforme UI).'
+    ],
+    indicators: [
+      { label: 'PID / Usuário', desc: 'Identificador e dono do processo.' },
+      { label: 'CPU / Memória', desc: 'Consumo relativo/absoluto reportado pelo sistema.' }
+    ],
+    apis: 'Monitoramento de processos via backend do painel (consulta em tempo real).',
+    permissions: 'Restrito a administrador (conforme sidebar/UI).',
+    troubleshooting: 'Dados ausentes podem indicar restrição de leitura em /proc ou falha temporária do coletor.'
+  },
+  {
+    id: 'services',
+    name: '11. Serviços',
+    icon: ShieldCheck,
+    summary: 'Status dos serviços/daemons realmente monitorados neste servidor.',
+    purpose: 'Exibir estado operacional dos serviços relevantes instalados no samuelserver.',
+    whatYouCanDo: [
+      'Ver status (online/offline/erro), boot, porta e infos básicas.',
+      'Copiar comandos systemctl de status/restart para uso no terminal.'
+    ],
+    indicators: [
+      { label: 'ONLINE / OFFLINE', desc: 'Estado atual detectado via systemd/porta/processo conforme heurística do monitor.' },
+      { label: 'Habilitado no boot', desc: 'Se a unidade está configurada para iniciar automaticamente.' }
+    ],
+    apis: 'GET de status de serviços via backend (services monitor). Monitorados: OpenSSH (22), AdGuardHome (53,8081), Server Panel (3000), Nginx (80,443), Cron, systemd-resolved (53), UFW, Docker, Tailscale, n8n (5678, container Docker).',
+    permissions: 'Restrito a administrador (conforme sidebar/UI).',
+    troubleshooting: 'Para investigar: sudo systemctl status <unidade> --no-pager e sudo journalctl -u <unidade> -n 80. n8n roda em Docker (container "n8n").'
+  },
+  {
+    id: 'network',
+    name: '12. Rede & MAC',
+    icon: Network,
+    summary: 'Interfaces, conexões e identificação de fabricantes por MAC.',
+    purpose: 'Inspecionar configuração de rede do host e resolver fabricante de endereços MAC.',
+    whatYouCanDo: [
+      'Ver interfaces/endereços (IPv4/IPv6), gateway e portas/conexões conforme dados disponíveis.',
+      'Consultar fabricante via lookup de MAC (OUI).'
+    ],
+    indicators: [
+      { label: 'Interfaces ativas', desc: 'Links e endereços em uso (ex.: wlo1, tailscale0, docker bridges).' },
+      { label: 'Fabricante (OUI)', desc: 'Identificação do vendor pelo prefixo do MAC; aleatórios/privados podem não ter vendor.' }
+    ],
+    apis: 'Telemetria de rede do backend; GET /api/mac-vendor/:mac (consulta externa api.macvendors.com com cache/fallback local, rate-limit ~1 req/s).',
+    permissions: 'Acesso conforme política da UI (módulo administrativo).',
+    troubleshooting: 'MAC aleatório (locally administered) não possui fabricante público. Em 429 aguarde Retry-After/1s; offline externo usa cache/fallback OUI quando disponível.'
+  },
+  {
+    id: 'logs',
+    name: '13. Logs do Sistema',
+    icon: ScrollText,
+    summary: 'Visualização de logs/journal de componentes do servidor.',
+    purpose: 'Apoiar diagnóstico de falhas e auditoria operacional.',
+    whatYouCanDo: [
+      'Consultar registros recentes por origem/serviço (conforme filtros da UI).',
+      'Buscar mensagens e acompanhar eventos em tempo de atualização.'
+    ],
+    indicators: [
+      { label: 'Severidade', desc: 'Nível do evento (info/warn/error) quando fornecido pela fonte.' },
+      { label: 'Origem', desc: 'Unidade/serviço que gerou o registro (systemd, nginx, etc.).' }
+    ],
+    apis: 'Consulta de logs via backend do painel (leitura de journal/fontes configuradas).',
+    permissions: 'Restrito a administrador.',
+    troubleshooting: 'Se vazio, verifique permissões de leitura do journal e se o serviço/arquivo de log existe.'
+  },
+  {
+    id: 'n8n',
+    name: '14. n8n Workflows',
+    icon: GitBranch,
+    summary: 'Status e controle básico da integração com n8n.',
+    purpose: 'Monitorar o n8n (container Docker) e acionar operações suportadas pela API do painel.',
+    whatYouCanDo: [
+      'Ver status/conectividade e informações do n8n.',
+      'Atualizar configuração e alternar estado de workflows (quando suportado).'
+    ],
+    indicators: [
+      { label: 'Online/API conectada', desc: 'Disponibilidade do serviço n8n e validade da chave de API configurada.' },
+      { label: 'Workflows', desc: 'Estado/execução conforme dados retornados pela integração.' }
+    ],
+    apis: 'GET /api/n8n/status; POST /api/n8n/config, POST /api/n8n/workflows/:id/toggle (admin). n8n em http://127.0.0.1:5678 (container Docker "n8n").',
+    permissions: 'Restrito a administrador.',
+    troubleshooting: 'Confira container: docker ps (n8n Up) e chave API em server-config.json (não versionado).'
+  },
+  {
+    id: 'commands',
+    name: '15. Terminal & Shell',
+    icon: Terminal,
+    summary: 'Execução controlada de comandos no host via allowlist do backend.',
+    purpose: 'Permitir operações administrativas rápidas sem expor shell irrestrita.',
+    whatYouCanDo: [
+      'Executar comandos/predefinições permitidos pela política do servidor.',
+      'Visualizar saída/erros retornados pela execução.'
+    ],
+    indicators: [
+      { label: 'Allowlist/Política', desc: 'Apenas comandos autorizados pelo backend podem ser executados.' },
+      { label: 'Código de saída', desc: 'Resultado da execução (sucesso/falha) e stdout/stderr.' }
+    ],
+    apis: 'POST /api/terminal/exec (admin).',
+    permissions: 'Exclusivo para administrador.',
+    troubleshooting: 'Comando negado = fora da allowlist; falhas podem ser permissão, binário ausente ou timeout.'
+  },
+  {
+    id: 'system',
+    name: '16. Sistema',
+    icon: Server,
+    summary: 'Informações do sistema operacional, host e ambiente.',
+    purpose: 'Consultar detalhes do Ubuntu/kernel/host e estado geral do sistema.',
+    whatYouCanDo: [
+      'Ver versão do SO, kernel, hostname e dados básicos de hardware/ambiente expostos.'
+    ],
+    indicators: [
+      { label: 'OS / Kernel', desc: 'Distribuição e versão do kernel em execução.' },
+      { label: 'Hostname', desc: 'Identidade do host na rede (samuelserver).' }
+    ],
+    apis: 'Informações de sistema expostas pelo backend de telemetria/saúde do painel.',
+    permissions: 'Restrito a administrador (conforme sidebar/UI).',
+    troubleshooting: 'Dados inconsistentes: reinicie o painel (sudo systemctl restart server-panel) e verifique coletores.'
+  },
+  {
+    id: 'documentation',
+    name: '17. Documentação',
+    icon: BookOpen,
+    summary: 'Manual técnico-operacional do painel e do servidor.',
+    purpose: 'Centralizar referência confiável de abas, APIs, acessos, serviços e procedimentos.',
+    whatYouCanDo: [
+      'Consultar função de cada aba, permissões e pontos de diagnóstico.',
+      'Copiar comandos de atualização, verificação e recuperação.'
+    ],
+    indicators: [
+      { label: 'Base de referência', desc: 'Conteúdo estático versionado com o frontend; valide contra o estado real do host quando houver mudanças.' }
+    ],
+    apis: 'N/A (conteúdo estático no frontend).',
+    permissions: 'Disponível para usuários autenticados.',
+    troubleshooting: 'Após atualizar o painel, faça hard refresh (Ctrl+F5) para carregar a versão mais recente.'
+  }
+];
 
 export const DocumentationTab: React.FC = () => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>('all');
   const [expandedTab, setExpandedTab] = useState<string | null>('overview');
 
-  const copyToClipboard = (text: string, key: string) => {
+  const copy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const dynamicIpv6Ssh = getDynamicSshCommand(SERVER_IPV6);
-
-  const TABS_DOCUMENTATION = [
-    {
-      id: 'overview',
-      name: '1. Visão Geral',
-      icon: Layers,
-      summary: 'Dashboard consolidado de telemetria, integridade de serviços e métricas vitais.',
-      purpose: 'Apresentar em uma única tela o pulso em tempo real do Ubuntu Server, consolidando status de CPU, RAM, disco, rede, segurança e uptime.',
-      whatYouCanDo: [
-        'Visualizar medidores rápidos de saúde (CPU, RAM, disco raiz e rede).',
-        'Conferir o resumo de serviços críticos (Nginx, AdGuard, Docker, SSH, Tailscale).',
-        'Checar conexões ativas e histórico recente de tráfego de dados.'
-      ],
-      indicators: [
-        { label: 'Servidor Online / Offline', desc: 'Indica se o backend Node.js está respondendo ao polling HTTP/WebSocket.' },
-        { label: 'Uptime', desc: 'Tempo contínuo em dias/horas desde a última reinicialização do kernel do Ubuntu.' },
-        { label: 'Carga da CPU (Load Average)', desc: 'Média de processos aguardando tempo de execução nos últimos 1, 5 e 15 minutos.' }
-      ],
-      apis: 'GET /api/system, GET /api/services, GET /api/health (telemetria via backend/proxy)',
-      permissions: 'Disponível para usuários comuns e administradores.',
-      troubleshooting: 'Se a tela exibir "Desconectado", verifique se o serviço server-panel está ativo via: sudo systemctl status server-panel.'
-    },
-    {
-      id: 'monitoring',
-      name: '2. Monitoramento',
-      icon: Activity,
-      summary: 'Telemetria profunda de hardware, sensores de temperatura de núcleos e partições.',
-      purpose: 'Acompanhar curvas históricas de consumo de recursos físicos, uso detalhado de memória (disponível, livre, cache/buffers e swap) e saúde térmica.',
-      whatYouCanDo: [
-        'Acompanhar oscilação de CPU e RAM nos últimos 60 segundos com sparklines.',
-        'Auditar temperatura por núcleo com sensores Intel Core i5 (Package, Core 0 a 5).',
-        'Verificar taxa de transferência de download e upload por interface de rede ativa.'
-      ],
-      indicators: [
-        { label: 'Disponível vs Livre', desc: 'Disponível é a memória real que novos processos podem alocar; Livre é a RAM intocada.' },
-        { label: 'Cache e Buffers', desc: 'RAM utilizada pelo kernel Linux para acelerar leitura de disco, liberada dinamicamente quando requisitada.' },
-        { label: 'Swap', desc: 'Espaço em disco reservado para paginação virtual de memória.' }
-      ],
-      apis: 'GET /api/system, GET /api/cpu, GET /api/memory, GET /api/disk, GET /api/network, GET /api/temperature',
-      permissions: 'Público/Operador.',
-      troubleshooting: 'Temperaturas acima de 75°C geram alerta automático. Verifique poeira ou rotação de cooler do processador.'
-    },
-    {
-      id: 'adguard',
-      name: '3. AdGuard Home',
-      icon: Shield,
-      summary: 'Central de controle de DNS, bloqueio de telemetria e dossiê com inteligência artificial.',
-      purpose: 'Proteger toda a rede doméstica contra anúncios, rastreadores e malwares, resolvendo DNS localmente na porta 53.',
-      whatYouCanDo: [
-        'Verificar consultas totais, permitidas e bloqueadas em 24h ou 2h com tooltip sincronizado.',
-        'Consultar servidores upstream ativos (Cloudflare DNS, Quad9, Google) e seus tempos de resposta.',
-        'Ativar Dossiê Inteligente com IA Opencode para explicar a finalidade de qualquer domínio bloqueado.'
-      ],
-      indicators: [
-        { label: 'Taxa de Bloqueio (%)', desc: 'Percentual de requisições de DNS que foram retidas por listas de bloqueio.' },
-        { label: 'Upstream Latency', desc: 'Tempo em milissegundos que os provedores DNS externos levam para responder ao servidor.' }
-      ],
-      apis: 'Proxy /adguard-api/* (AdGuard :8081) e rotas Node /api/adguard/status|stats|querylog|domains|analyze|sync|clear-history|config',
-      permissions: 'Operador visualiza consultas; Administrador limpa histórico e configura regras.',
-      troubleshooting: 'Se o AdGuard estiver inativo, execute: sudo systemctl restart AdGuardHome. Cheque logs em /opt/AdGuardHome/data/AdGuardHome.yaml.'
-    },
-    {
-      id: 'ping',
-      name: '4. Ping / Latência',
-      icon: Radio,
-      summary: 'Medição contínua de latência (RTT) e perda de pacotes via socket e ICMP.',
-      purpose: 'Monitorar a qualidade da conexão com o gateway local e os maiores backbones da internet sem consumir recursos pesados.',
-      whatYouCanDo: [
-        'Acompanhar oscilação de latência em tempo real com gráfico SVG contínuo.',
-        'Auditar múltiplos destinos: Cloudflare (1.1.1.1), Google (8.8.8.8), Quad9 (9.9.9.9), NIC.br e Gateway (192.168.100.1).',
-        'Identificar perda de pacotes e diferenciar latência elevada de indisponibilidade de rota.'
-      ],
-      indicators: [
-        { label: 'Mín / Média / Máx', desc: 'Distribuição estatística das últimas 25 amostras de ida e volta (RTT).' },
-        { label: 'Taxa de Descarte (%)', desc: 'Percentual de falhas completas de comunicação nas amostras coletadas.' }
-      ],
-      apis: 'GET /api/ping (camada híbrida TCP/IP + fallback ICMP /bin/ping)',
-      permissions: 'Público/Operador.',
-      troubleshooting: 'Se o gateway local aparecer como inativo, confirme se o roteador aceita ICMP ping ou responde na porta 53/80.'
-    },
-    {
-      id: 'opencode',
-      name: '5. Lux e Opencode (Ubuntu)',
-      icon: Bot,
-      summary: 'Agente inteligente oficial do Ubuntu Server impulsionado pelo Lux e pela CLI local do opencode.',
-      purpose: 'Auxiliar na administração, geração de scripts e diagnóstico avançado do host samuelserver com raciocínio DevOps.',
-      whatYouCanDo: [
-        'Conversar com o Lux + Opencode sobre diagnósticos de rede, firewall, Nginx e automações.',
-        'Selecionar modelos de IA disponíveis dinamicamente via CLI opencode models.',
-        'Acompanhar cota de tokens (prompt, resposta e total), histórico diário e limites de requisição por minuto (RPM/TPM).',
-        'Salvar e alternar entre múltiplas sessões com modelo persistido e histórico em disco.'
-      ],
-      indicators: [
-        { label: 'Tokens Usados Hoje', desc: 'Total acumulado de tokens de entrada (prompt) e saída (resposta) consumidos na data atual.' },
-        { label: 'Quota Diária', desc: 'Percentual de uso da quota de tokens processados pelo agente Lux + Opencode.' }
-      ],
-      apis: 'GET /api/opencode/models|tokens|sessions, GET/POST/PATCH/DELETE /api/opencode/sessions*, POST /api/opencode/chat',
-      permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Certifique-se de configurar OPENCODE_BIN e OPENCODE_MODEL no arquivo /opt/server-panel/.env para ativar o agente em produção.'
-    },
-    {
-      id: 'files',
-      name: '6. Gerenciador de Arquivos',
-      icon: Folder,
-      summary: 'Navegação segura na árvore de diretórios do Ubuntu, editor de texto e visualizador de imagens.',
-      purpose: 'Permitir inspeção, criação e edição rápida de arquivos de configuração sem exigir conexão SSH com nano/vim.',
-      whatYouCanDo: [
-        'Navegar por pastas do sistema, inclusive links simbólicos (/lib, /bin, /sbin).',
-        'Visualizar fotos e imagens em modo nativo.',
-        'Criar novos arquivos de texto/bloco de notas e salvar alterações diretamente no servidor.'
-      ],
-      indicators: [
-        { label: 'Permissões (rwxr-xr-x)', desc: 'Privilégios de leitura, escrita e execução do usuário do sistema.' },
-        { label: 'Bloqueio de Path Traversal', desc: 'Proteção de segurança que bloqueia acesso a arquivos confidenciais (/etc/shadow).' }
-      ],
-      apis: 'GET /api/files/list|read|raw, POST /api/files/create|save',
-      permissions: 'Restrito para Administradores autenticados com token Bearer.',
-      troubleshooting: 'Caso não consiga salvar um arquivo, verifique se o usuário do processo tem permissão de escrita no diretório alvo.'
-    },
-    {
-      id: 'security',
-      name: '7. Segurança & Ataques',
-      icon: ShieldAlert,
-      summary: 'Auditoria de força bruta SSH, varreduras web e gerenciamento do firewall UFW.',
-      purpose: 'Detectar e neutralizar invasores externos, diferenciando acessos locais legítimos de ataques maliciosos de força bruta.',
-      whatYouCanDo: [
-        'Visualizar IPs hostis com geolocalização GeoIP (País, Cidade, Provedor e Bandeira).',
-        'Identificar o motivo do erro (Senha Incorreta vs Usuário Inexistente vs Scan HTTP).',
-        'Banir ou desbanir IPs hostis no firewall UFW com 1 clique e limpar o histórico de auditoria.'
-      ],
-      indicators: [
-        { label: 'Nível de Ameaça (Normal / Moderado / Sob Ataque)', desc: 'Classificação calculada baseada em ameaças externas reais.' },
-        { label: 'Regras do UFW', desc: 'Listagem numerada de regras de firewall ativas em tempo real no kernel do Ubuntu.' }
-      ],
-      apis: 'GET /api/security/*, POST /api/security/block-ip|unblock-ip|clear-history',
-      permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Para inspecionar regras diretamente no terminal, execute: sudo ufw status numbered.'
-    },
-    {
-      id: 'credentials',
-      name: '8. Credenciais & APIs',
-      icon: Key,
-      summary: 'Central de chaves de API, variáveis de ambiente e gerenciamento de senhas de acesso.',
-      purpose: 'Centralizar e atualizar parâmetros de conexão (AdGuard, n8n, Opencode) e senhas do painel sem editar arquivos manualmente.',
-      whatYouCanDo: [
-        'Alterar as credenciais de login do Administrador e Operador.',
-        'Configurar credenciais da API do AdGuard Home e tokens do n8n.',
-        'Cadastrar variáveis de ambiente personalizadas armazenadas com segurança.'
-      ],
-      indicators: [
-        { label: 'Cofre Protegido', desc: 'Camada de proteção que exige senha mestra para revelar segredos na tela.' }
-      ],
-      apis: 'GET /api/credentials, POST /api/credentials',
-      permissions: 'Exclusivo para Administrador.',
-      troubleshooting: 'As credenciais alteradas são gravadas no arquivo server-config.json e no ambiente local.'
-    },
-    {
-      id: 'processes',
-      name: '9. Processos',
-      icon: Cpu,
-      summary: 'Inspetor de processos em tempo real do kernel Linux com PID, consumo de CPU e memória.',
-      purpose: 'Identificar gargalos de processamento, processos zumbis ou serviços consumindo recursos excessivos.',
-      whatYouCanDo: [
-        'Filtrar processos por nome, usuário ou comando.',
-        'Ordenar por maior consumo de CPU ou memória RAM.',
-        'Finalizar processos com sinal SIGTERM/SIGKILL (botão de encerramento).'
-      ],
-      indicators: [
-        { label: 'PID', desc: 'Identificador único do processo no sistema operacional.' },
-        { label: 'Estado (R, S, Z)', desc: 'R (Executando), S (Dormindo/Aguardando), Z (Zumbi).' }
-      ],
-      apis: 'GET /api/processes (leitura/monitoramento)',
-      permissions: 'Restrito para Administrador.',
-      troubleshooting: 'Tenha cautela ao finalizar processos do sistema como sshd, systemd-journald ou nginx.'
-    },
-    {
-      id: 'services',
-      name: '10. Serviços',
-      icon: ShieldCheck,
-      summary: 'Painel de controle do systemd para daemons e serviços do Ubuntu.',
-      purpose: 'Verificar status de execução, reiniciar, iniciar ou parar serviços essenciais de infraestrutura.',
-      whatYouCanDo: [
-        'Conferir o estado real de serviços: Nginx, AdGuard Home, Docker, OpenSSH, Tailscale, Fail2Ban, Server Panel.',
-        'Reiniciar ou parar serviços diretamente pelo painel.',
-        'Copiar comandos canônicos do systemctl com 1 clique.'
-      ],
-      indicators: [
-        { label: 'Ativo (Running)', desc: 'O serviço está em execução normal no systemd.' },
-        { label: 'Inativo (Dead/Exited)', desc: 'O serviço está parado ou foi desabilitado intencionalmente.' }
-      ],
-      apis: 'GET /api/services (monitoramento); ações avançadas via Terminal/systemctl quando autorizado',
-      permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Se um serviço falhar ao iniciar, consulte seus logs com: sudo journalctl -u NOME_DO_SERVICO -n 50.'
-    },
-    {
-      id: 'network',
-      name: '11. Rede & MAC',
-      icon: Network,
-      summary: 'Auditoria de interfaces físicas e virtuais, endereçamento IPv4/IPv6 e tabela ARP.',
-      purpose: 'Mapear todos os dispositivos conectados à rede local, interfaces ativas e portas de escuta.',
-      whatYouCanDo: [
-        'Inspecionar IPs locais, máscaras de sub-rede, gateway e endereços MAC.',
-        'Consultar tabela ARP com identificação de fabricantes de dispositivos na LAN.',
-        'Verificar portas TCP/UDP em escuta (LISTEN) no servidor.'
-      ],
-      indicators: [
-        { label: 'Dual-Stack IPv4/IPv6', desc: 'Indica disponibilidade simultânea de IPv4 estático e IPv6 global.' },
-        { label: 'Interface UP/DOWN', desc: 'Estado físico do link de rede ethernet ou Wi-Fi.' }
-      ],
-      apis: 'GET /api/network, GET /api/mac-vendor/:mac',
-      permissions: 'Público/Operador.',
-      troubleshooting: 'O endereço IPv6 global é dinâmico e sincronizado automaticamente pela interface wlo1.'
-    },
-    {
-      id: 'logs',
-      name: '12. Logs do Sistema',
-      icon: ScrollText,
-      summary: 'Visualizador unificado de logs do journald, Nginx, autenticação e kernel.',
-      purpose: 'Acelerar a investigação de falhas de software, erros de proxy e eventos de segurança.',
-      whatYouCanDo: [
-        'Filtrar logs por serviço específico (Nginx, SSH, AdGuard, Kernel, Server Panel).',
-        'Pesquisar por palavras-chave com busca em tempo real.',
-        'Exportar e copiar registros de log selecionados.'
-      ],
-      indicators: [
-        { label: 'Severidade (Info, Warning, Error)', desc: 'Classificação do nível de criticidade da mensagem registrada.' }
-      ],
-      apis: 'GET /api/logs',
-      permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Para visualizar logs brutos contínuos no terminal: sudo journalctl -f.'
-    },
-    {
-      id: 'n8n',
-      name: '13. n8n Workflows',
-      icon: GitBranch,
-      summary: 'Integração com a plataforma de automação de fluxos de trabalho e webhooks.',
-      purpose: 'Supervisionar execuções de automações, alertas de infraestrutura e rotinas agendadas.',
-      whatYouCanDo: [
-        'Conferir status do serviço n8n local na porta 5678.',
-        'Monitorar workflows ativos e taxas de sucesso/falha de execução.',
-        'Acessar diretamente o editor visual do n8n.'
-      ],
-      indicators: [
-        { label: 'Workflow Ativo', desc: 'Fluxo em execução aguardando gatilhos ou cron schedules.' }
-      ],
-      apis: 'GET /api/n8n/status, POST /api/n8n/config, POST /api/n8n/workflows/:id/toggle',
-      permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Se o n8n estiver offline, execute: sudo systemctl start n8n ou verifique seu contêiner Docker.'
-    },
-    {
-      id: 'commands',
-      name: '14. Terminal & Shell',
-      icon: Terminal,
-      summary: 'Console interativo para execução segura de comandos administrativos no Ubuntu.',
-      purpose: 'Executar tarefas de manutenção sem necessidade de abrir um cliente SSH externo.',
-      whatYouCanDo: [
-        'Executar diagnósticos rápidos pré-formatados com 1 clique.',
-        'Digitar comandos manuais no terminal embutido com suporte a histórico.',
-        'Acompanhar a saída completa (stdout/stderr) em tempo real.'
-      ],
-      indicators: [
-        { label: 'Allowlist Policy', desc: 'Camada de proteção que bloqueia comandos destrutivos não autorizados.' }
-      ],
-      apis: 'POST /api/terminal/exec',
-      permissions: 'Exclusivo para Administrador autenticado.',
-      troubleshooting: 'Comandos de longa duração possuem timeout de segurança de 30 segundos.'
-    },
-    {
-      id: 'system',
-      name: '15. Sistema',
-      icon: Server,
-      summary: 'Informações de distribuição Linux, kernel, arquitetura e controle de energia.',
-      purpose: 'Consultar detalhes de release do sistema operacional e executar ações de reboot/shutdown quando necessário.',
-      whatYouCanDo: [
-        'Visualizar versão detalhada do Ubuntu 24.04 LTS e versão do kernel Linux.',
-        'Conferir hostname oficial, arquitetura x86_64 e tipo de virtualização/bare-metal.',
-        'Executar reinicialização controlada do host.'
-      ],
-      indicators: [
-        { label: 'Kernel Version', desc: 'Versão do núcleo Linux em execução.' },
-        { label: 'Hostname', desc: 'Nome de rede da máquina (samuelserver).' }
-      ],
-      apis: 'GET /api/system (informações/snapshot); ações de energia não expostas na API atual',
-      permissions: 'Restrito para Administradores.',
-      troubleshooting: 'Após reiniciar o servidor, o painel restabelece a conexão automaticamente em ~45 segundos.'
-    },
-    {
-      id: 'documentation',
-      name: '17. Navegador Remoto',
-      icon: BookOpen,
-      summary: 'Manual operacional completo de infraestrutura, arquitetura e procedimentos de recuperação.',
-      purpose: 'Servir como fonte definitiva de consulta técnica para operar, atualizar e recuperar o servidor doméstico.',
-      whatYouCanDo: [
-        'Copiar comandos operacionais em linha única com backup automático.',
-        'Consultar o manual específico de cada aba do sistema.',
-        'Seguir guias de resolução passo a passo para emergências e incidentes.'
-      ],
-      indicators: [
-        { label: 'Versão de Infraestrutura', desc: 'Versão do pacote de scripts e automações em vigor.' }
-      ],
-      apis: 'Integrada estaticamente no frontend.',
-      permissions: 'Acessível para todos os perfis.',
-      troubleshooting: 'Mantenha este manual atualizado sempre que novas integrações forem adicionadas.'
-    }
-  ];
+  const updateCmd = 'cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh';
 
   return (
     <div className="space-y-4 font-sans text-[#1A1A2E]">
-      {/* Top Banner Neo-brutalist */}
       <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b-2 border-[#1A1A2E] gap-2">
           <div className="flex items-center gap-2.5">
@@ -360,257 +355,97 @@ export const DocumentationTab: React.FC = () => {
               <BookOpen className="w-5 h-5 text-[#FF5A36]" />
             </div>
             <div>
-              <h1 className="text-base font-black text-[#1A1A2E] font-title">
-                Manual Operacional & Documentação Técnica do Sistema
-              </h1>
-              <p className="text-xs text-[#4A4A68] font-medium">
-                Ubuntu Server 24.04 LTS (samuelserver) • Nginx • AdGuard Home • Tailscale • Opencode AI
-              </p>
+              <h1 className="text-base font-black font-title">Manual Operacional & Documentação Técnica</h1>
+              <p className="text-xs text-[#4A4A68] font-medium">samuelserver • Ubuntu 26.04.1 LTS (kernel 7.0.0) • Nginx • AdGuard Home • Docker/n8n • Tailscale • Opencode</p>
             </div>
           </div>
-          <span className="text-xs font-mono font-bold text-[#FF5A36] bg-[#FFF7E8] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] self-start sm:self-auto">
-            Versão v2.6 (Dual-Stack & Opencode AI)
-          </span>
+          <span className="text-xs font-mono font-bold text-[#FF5A36] bg-[#FFF7E8] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] self-start sm:self-auto">Revisão: 2026-11-12</span>
         </div>
-
-        {/* Navegação Rápida de Seções */}
         <div className="flex items-center gap-2 flex-wrap pt-3 text-xs">
-          <span className="text-[#4A4A68] font-bold mr-1 text-xs">Seções:</span>
+          <span className="text-[#4A4A68] font-bold mr-1">Seções:</span>
           {[
             { id: 'all', label: 'Tudo' },
-            { id: 'overview', label: '1. Visão Geral da Arquitetura' },
-            { id: 'tabs', label: '2. Manual das 16 Abas' },
-            { id: 'ops', label: '3. Procedimentos Operacionais' },
-            { id: 'update', label: '⚡ Script de Atualização' }
-          ].map(sec => (
-            <button
-              key={sec.id}
-              onClick={() => setActiveSection(sec.id)}
-              className={`px-3 py-1.5 rounded-lg border-2 border-[#1A1A2E] transition text-xs font-bold shadow-[2px_2px_0px_#1A1A2E] ${
-                activeSection === sec.id 
-                  ? 'bg-[#FF5A36] text-white' 
-                  : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'
-              }`}
-            >
-              {sec.label}
-            </button>
+            { id: 'overview', label: 'Visão Geral' },
+            { id: 'tabs', label: 'Abas (1-17)' },
+            { id: 'ops', label: 'Operação & Recuperação' },
+            { id: 'update', label: 'Atualização' }
+          ].map(s => (
+            <button key={s.id} onClick={() => setActiveSection(s.id)} className={`px-3 py-1.5 rounded-lg border-2 border-[#1A1A2E] font-bold shadow-[2px_2px_0px_#1A1A2E] ${activeSection === s.id ? 'bg-[#FF5A36] text-white' : 'bg-[#FFF7E8] text-[#4A4A68] hover:text-[#1A1A2E]'}`}>{s.label}</button>
           ))}
         </div>
       </div>
 
-      {/* SCRIPT DE ATUALIZAÇÃO SEGURA (DESTAQUE PRIORITÁRIO) */}
       {(activeSection === 'all' || activeSection === 'update') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
           <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <Terminal className="w-4 h-4 text-[#FF5A36]" />
-              <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                Procedimento de Atualização Segura do Painel (com Backup & Rollback)
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => copyToClipboard(`cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`, 'update-script')}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono font-bold bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none transition"
-                title="Copiar comando em linha única para o shell"
-              >
-                {copiedKey === 'update-script' ? (
-                  <>
-                    <Check className="w-3.5 h-3.5 text-white" />
-                    <span>Copiado com Sucesso!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copiar Comando em Linha Única</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <div className="flex items-center gap-2"><Terminal className="w-4 h-4 text-[#FF5A36]" /><h2 className="text-xs font-black font-title uppercase tracking-wider">Atualização Segura (backup, build, deploy, health-check, rollback)</h2></div>
+            <button onClick={() => copy(updateCmd, 'update')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-mono font-bold bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#E04522]">
+              {copiedKey === 'update' ? <><Check className="w-3.5 h-3.5" /><span>Copiado</span></> : <><Copy className="w-3.5 h-3.5" /><span>Copiar comando</span></>}
+            </button>
           </div>
-
-          <p className="text-xs text-[#4A4A68] font-medium leading-relaxed">
-            Execute o script em linha única abaixo no terminal do Ubuntu (<code className="text-[#1A1A2E] font-mono font-bold">samuelserver</code>). Ele realiza: (1) salvaguarda de configurações locais; (2) backup automático timestamped em <code className="text-[#1A1A2E] font-mono font-bold">/var/backups/server-panel</code>; (3) sincronização via git pull; (4) compilação de produção com Vite/esbuild; (5) rollback automático em caso de qualquer falha; (6) reload sem queda no Nginx e validação por health check.
-          </p>
-
-          <div className="relative">
-            <pre className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs text-[#1A1A2E] font-mono font-bold overflow-x-auto shadow-[2px_2px_0px_#1A1A2E] leading-relaxed selection:bg-[#FFEECB]">
-{`cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`}
-            </pre>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs font-mono">
-            <div className="p-3 rounded-lg bg-[#D1FADF] border-2 border-[#12B76A] text-[#12B76A] font-bold">
-              <span>1. Backup Preventivo</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Cria snapshot em /var/backups antes de tocar nos arquivos.</p>
-            </div>
-            <div className="p-3 rounded-lg bg-[#E0F2FE] border-2 border-[#00A6FB] text-[#026AA2] font-bold">
-              <span>2. Git Pull & Build</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Sincroniza o repositório e compila frontend e backend.</p>
-            </div>
-            <div className="p-3 rounded-lg bg-[#FEF0C7] border-2 border-[#F79009] text-[#B54708] font-bold">
-              <span>3. Deploy Nginx</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Substitui arquivos em /var/www/server-panel como www-data.</p>
-            </div>
-            <div className="p-3 rounded-lg bg-[#FEE4E2] border-2 border-[#F04438] text-[#D92D20] font-bold">
-              <span>4. Rollback Automático</span>
-              <p className="text-xs text-[#1A1A2E] font-normal font-sans mt-0.5">Restaura a versão anterior caso o build ou API falhem.</p>
-            </div>
+          <p className="text-xs text-[#4A4A68]">Execute em <code className="font-mono font-bold text-[#1A1A2E]">samuelserver</code> como usuário com sudo. O script preserva configs locais (.env/server-config.json), cria backup em <code className="font-mono font-bold text-[#1A1A2E]">/var/backups/server-panel</code>, compila e publica em <code className="font-mono font-bold text-[#1A1A2E]">/var/www/server-panel</code>, valida nginx/API e faz rollback em falha.</p>
+          <pre className="p-4 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs font-mono font-bold overflow-x-auto shadow-[2px_2px_0px_#1A1A2E]">{updateCmd}</pre>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+            {[['1. Backup','Snapshot em /var/backups/server-panel e .bak'],['2. Sync & Build','git pull + npm install/build (frontend e dist/server.cjs)'],['3. Publicação','Copia dist para /var/www/server-panel, nginx -t, restart/reload'],['4. Validação','Health-check API e rollback automático em erro']].map(([t,d])=> (
+              <div key={t} className="p-3 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]"><span className="font-bold block">{t}</span><p className="text-[#4A4A68] mt-0.5 font-sans">{d}</p></div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* SEÇÃO 1: VISÃO GERAL DA ARQUITETURA */}
       {(activeSection === 'all' || activeSection === 'overview') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Layers className="w-5 h-5 text-[#00A6FB]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              1. Visão Geral da Arquitetura do Sistema
-            </h2>
-          </div>
-
+          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]"><Layers className="w-5 h-5 text-[#00A6FB]" /><h2 className="text-xs font-black font-title uppercase tracking-wider">Visão Geral da Arquitetura</h2></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
             <div className="p-4 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2">
-              <h3 className="font-bold text-sm text-[#1A1A2E] flex items-center gap-2">
-                <Server className="w-4 h-4 text-[#FF5A36]" />
-                O que é o Ubuntu Server Panel?
-              </h3>
-              <p className="text-[#4A4A68] leading-relaxed">
-                É um painel operacional completo e soberano desenvolvido especificamente para o servidor doméstico <code className="font-bold text-[#1A1A2E]">samuelserver</code>. Ele resolve o problema de fragmentação administrativa, unificando em uma única interface responsiva a telemetria do sistema, o bloqueador de DNS AdGuard Home, o firewall UFW, o terminal, o explorador de arquivos e o agente inteligente Opencode.
-              </p>
+              <h3 className="font-bold text-sm flex items-center gap-2"><Server className="w-4 h-4 text-[#FF5A36]" />Stack e execução</h3>
+              <p className="text-[#4A4A68] leading-relaxed">Frontend React + Vite (SPA) servido pelo Nginx a partir de <code className="font-mono text-[#1A1A2E]">/var/www/server-panel</code>. Backend Node.js/Express (<code className="font-mono text-[#1A1A2E]">node dist/server.cjs</code>) na porta <b>3000</b>, gerido pelo systemd (<code className="font-mono text-[#1A1A2E]">server-panel.service</code>, usuário root, <code className="font-mono text-[#1A1A2E]">NODE_ENV=production</code>).</p>
             </div>
-
             <div className="p-4 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] space-y-2">
-              <h3 className="font-bold text-sm text-[#1A1A2E] flex items-center gap-2">
-                <Network className="w-4 h-4 text-[#12B76A]" />
-                Comunicação Frontend & Backend
-              </h3>
-              <p className="text-[#4A4A68] leading-relaxed">
-                O frontend é uma SPA React moderna com Vite e Tailwind CSS, servida pelo Nginx. O backend é um serviço Node.js Express rodando na porta local 3000 (<code className="font-bold text-[#1A1A2E]">server.cjs</code>). As requisições à API (<code className="font-bold text-[#1A1A2E]">/api/*</code>) são protegidas por autenticação via headers e consultam diretamente arquivos do kernel (<code className="font-mono">/proc/meminfo</code>, <code className="font-mono">journalctl</code>, <code className="font-mono">ufw</code>).
-              </p>
+              <h3 className="font-bold text-sm flex items-center gap-2"><Network className="w-4 h-4 text-[#12B76A]" />Proxy e integrações</h3>
+              <p className="text-[#4A4A68] leading-relaxed">Nginx publica o painel e faz proxy de <code className="font-mono text-[#1A1A2E]">/api/</code>, <code className="font-mono text-[#1A1A2E]">/ws</code>, <code className="font-mono text-[#1A1A2E]">/browser-ws</code> para <code className="font-mono text-[#1A1A2E]">127.0.0.1:3000</code> e <code className="font-mono text-[#1A1A2E]">/adguard-api/</code> para <code className="font-mono text-[#1A1A2E]">127.0.0.1:8081</code>. AdGuard Home em :53/:8081; n8n em container Docker (host :5678).</p>
             </div>
           </div>
-
-          {/* Dados de Identificação do Host */}
           <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-[#1A1A2E]">
-              Identificação de Conectividade do Servidor
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
-              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
-                <span className="text-[#4A4A68] text-[10px] block font-bold">IPv4 Wi-Fi (LAN Doméstica)</span>
-                <span className="text-[#1A1A2E] font-bold text-sm">192.168.100.23</span>
-              </div>
-              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
-                <span className="text-[#4A4A68] text-[10px] block font-bold">Tailscale IP (VPN Global)</span>
-                <span className="text-[#00A6FB] font-bold text-sm">100.97.208.102</span>
-              </div>
-              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
-                <span className="text-[#4A4A68] text-[10px] block font-bold">Usuário Administrativo</span>
-                <span className="text-[#12B76A] font-bold text-sm">samuel (sudoer)</span>
-              </div>
+            <h3 className="text-xs font-bold uppercase tracking-wider">Identidade e conectividade do host</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]"><span className="text-[#4A4A68] text-[10px] block font-bold">Hostname</span><span className="font-bold text-sm">samuelserver</span></div>
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]"><span className="text-[#4A4A68] text-[10px] block font-bold">IPv4 LAN (wlo1)</span><span className="font-bold text-sm">192.168.100.23/24</span></div>
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]"><span className="text-[#4A4A68] text-[10px] block font-bold">Tailscale</span><span className="text-[#00A6FB] font-bold text-sm">100.97.208.102</span></div>
+              <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]"><span className="text-[#4A4A68] text-[10px] block font-bold">SO / Kernel</span><span className="text-[#12B76A] font-bold text-[11px]">Ubuntu 26.04.1 • 7.0.0-43</span></div>
             </div>
+            <p className="text-xs text-[#4A4A68]"><b>Serviços monitorados:</b> OpenSSH (22), AdGuard Home (53,8081), Server Panel (3000), Nginx (80,443), Cron, systemd-resolved (53), UFW, Docker, Tailscale, n8n (5678, Docker). Itens não instalados não devem aparecer como ativos.</p>
           </div>
         </div>
       )}
 
-      {/* SEÇÃO 2: DOCUMENTAÇÃO INDIVIDUAL DAS 16 ABAS */}
       {(activeSection === 'all' || activeSection === 'tabs') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
           <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-5 h-5 text-[#FF5A36]" />
-              <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                2. Manual Individual das 16 Abas do Painel
-              </h2>
-            </div>
-            <span className="text-xs font-mono font-bold text-[#4A4A68]">
-              Clique em qualquer aba para expandir os detalhes
-            </span>
+            <div className="flex items-center gap-2"><BookOpen className="w-5 h-5 text-[#FF5A36]" /><h2 className="text-xs font-black font-title uppercase tracking-wider">Manual das Abas (1–17, ordem real do painel)</h2></div>
+            <span className="text-xs font-mono font-bold text-[#4A4A68]">Clique para expandir</span>
           </div>
-
           <div className="space-y-3">
             {TABS_DOCUMENTATION.map((tab) => {
-              const Icon = tab.icon;
-              const isExpanded = expandedTab === tab.id;
-
+              const Icon = tab.icon; const open = expandedTab === tab.id;
               return (
-                <div 
-                  key={tab.id}
-                  className="rounded-xl border-2 border-[#1A1A2E] bg-white overflow-hidden shadow-[2px_2px_0px_#1A1A2E] transition"
-                >
-                  <button
-                    onClick={() => setExpandedTab(isExpanded ? null : tab.id)}
-                    className="w-full p-3.5 bg-[#FFF7E8] hover:bg-[#FFEECB] text-left flex items-center justify-between gap-3 transition"
-                  >
+                <div key={tab.id} className="rounded-xl border-2 border-[#1A1A2E] bg-white overflow-hidden shadow-[2px_2px_0px_#1A1A2E]">
+                  <button onClick={() => setExpandedTab(open ? null : tab.id)} className="w-full p-3.5 bg-[#FFF7E8] hover:bg-[#FFEECB] text-left flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-7 h-7 rounded-md bg-white border border-[#1A1A2E] flex items-center justify-center shrink-0">
-                        <Icon className="w-4 h-4 text-[#FF5A36]" />
-                      </div>
-                      <div>
-                        <span className="font-bold font-title text-sm text-[#1A1A2E] block">{tab.name}</span>
-                        <span className="text-xs text-[#4A4A68] font-medium">{tab.summary}</span>
-                      </div>
+                      <div className="w-7 h-7 rounded-md bg-white border border-[#1A1A2E] flex items-center justify-center shrink-0"><Icon className="w-4 h-4 text-[#FF5A36]" /></div>
+                      <div><span className="font-bold font-title text-sm block">{tab.name}</span><span className="text-xs text-[#4A4A68] font-medium">{tab.summary}</span></div>
                     </div>
-                    <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-white px-2 py-1 rounded border border-[#1A1A2E]">
-                      {isExpanded ? 'Recolher ▲' : 'Ver Detalhes ▼'}
-                    </span>
+                    <span className="text-xs font-mono font-bold bg-white px-2 py-1 rounded border border-[#1A1A2E]">{open ? 'Recolher ▲' : 'Detalhes ▼'}</span>
                   </button>
-
-                  {isExpanded && (
-                    <div className="p-4 space-y-3.5 text-xs text-[#1A1A2E] bg-white border-t-2 border-[#1A1A2E]">
-                      {/* Finalidade */}
-                      <div>
-                        <strong className="text-xs font-bold text-[#4A4A68] uppercase tracking-wider block mb-1">
-                          Finalidade do Módulo:
-                        </strong>
-                        <p className="text-[#1A1A2E] leading-relaxed bg-[#FFF7E8]/50 p-2.5 rounded-lg border border-[#1A1A2E]/20">
-                          {tab.purpose}
-                        </p>
-                      </div>
-
-                      {/* O que você consegue fazer */}
-                      <div>
-                        <strong className="text-xs font-bold text-[#4A4A68] uppercase tracking-wider block mb-1">
-                          Ações e Recursos Disponíveis:
-                        </strong>
-                        <ul className="list-disc pl-5 space-y-1 text-[#1A1A2E]">
-                          {tab.whatYouCanDo.map((item, idx) => (
-                            <li key={idx}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      {/* Indicadores */}
-                      <div>
-                        <strong className="text-xs font-bold text-[#4A4A68] uppercase tracking-wider block mb-1">
-                          Significado dos Indicadores:
-                        </strong>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {tab.indicators.map((ind, idx) => (
-                            <div key={idx} className="p-2 rounded bg-[#FFF7E8] border border-[#1A1A2E]/30 text-xs">
-                              <span className="font-bold text-[#FF5A36] block">{ind.label}:</span>
-                              <span className="text-[#4A4A68]">{ind.desc}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Técnico e Troubleshooting */}
+                  {open && (
+                    <div className="p-4 space-y-3.5 text-xs border-t-2 border-[#1A1A2E]">
+                      <div><strong className="text-[#4A4A68] uppercase tracking-wider block mb-1">Finalidade</strong><p className="leading-relaxed bg-[#FFF7E8]/50 p-2.5 rounded-lg border border-[#1A1A2E]/20">{tab.purpose}</p></div>
+                      <div><strong className="text-[#4A4A68] uppercase tracking-wider block mb-1">O que você pode fazer</strong><ul className="list-disc pl-5 space-y-1">{tab.whatYouCanDo.map((i, idx) => <li key={idx}>{i}</li>)}</ul></div>
+                      <div><strong className="text-[#4A4A68] uppercase tracking-wider block mb-1">Indicadores</strong><div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{tab.indicators.map((ind, idx) => (<div key={idx} className="p-2 rounded bg-[#FFF7E8] border border-[#1A1A2E]/30"><span className="font-bold text-[#FF5A36] block">{ind.label}</span><span className="text-[#4A4A68]">{ind.desc}</span></div>))}</div></div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-[#1A1A2E]/20 font-mono text-[11px]">
-                        <div className="p-2.5 rounded bg-[#E0F2FE] border border-[#00A6FB] text-[#026AA2]">
-                          <strong className="block text-[10px] uppercase font-bold">APIs Envolvidas:</strong>
-                          <span className="text-[#1A1A2E] font-medium">{tab.apis}</span>
-                        </div>
-                        <div className="p-2.5 rounded bg-[#D1FADF] border border-[#12B76A] text-[#12B76A]">
-                          <strong className="block text-[10px] uppercase font-bold">Permissões:</strong>
-                          <span className="text-[#1A1A2E] font-medium">{tab.permissions}</span>
-                        </div>
-                        <div className="p-2.5 rounded bg-[#FEE4E2] border border-[#F04438] text-[#D92D20]">
-                          <strong className="block text-[10px] uppercase font-bold">Resolução de Problemas:</strong>
-                          <span className="text-[#1A1A2E] font-medium">{tab.troubleshooting}</span>
-                        </div>
+                        <div className="p-2.5 rounded bg-[#E0F2FE] border border-[#00A6FB] text-[#026AA2]"><strong className="block text-[10px] uppercase">APIs / Fonte</strong><span className="text-[#1A1A2E] font-medium break-words">{tab.apis}</span></div>
+                        <div className="p-2.5 rounded bg-[#D1FADF] border border-[#12B76A] text-[#027A48]"><strong className="block text-[10px] uppercase">Permissões</strong><span className="text-[#1A1A2E] font-medium">{tab.permissions}</span></div>
+                        <div className="p-2.5 rounded bg-[#FEE4E2] border border-[#F04438] text-[#B42318]"><strong className="block text-[10px] uppercase">Diagnóstico</strong><span className="text-[#1A1A2E] font-medium">{tab.troubleshooting}</span></div>
                       </div>
                     </div>
                   )}
@@ -621,68 +456,16 @@ export const DocumentationTab: React.FC = () => {
         </div>
       )}
 
-      {/* SEÇÃO 3: PROCEDIMENTOS OPERACIONAIS REAIS */}
       {(activeSection === 'all' || activeSection === 'ops') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
-          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
-            <Terminal className="w-5 h-5 text-[#12B76A]" />
-            <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              3. Procedimentos Operacionais & Comandos de Emergência
-            </h2>
-          </div>
-
+          <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E]"><Terminal className="w-5 h-5 text-[#12B76A]" /><h2 className="text-xs font-black font-title uppercase tracking-wider">Operação & Recuperação</h2></div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs font-mono">
-            {/* AdGuard */}
-            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
-              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
-                <Shield className="w-4 h-4 text-[#FF5A36]" />
-                Reiniciar e Diagnosticar AdGuard Home
-              </span>
-              <p className="text-xs text-[#4A4A68] font-sans">Caso o bloqueador de DNS não responda na porta 53:</p>
-              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
-{`sudo systemctl restart AdGuardHome
-sudo systemctl status AdGuardHome --no-pager`}
-              </pre>
-            </div>
-
-            {/* Nginx */}
-            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
-              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
-                <Globe className="w-4 h-4 text-[#00A6FB]" />
-                Testar Sintaxe e Recarregar Nginx
-              </span>
-              <p className="text-xs text-[#4A4A68] font-sans">Sempre teste a sintaxe antes de recarregar o servidor web:</p>
-              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
-{`sudo nginx -t && sudo systemctl reload nginx`}
-              </pre>
-            </div>
-
-            {/* Tailscale */}
-            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
-              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
-                <Lock className="w-4 h-4 text-[#12B76A]" />
-                Diagnóstico de Rede Tailscale WireGuard
-              </span>
-              <p className="text-xs text-[#4A4A68] font-sans">Verifica a conectividade segura da VPN ponto a ponto:</p>
-              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
-{`tailscale status
-tailscale ping 100.97.208.102`}
-              </pre>
-            </div>
-
-            {/* Rollback Manual */}
-            <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] space-y-2">
-              <span className="font-bold text-[#1A1A2E] block text-sm font-sans flex items-center gap-1.5">
-                <RotateCcw className="w-4 h-4 text-[#F04438]" />
-                Recuperação / Rollback Manual do Painel
-              </span>
-              <p className="text-xs text-[#4A4A68] font-sans">Restaura a cópia de segurança em caso de emergência:</p>
-              <pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">
-{`sudo cp -a /var/www/server-panel.bak/. /var/www/server-panel/
-sudo systemctl restart server-panel`}
-              </pre>
-            </div>
+            <div className="p-4 rounded-xl border-2 border-[#1A1A2E] space-y-2"><span className="font-bold text-sm font-sans flex items-center gap-1.5"><Shield className="w-4 h-4 text-[#FF5A36]" />AdGuard Home</span><pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">{`sudo systemctl status AdGuardHome --no-pager\nsudo systemctl restart AdGuardHome\ncurl -I http://127.0.0.1:8081/`}</pre></div>
+            <div className="p-4 rounded-xl border-2 border-[#1A1A2E] space-y-2"><span className="font-bold text-sm font-sans flex items-center gap-1.5"><Globe className="w-4 h-4 text-[#00A6FB]" />Nginx & Painel</span><pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">{`sudo nginx -t && sudo systemctl reload nginx\nsudo systemctl status server-panel --no-pager\ncurl -s -o /dev/null -w '%{http_code}\\n' http://127.0.0.1:3000/api/health`}</pre></div>
+            <div className="p-4 rounded-xl border-2 border-[#1A1A2E] space-y-2"><span className="font-bold text-sm font-sans flex items-center gap-1.5"><GitBranch className="w-4 h-4 text-[#F79009]" />n8n (Docker)</span><pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">{`docker ps --filter name=n8n\ncd /home/samuel/n8n && docker compose ps\n# reinício: docker compose restart n8n`}</pre></div>
+            <div className="p-4 rounded-xl border-2 border-[#1A1A2E] space-y-2"><span className="font-bold text-sm font-sans flex items-center gap-1.5"><RotateCcw className="w-4 h-4 text-[#F04438]" />Deploy manual / rollback</span><pre className="p-2.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] overflow-x-auto">{`# publicar dist já compilada\nsudo cp -a dist/. /var/www/server-panel/ && sudo chown -R www-data:www-data /var/www/server-panel\nsudo nginx -t && sudo systemctl restart server-panel && sudo systemctl reload nginx\n# rollback: restaurar backup em /var/backups/server-panel`}</pre></div>
           </div>
+          <div className="p-3 rounded-lg bg-[#FEF0C7] border-2 border-[#F79009] text-xs text-[#7A2E0E] flex gap-2"><Lock className="w-4 h-4 shrink-0 mt-0.5" /><p><b>Segurança:</b> <code className="font-mono">.env</code> e <code className="font-mono">server-config.json</code> contêm segredos e não devem ser commitados. Não exponha senhas/tokens/cookies em logs. Acesso SSH: usuário <code className="font-mono">samuel</code> (LAN 192.168.100.23, Tailscale 100.97.208.102).</p></div>
         </div>
       )}
     </div>

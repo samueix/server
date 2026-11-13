@@ -329,12 +329,114 @@ export function getDiskInfo() {
   };
 }
 
+function getActiveNetworkClients() {
+  const clients = new Map<string, any>();
+  const parseIpNeigh = (output: string) => {
+    for (const line of output.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const parts = trimmed.split(/\s+/);
+      const ip = parts[0];
+      const devIdx = parts.indexOf('dev');
+      const iface = devIdx >= 0 ? parts[devIdx + 1] : undefined;
+      const macIdx = parts.indexOf('lladdr');
+      const mac = macIdx >= 0 ? (parts[macIdx + 1] || '').toUpperCase() : '';
+      const state = parts[parts.length - 1] || '';
+      if (!ip || !mac || mac === '00:00:00:00:00:00') continue;
+      if (ip.startsWith('fe80:') || ip.startsWith('169.254.')) continue;
+      if (state === 'FAILED') continue;
+      const isIpv6 = ip.includes(':');
+      const key = `${iface || 'net'}:${mac}`;
+      const existing = clients.get(key) || {
+        id: `neigh-${iface || 'net'}-${mac.replace(/:/g, '')}`,
+        nome: undefined,
+        hostname: undefined,
+        ipv4: undefined,
+        ipv6: undefined,
+        mac,
+        fabricante: undefined,
+        status: ['REACHABLE', 'DELAY', 'PROBE'].includes(state) ? 'ONLINE' : 'OFFLINE',
+        ultimaAtividade: state,
+        interface: iface,
+        consultas: 0
+      };
+      if (isIpv6) {
+        if (!existing.ipv6) existing.ipv6 = ip;
+      } else {
+        if (!existing.ipv4) existing.ipv4 = ip;
+      }
+      if (['REACHABLE', 'DELAY', 'PROBE'].includes(state)) existing.status = 'ONLINE';
+      existing.ultimaAtividade = state || existing.ultimaAtividade;
+      clients.set(key, existing);
+    }
+  };
+
+  try {
+    const out = execSync('ip neigh show 2>/dev/null || true', { encoding: 'utf-8', timeout: 1200 });
+    parseIpNeigh(out);
+  } catch {}
+
+  // Fallback: /proc/net/arp (IPv4)
+  if (clients.size === 0) {
+    try {
+      const arp = fs.readFileSync('/proc/net/arp', 'utf-8');
+      const lines = arp.trim().split('\n').slice(1);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length < 6) continue;
+        const [ip, , flags, macRaw, , iface] = parts;
+        const mac = (macRaw || '').toUpperCase();
+        if (!mac || mac === '00:00:00:00:00:00') continue;
+        if (flags === '0x0') continue;
+        const key = `${iface}:${mac}`;
+        clients.set(key, {
+          id: `arp-${iface}-${mac.replace(/:/g, '')}`,
+          nome: undefined,
+          hostname: undefined,
+          ipv4: ip,
+          ipv6: undefined,
+          mac,
+          fabricante: undefined,
+          status: flags !== '0x0' ? 'ONLINE' : 'OFFLINE',
+          ultimaAtividade: 'ARP',
+          interface: iface,
+          consultas: 0
+        });
+      }
+    } catch {}
+  }
+
+  // Anota gateway se detectável
+  let gatewayIp: string | null = null;
+  try {
+    const route = execSync("ip route show default 2>/dev/null | awk '/default/ {print $3; exit}'", { encoding: 'utf-8', timeout: 800 }).trim();
+    if (route) gatewayIp = route;
+  } catch {}
+
+  for (const c of clients.values()) {
+    if (gatewayIp && c.ipv4 === gatewayIp) {
+      c.nome = c.nome || 'Gateway/Roteador';
+      c.hostname = c.hostname || 'gateway';
+      c.tipo = 'roteador';
+      c.status = 'ONLINE';
+    }
+  }
+
+  return Array.from(clients.values()).sort((a, b) => (a.ipv4 || a.ipv6 || '').localeCompare(b.ipv4 || b.ipv6 || '', undefined, { numeric: true }));
+}
+
 export function getNetworkInfo() {
   const nics = os.networkInterfaces();
   const interfaces: any[] = [];
   let primaryIp = '127.0.0.1';
   let primaryIpv6: string | undefined = undefined;
   let primaryInterface = 'eth0';
+  let defaultGateway = '--';
+
+  try {
+    const gw = execSync("ip route show default 2>/dev/null | awk '/default/ {print $3; exit}'", { encoding: 'utf-8', timeout: 800 }).trim();
+    if (gw) defaultGateway = gw;
+  } catch {}
 
   for (const [name, addrList] of Object.entries(nics)) {
     if (!addrList) continue;
@@ -368,7 +470,7 @@ export function getNetworkInfo() {
       ipv6: ipv6 || null,
       mac,
       netmask,
-      gateway: ipv4 ? '192.168.100.1' : '--',
+      gateway: ipv4 ? defaultGateway : '--',
       is_up: true,
       status: 'UP',
       speed_mbps: 1000,
@@ -387,10 +489,10 @@ export function getNetworkInfo() {
       nome: 'eth0',
       ip: '192.168.100.23',
       ipv4: '192.168.100.23',
-      ipv6: '2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445',
+      ipv6: primaryIpv6 || null,
       mac: '5c:cd:5b:5a:74:45',
       netmask: '255.255.255.0',
-      gateway: '192.168.100.1',
+      gateway: defaultGateway,
       is_up: true,
       status: 'UP',
       speed_mbps: 1000,
@@ -402,8 +504,9 @@ export function getNetworkInfo() {
       erros: 0
     });
     primaryIp = '192.168.100.23';
-    primaryIpv6 = '2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445';
   }
+
+  const activeClients = getActiveNetworkClients();
 
   return {
     interfaces,
@@ -411,7 +514,9 @@ export function getNetworkInfo() {
     primary_ip: primaryIp,
     primary_ipv6: primaryIpv6,
     download_bytes_sec: 24500,
-    upload_bytes_sec: 8400
+    upload_bytes_sec: 8400,
+    active_clients: activeClients,
+    activeClients
   };
 }
 
