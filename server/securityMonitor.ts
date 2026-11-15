@@ -78,6 +78,11 @@ export interface SecurityStatusResponse {
 let panelFailedAttempts: { ip: string; user: string; timestamp: Date }[] = [];
 let historyClearedAt: Date | null = null;
 
+export function getPanelFailedAttempts(limit = 100): { ip: string; user: string; timestamp: string; timestampMs: number }[] {
+  const list = panelFailedAttempts.slice(0, limit).map(a => ({ ip: a.ip, user: a.user, timestamp: a.timestamp.toISOString(), timestampMs: a.timestamp.getTime() }));
+  return list;
+}
+
 // Cache local de GeoIP em memória para resposta instantânea
 const geoCache = new Map<string, { country: string; city: string; isp: string; flag: string }>();
 
@@ -133,8 +138,9 @@ export async function resolveIpLocation(ip: string): Promise<{ country: string; 
 }
 
 export function recordPanelFailedLogin(ip: string, user: string) {
-  if (!isValidIp(ip)) return;
-  panelFailedAttempts.unshift({ ip, user, timestamp: new Date() });
+  const cleanIp = (ip || '').trim().replace(/^::ffff:/, '') || 'unknown';
+  const cleanUser = (user || '').trim().slice(0, 64) || 'desconhecido';
+  panelFailedAttempts.unshift({ ip: cleanIp, user: cleanUser, timestamp: new Date() });
   if (panelFailedAttempts.length > 500) {
     panelFailedAttempts.length = 500;
   }
@@ -491,7 +497,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
     }
   } catch {}
 
-  // 3. Incorporar tentativas registradas no painel
+  // 3. Incorporar tentativas registradas no painel (com usuário tentado e IP)
   for (const item of panelFailedAttempts) {
     if (historyClearedAt && item.timestamp <= historyClearedAt) continue;
     if (item.timestamp >= oneDayAgo) {
@@ -499,22 +505,42 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
       if (item.timestamp >= oneHourAgo) {
         failedAttemptsLastHour++;
       }
-      userCounts[item.user] = (userCounts[item.user] || 0) + 1;
+      const targetUser = item.user || 'desconhecido';
+      userCounts[targetUser] = (userCounts[targetUser] || 0) + 1;
       if (!ipCounts[item.ip]) {
         ipCounts[item.ip] = {
           count: 0,
           lastAttempt: item.timestamp.toLocaleTimeString('pt-BR'),
-          targetUser: item.user,
+          targetUser,
           service: 'Server Panel Web',
           failureReason: 'senha_incorreta',
-          failureReasonLabel: 'Senha Incorreta no Painel Web'
+          failureReasonLabel: 'Senha/Usuário incorreto no Painel Web'
         };
       }
       ipCounts[item.ip].count++;
+      ipCounts[item.ip].targetUser = targetUser;
+      ipCounts[item.ip].lastAttempt = item.timestamp.toLocaleTimeString('pt-BR');
 
       const hourKey = `${String(item.timestamp.getHours()).padStart(2, '0')}:00`;
       if (hourlyBuckets[hourKey] !== undefined) {
         hourlyBuckets[hourKey]++;
+      }
+
+      // registra incidente específico de login do painel para auditoria visível
+      if (recentIncidents.length < 40) {
+        recentIncidents.push({
+          id: 'panel_' + Math.random().toString(36).slice(2, 9),
+          timestamp: item.timestamp.toLocaleString('pt-BR'),
+          hora: item.timestamp.toLocaleTimeString('pt-BR'),
+          service: 'Server Panel Web',
+          sourceIp: item.ip,
+          targetUser,
+          failureReason: 'senha_incorreta',
+          failureReasonLabel: 'Login falhou (usuário/senha inválidos)',
+          location: 'Resolvendo...',
+          detail: `Tentativa de login no painel com usuário "${targetUser}"`,
+          severity: 'media'
+        });
       }
     }
   }

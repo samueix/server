@@ -28,7 +28,7 @@ const RemoteBrowserTab = React.lazy(() => import('./components/tabs/RemoteBrowse
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
-import { getStoredAuth, saveAuthSession, clearAuthSession, AuthSession } from './services/authService';
+import { getStoredAuth, saveAuthSession, clearAuthSession, touchAuthSession, AuthSession } from './services/authService';
 
 import { 
   NavigationTab, 
@@ -89,8 +89,35 @@ const TabLoadingFallback: React.FC = () => (
   </div>
 );
 
+
+const TAB_PATHS: Record<NavigationTab, string> = {
+  overview: '/visao-geral',
+  monitoring: '/monitoramento',
+  opencode: '/opencode',
+  browser: '/navegador',
+  files: '/arquivos',
+  security: '/seguranca',
+  credentials: '/credenciais',
+  processes: '/processos',
+  services: '/servicos',
+  network: '/rede',
+  adguard: '/adguard',
+  ping: '/ping',
+  logs: '/logs',
+  n8n: '/n8n',
+  commands: '/terminal',
+  system: '/sistema',
+  documentation: '/documentacao',
+};
+const PATH_TO_TAB: Record<string, NavigationTab> = Object.entries(TAB_PATHS).reduce((acc, [k,v]) => { acc[v]=k as NavigationTab; return acc; }, {} as Record<string,NavigationTab>);
+function tabFromPath(pathname: string): NavigationTab | null {
+  const p = pathname.replace(/\/+$/, '') || '/';
+  return PATH_TO_TAB[p] || null;
+}
+const INTENDED_PATH_KEY = 'server_panel_intended_path_v1';
+
 export default function App() {
-  const [activeTab, setActiveTab] = useState<NavigationTab>('overview');
+  const [activeTab, setActiveTab] = useState<NavigationTab>(() => tabFromPath(window.location.pathname) || 'overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isCodeViewerOpen, setIsCodeViewerOpen] = useState<boolean>(false);
@@ -99,6 +126,26 @@ export default function App() {
   const [authSession, setAuthSession] = useState<AuthSession | null>(() => getStoredAuth());
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState<boolean>(false);
   const [logoutNotice, setLogoutNotice] = useState<string | null>(null);
+
+  const navigateToTab = useCallback((tab: NavigationTab) => {
+    navigateToTab(tab);
+    const target = TAB_PATHS[tab] || '/visao-geral';
+    if (window.location.pathname !== target) {
+      window.history.pushState({ tab }, '', target);
+    }
+  }, []);
+
+  // Keep tab in sync with browser back/forward and direct URL
+  useEffect(() => {
+    const onPop = () => {
+      const t = tabFromPath(window.location.pathname);
+      if (t) setActiveTab(t);
+    };
+    window.addEventListener('popstate', onPop);
+    // if authenticated and on root/login-like, go to current tab path
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
 
   // Connection & Telemetry State
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
@@ -412,12 +459,23 @@ export default function App() {
       session.role = role;
       saveAuthSession(session);
     }
-    setAuthSession(session || getStoredAuth());
+    const s = session || getStoredAuth();
+    setAuthSession(s);
     setLogoutNotice(null);
     setIsInitialLoad(true);
-    setTimeout(() => {
-      executePoll();
-    }, 100);
+    try {
+      const intended = sessionStorage.getItem(INTENDED_PATH_KEY);
+      if (intended) {
+        sessionStorage.removeItem(INTENDED_PATH_KEY);
+        const t = tabFromPath(intended);
+        if (t) { setActiveTab(t); window.history.replaceState({tab:t}, '', TAB_PATHS[t]); }
+      } else {
+        // ensure URL matches active tab
+        const target = TAB_PATHS[activeTab] || '/visao-geral';
+        if (window.location.pathname !== target) window.history.replaceState({tab:activeTab}, '', target);
+      }
+    } catch {}
+    setTimeout(() => { executePoll(); }, 100);
   };
 
   // Logout handler
@@ -443,6 +501,26 @@ export default function App() {
     return () => window.removeEventListener('server-panel:unauthorized', handleUnauthorized);
   }, []);
 
+
+  // Auto logout por inatividade (10 minutos)
+  useEffect(() => {
+    if (!authSession?.authenticated) return;
+    let timer: any = null;
+    const reset = () => {
+      touchAuthSession();
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        clearAuthSession();
+        setAuthSession(null);
+        setLogoutNotice('Sessão expirada por inatividade (10 minutos). Faça login novamente.');
+      }, 10 * 60 * 1000);
+    };
+    const events = ['mousemove','mousedown','keydown','touchstart','scroll','click'];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => { if (timer) clearTimeout(timer); events.forEach(e => window.removeEventListener(e, reset)); };
+  }, [authSession?.authenticated]);
+
   // Polling com Backoff Exponencial e Pausa Inteligente em document.hidden
   const scheduleNextPoll = useCallback(() => {
     if (pollTimerRef.current) {
@@ -462,6 +540,14 @@ export default function App() {
       scheduleNextPoll();
     }, delay);
   }, [currentConfig.refreshIntervalSeconds, executePoll]);
+
+  // Ensure URL matches tab when authenticated
+  useEffect(() => {
+    if (authSession?.authenticated) {
+      const target = TAB_PATHS[activeTab] || '/visao-geral';
+      if (window.location.pathname !== target) window.history.replaceState({tab:activeTab}, '', target);
+    }
+  }, [authSession?.authenticated]);
 
   // Periodic polling hook & visibilitychange listener
   useEffect(() => {
@@ -515,6 +601,10 @@ export default function App() {
 
   // Se não houver sessão ativa autenticada, exibe a tela de login
   if (!authSession || !authSession.authenticated) {
+    try {
+      const p = window.location.pathname;
+      if (tabFromPath(p)) sessionStorage.setItem(INTENDED_PATH_KEY, p);
+    } catch {}
     return (
       <LoginScreen
         onLoginSuccess={handleLoginSuccess}
@@ -550,7 +640,7 @@ export default function App() {
         <Sidebar
           currentTab={activeTab}
           onSelectTab={(tab) => {
-            setActiveTab(tab);
+            navigateToTab(tab);
             setMobileMenuOpen(false);
           }}
           isOpenMobile={mobileMenuOpen}
@@ -573,7 +663,7 @@ export default function App() {
               alertHistory={alertHistory}
               onDismissAlert={handleDismissAlert}
               onClearAlertHistory={handleClearAlertHistory}
-              onSelectTab={setActiveTab}
+              onSelectTab={navigateToTab}
             />
 
             {/* Offline Banner when telemetry server is unreachable (only on server tabs) */}
@@ -607,7 +697,7 @@ export default function App() {
                 isConnected={connectionStatus === 'connected'}
                 isStaleData={isStaleData}
                 serverIp={serverIp}
-                onSelectTab={setActiveTab}
+                onSelectTab={navigateToTab}
               />
             )}
 

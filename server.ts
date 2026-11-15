@@ -60,6 +60,8 @@ import {
   blockIpInUfw, 
   unblockIpInUfw 
 } from './server/securityMonitor.js';
+import { logAudit, getAuditLog, clearAuditLog } from './server/auditLog.js';
+import { loadMetricsHistory, getMetricsHistory, addMetricPoint } from './server/metricsHistory.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
   setN8nConfig as setN8nConfigFallback,
@@ -276,6 +278,29 @@ function requireUserOrAdminAuth(req: express.Request, res: express.Response, nex
 
 export function createApp() {
   const app = express();
+  loadMetricsHistory();
+
+  // Persist metrics history (best-effort, every 60s)
+  setInterval(() => {
+    try {
+      const cpu = getCpuInfo();
+      const mem = getMemoryInfo();
+      const disk = getDiskInfo();
+      const temp = getTemperatureInfo();
+      const net = getNetworkInfo();
+      const tempVal = (temp && (temp as any).temperatura_c != null) ? Number((temp as any).temperatura_c) : (Array.isArray((temp as any)?.sensores) && (temp as any).sensores[0]?.temperatura_c != null ? Number((temp as any).sensores[0].temperatura_c) : null);
+      addMetricPoint({
+        ts: Date.now(),
+        cpu: Number((cpu as any)?.usage_percent ?? (cpu as any)?.uso_percentual ?? 0),
+        ram: Number((mem as any)?.ram?.usage_percent ?? (mem as any)?.usage_percent ?? (mem as any)?.uso_percentual ?? 0),
+        disk: Number((disk as any)?.root?.percent ?? (disk as any)?.percent ?? (disk as any)?.uso_percentual ?? 0),
+        temp: tempVal,
+        netRx: Number((net as any)?.total?.rx_bytes ?? 0),
+        netTx: Number((net as any)?.total?.tx_bytes ?? 0),
+      });
+    } catch {}
+  }, 60000).unref?.();
+
   app.use(express.json());
 
   // Middleware de Cabeçalhos de Segurança e Validação Estrita de CORS
@@ -435,6 +460,8 @@ export function createApp() {
       const blocked = req.body?.blocked !== false;
       if (!domain) return res.status(400).json({ error: 'Domínio é obrigatório.' });
       const result = await setAdGuardDomainBlocked(domain, blocked);
+      const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: blocked?'adguard_block_domain':'adguard_unblock_domain', target: domain, details: `${blocked?'Bloqueio':'Desbloqueio'} de domínio no AdGuard`, status: 'success' });
       return res.json(result);
     } catch (err: any) {
       return res.status(400).json({ error: err.message });
@@ -517,6 +544,7 @@ export function createApp() {
     if (authenticatedUser) {
       // Sucesso: reseta histórico de falhas do IP
       failedLoginAttempts.delete(clientIp);
+      logAudit({ actor: authenticatedUser, role: userRole, ip: clientIp, action: 'login', target: 'panel', details: 'Login bem-sucedido', status: 'success' });
       return res.json({
         authenticated: true,
         user: authenticatedUser,
@@ -526,7 +554,18 @@ export function createApp() {
     }
 
     // Falha: incrementa contador de tentativas com janela de 5 minutos
-    recordPanelFailedLogin(clientIp, 'tentativa_web');
+    let attemptedUser = 'desconhecido';
+    try {
+      if (authHeader && authHeader.startsWith('Basic ')) {
+        const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf-8');
+        const colonIdx = decoded.indexOf(':');
+        attemptedUser = (colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded).trim() || 'desconhecido';
+      } else if (!authHeader && !apiKeyHeader) {
+        attemptedUser = 'sem_credenciais';
+      }
+    } catch {}
+    recordPanelFailedLogin(clientIp, attemptedUser);
+    logAudit({ actor: attemptedUser, role: 'unknown', ip: clientIp, action: 'login_failed', target: 'panel', details: `Tentativa de login falhou (usuário: ${attemptedUser})`, status: 'failure', meta: { attemptedUser } });
     if (!rateLimit || now > rateLimit.resetAt) {
       failedLoginAttempts.set(clientIp, { count: 1, resetAt: now + 300000 });
     } else {
@@ -837,6 +876,8 @@ export function createApp() {
     try {
       const { ssid, password } = req.body || {};
       const result = connectWifi(String(ssid || ''), String(password ?? ''));
+      const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'wifi_connect', target: String(ssid||''), details: result.success ? 'Conexão Wi-Fi solicitada' : `Falha Wi-Fi: ${result.message||''}`, status: result.success?'success':'failure' });
       return res.status(result.success ? 200 : 400).json(result);
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err?.message || 'Falha ao conectar Wi-Fi' });
@@ -1048,9 +1089,163 @@ export function createApp() {
   app.post('/api/credentials', requireAdminAuth, (req, res) => {
     try {
       const updated = saveServerConfig(req.body);
+      const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'credentials_update', target: 'server-config', details: 'Credenciais/configurações atualizadas', status: 'success' });
       return res.json({ success: true, message: 'Configurações salvas em server-config.json com sucesso.', config: updated });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+
+  // Histórico de tentativas de login do painel (IP, usuário tentado, localidade)
+  app.get('/api/security/login-attempts', requireAdminAuth, async (req, res) => {
+    try {
+      const { getPanelFailedAttempts, resolveIpLocation } = await import('./server/securityMonitor.js');
+      const attempts = getPanelFailedAttempts(200);
+      const enriched = await Promise.all(attempts.map(async (a) => {
+        let loc: any = null;
+        try { loc = await resolveIpLocation(a.ip); } catch {}
+        return { ...a, location: loc };
+      }));
+      return res.json({ attempts: enriched });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+  // Auditoria persistente de ações sensíveis
+  app.get('/api/audit', requireAdminAuth, (req, res) => {
+    try {
+      const limit = Math.min(1000, Math.max(1, parseInt((req.query.limit as string) || '200', 10)));
+      return res.json({ entries: getAuditLog(limit) });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/audit/clear', requireAdminAuth, (req, res) => {
+    try {
+      const caller = extractCaller(req);
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      clearAuditLog();
+      logAudit({ actor: caller.username || 'admin', role: caller.role || 'admin', ip, action: 'audit_clear', target: 'audit', details: 'Log de auditoria limpo', status: 'info' });
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+
+  // Docker: visão de containers (status/uso básico)
+  app.get('/api/docker/containers', requireAdminAuth, async (_req, res) => {
+    try {
+      const { execFile } = await import('child_process');
+      const util = await import('util');
+      const execFileAsync = util.promisify(execFile);
+      let ps = '';
+      try {
+        const r = await execFileAsync('docker', ['ps', '-a', '--format', '{{json .}}'], { timeout: 8000 });
+        ps = r.stdout || '';
+      } catch (e: any) {
+        return res.json({ available: false, error: e?.stderr || e?.message || 'Docker indisponível', containers: [] });
+      }
+      const containers = ps.split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      // try stats (no-stream) best effort
+      let statsMap: Record<string, any> = {};
+      try {
+        const r = await execFileAsync('docker', ['stats', '--no-stream', '--format', '{{json .}}'], { timeout: 10000 });
+        (r.stdout||'').split('\n').filter(Boolean).forEach(l => { try { const j=JSON.parse(l); if(j.ID||j.Name) statsMap[j.ID||j.Name]=j; } catch {} });
+      } catch {}
+      return res.json({ available: true, containers, stats: statsMap, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      return res.status(500).json({ available: false, error: err.message, containers: [] });
+    }
+  });
+
+  app.post('/api/docker/containers/:id/restart', requireAdminAuth, async (req, res) => {
+    try {
+      const id = String(req.params.id||'').replace(/[^a-zA-Z0-9_.-]/g,'');
+      if (!id) return res.status(400).json({ error: 'ID inválido' });
+      const { execFile } = await import('child_process');
+      const util = await import('util');
+      const execFileAsync = util.promisify(execFile);
+      await execFileAsync('docker', ['restart', id], { timeout: 30000 });
+      const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'docker_restart', target: id, details: 'Container reiniciado', status: 'success' });
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.stderr || err.message });
+    }
+  });
+
+  // SMART / saúde do disco (best-effort)
+  app.get('/api/system/smart', requireAdminAuth, async (_req, res) => {
+    try {
+      const { execFile } = await import('child_process');
+      const util = await import('util');
+      const execFileAsync = util.promisify(execFile);
+      let devices: string[] = [];
+      try {
+        const r = await execFileAsync('lsblk', ['-dn', '-o', 'NAME,TYPE'], { timeout: 5000 });
+        devices = (r.stdout||'').split('\n').map(l=>l.trim().split(/\s+/)).filter(p=>p[1]==='disk').map(p=>'/dev/'+p[0]);
+      } catch {}
+      const results: any[] = [];
+      for (const dev of devices.slice(0,4)) {
+        try {
+          const r = await execFileAsync('smartctl', ['-H', '-A', '-i', dev], { timeout: 8000 });
+          results.push({ device: dev, ok: true, output: (r.stdout||'').slice(0,8000) });
+        } catch (e: any) {
+          // try with sudo -n
+          try {
+            const r2 = await execFileAsync('sudo', ['-n', 'smartctl', '-H', '-A', '-i', dev], { timeout: 8000 });
+            results.push({ device: dev, ok: true, output: (r2.stdout||'').slice(0,8000) });
+          } catch (e2: any) {
+            results.push({ device: dev, ok: false, error: (e2?.stderr||e2?.message||e?.stderr||e?.message||'indisponível').slice(0,500) });
+          }
+        }
+      }
+      return res.json({ devices: results, available: results.some(r=>r.ok), timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Atualizações do sistema e containers (best-effort)
+  app.get('/api/system/updates', requireAdminAuth, async (_req, res) => {
+    try {
+      const { execFile } = await import('child_process');
+      const util = await import('util');
+      const execFileAsync = util.promisify(execFile);
+      let apt: any = { available: false };
+      try {
+        // do not apt update (privileged/slow), read upgradable list
+        const r = await execFileAsync('apt', ['list', '--upgradable'], { timeout: 15000 });
+        const lines = (r.stdout||'').split('\n').filter(l=>l.includes('/'));
+        apt = { available: true, count: lines.length, packages: lines.slice(0,50) };
+      } catch (e: any) {
+        apt = { available: false, error: (e?.stderr||e?.message||'').slice(0,200) };
+      }
+      let dockerImages: any = { available: false };
+      try {
+        const r = await execFileAsync('docker', ['images', '--format', '{{json .}}'], { timeout: 8000 });
+        const imgs = (r.stdout||'').split('\n').filter(Boolean).map(l=>{try{return JSON.parse(l)}catch{return null}}).filter(Boolean);
+        dockerImages = { available: true, images: imgs.slice(0,50) };
+      } catch (e: any) {
+        dockerImages = { available: false, error: (e?.stderr||e?.message||'').slice(0,200) };
+      }
+      return res.json({ apt, dockerImages, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // AdGuard: listas de filtros e upstreams (relatórios/gestão básica)
+  app.get('/api/adguard/filters', requireUserOrAdminAuth, async (_req, res) => {
+    try {
+      const st = await getAdGuardFilteringStatus();
+      return res.json(st);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 
@@ -1068,6 +1263,8 @@ export function createApp() {
   app.post('/api/security/clear-history', requireAdminAuth, async (req, res) => {
     try {
       const result = await clearSecurityHistory();
+      const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'security_clear_history', target: 'security', details: 'Histórico de segurança limpo', status: 'info' });
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

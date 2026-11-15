@@ -17,16 +17,29 @@ export interface AuthSession {
   apiKey?: string;
   authType: 'basic' | 'bearer' | 'apikey';
   savedAt: string;
+  expiresAt?: number; // epoch ms, 10 min inactivity
 }
 
-/**
- * Lê a sessão salva priorizando sessionStorage (com migração de localStorage)
- */
-export function getStoredAuth(): AuthSession | null {
+const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+export function isSessionExpired(session: AuthSession | null): boolean {
+  if (!session) return true;
+  if (session.expiresAt && Date.now() > session.expiresAt) return true;
+  return false;
+}
+
+export function touchAuthSession(): void {
+  const s = getStoredAuthInternal();
+  if (s && s.authenticated) {
+    s.expiresAt = Date.now() + SESSION_TTL_MS;
+    try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s)); } catch {}
+  }
+}
+
+function getStoredAuthInternal(): AuthSession | null {
   try {
     let raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) {
-      // Migração suave de localStorage se existente
       raw = localStorage.getItem(AUTH_STORAGE_KEY);
       if (raw) {
         sessionStorage.setItem(AUTH_STORAGE_KEY, raw);
@@ -35,13 +48,22 @@ export function getStoredAuth(): AuthSession | null {
     }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.authenticated) {
-      return parsed;
-    }
-  } catch (e) {
-    console.error('Erro ao ler autenticação de sessão', e);
-  }
+    if (parsed && parsed.authenticated) return parsed;
+  } catch (e) {}
   return null;
+}
+
+/**
+ * Lê a sessão salva priorizando sessionStorage (com migração de localStorage)
+ */
+export function getStoredAuth(): AuthSession | null {
+  const s = getStoredAuthInternal();
+  if (!s) return null;
+  if (isSessionExpired(s)) {
+    clearAuthSession();
+    return null;
+  }
+  return s;
 }
 
 /**
@@ -49,6 +71,7 @@ export function getStoredAuth(): AuthSession | null {
  */
 export function saveAuthSession(session: AuthSession): void {
   try {
+    if (!session.expiresAt) session.expiresAt = Date.now() + SESSION_TTL_MS;
     sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
   } catch (e) {
     console.error('Erro ao salvar autenticação', e);
@@ -161,7 +184,8 @@ export async function verifyCredentialsWithServer(
       authHeader,
       apiKey: tokenKey,
       authType,
-      savedAt: new Date().toISOString()
+      savedAt: new Date().toISOString(),
+      expiresAt: Date.now() + SESSION_TTL_MS
     };
 
     saveAuthSession(session);
