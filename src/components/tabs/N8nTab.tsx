@@ -45,8 +45,11 @@ export const N8nTab: React.FC = () => {
   const n8nPanelUrl = React.useMemo(() => {
     if (typeof window === 'undefined') return 'http://127.0.0.1:5678/';
     const host = window.location.hostname || '127.0.0.1';
-    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
-    return `${window.location.protocol}//${formattedHost}:5678/`;
+    // Se o painel for acessado via IPv6 global, :5678 pode não responder nesse endereço; usa IPv4 LAN do servidor
+    if (host.includes(':')) {
+      return 'http://192.168.100.23:5678/';
+    }
+    return `${window.location.protocol}//${host}:5678/`;
   }, []);
 
   const loadData = async (manual = false) => {
