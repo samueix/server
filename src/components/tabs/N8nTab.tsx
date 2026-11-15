@@ -17,7 +17,8 @@ import {
   X,
   ShieldCheck,
   Terminal,
-  ArrowRight
+  ArrowRight,
+  PanelRightOpen
 } from 'lucide-react';
 import { N8nStatusResponse, N8nWorkflow } from '../../types';
 import { apiFetch } from '../../services/api';
@@ -39,6 +40,14 @@ export const N8nTab: React.FC = () => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isFetchingRef = useRef<boolean>(false);
+
+  const [showN8nPanel, setShowN8nPanel] = useState<boolean>(false);
+  const n8nPanelUrl = React.useMemo(() => {
+    if (typeof window === 'undefined') return 'http://127.0.0.1:5678/';
+    const host = window.location.hostname || '127.0.0.1';
+    const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+    return `${window.location.protocol}//${formattedHost}:5678/`;
+  }, []);
 
   const loadData = async (manual = false) => {
     if (isFetchingRef.current) return;
@@ -179,6 +188,18 @@ export const N8nTab: React.FC = () => {
 
         <div className="flex items-center gap-2.5 flex-wrap">
           <button
+            type="button"
+            onClick={() => setShowN8nPanel((v) => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${
+              showN8nPanel ? 'bg-[#FF5A36] text-white' : 'bg-[#FFF7E8] text-[#1A1A2E] hover:bg-[#FFEECB]'
+            }`}
+            title="Abrir/fechar painel nativo do n8n integrado"
+          >
+            <PanelRightOpen className="w-3.5 h-3.5" />
+            <span>{showN8nPanel ? 'Fechar Interface' : 'Abrir Interface'}</span>
+          </button>
+
+          <button
             onClick={() => setIsConfigModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
             title="Configurar chave da API do n8n"
@@ -188,7 +209,7 @@ export const N8nTab: React.FC = () => {
           </button>
 
           <a
-            href={n8nUrl}
+            href={n8nPanelUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#00A6FB] hover:bg-[#0095e0] text-white rounded-lg text-xs font-mono font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
@@ -296,6 +317,20 @@ export const N8nTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Painel nativo do n8n embutido na mesma aba */}
+      {showN8nPanel && (
+        <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#FFF7E8]">
+            <div className="flex items-center gap-2">
+              <GitBranch className="w-4 h-4 text-[#FF5A36]" />
+              <span className="font-title font-bold text-sm text-[#1A1A2E]">Interface do n8n (porta 5678)</span>
+            </div>
+            <a href={n8nPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+          </div>
+          <iframe src={n8nPanelUrl} title="n8n" className="w-full bg-white" style={{ height: '75vh', minHeight: '680px', border: '0' }} />
+        </div>
+      )}
 
       {/* Alerta de Configuração / Orientação para o Usuário */}
       {(!isOnline || !isApiConnected) && (
