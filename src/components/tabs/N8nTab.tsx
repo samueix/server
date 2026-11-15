@@ -42,15 +42,7 @@ export const N8nTab: React.FC = () => {
   const isFetchingRef = useRef<boolean>(false);
 
   const [showN8nPanel, setShowN8nPanel] = useState<boolean>(false);
-  const n8nPanelUrl = React.useMemo(() => {
-    if (typeof window === 'undefined') return 'http://127.0.0.1:5678/';
-    const host = window.location.hostname || '127.0.0.1';
-    // Se o painel for acessado via IPv6 global, :5678 pode não responder nesse endereço; usa IPv4 LAN do servidor
-    if (host.includes(':')) {
-      return 'http://192.168.100.23:5678/';
-    }
-    return `${window.location.protocol}//${host}:5678/`;
-  }, []);
+  const n8nPanelUrl = '/n8n/'; // mesmo host via proxy Nginx (evita X-Frame-Options/mixed-origin)
 
   const loadData = async (manual = false) => {
     if (isFetchingRef.current) return;
