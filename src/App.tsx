@@ -128,7 +128,7 @@ export default function App() {
   const [logoutNotice, setLogoutNotice] = useState<string | null>(null);
 
   const navigateToTab = useCallback((tab: NavigationTab) => {
-    navigateToTab(tab);
+    setActiveTab(tab);
     const target = TAB_PATHS[tab] || '/visao-geral';
     if (window.location.pathname !== target) {
       window.history.pushState({ tab }, '', target);
