@@ -53,6 +53,10 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const [clearMessage, setClearMessage] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<boolean>(false);
   const [showAdGuardPanel, setShowAdGuardPanel] = useState<boolean>(false);
+  const [domainInput, setDomainInput] = useState<string>('');
+  const [userRules, setUserRules] = useState<string[]>([]);
+  const [domainActionBusy, setDomainActionBusy] = useState<string | null>(null);
+  const [domainActionMsg, setDomainActionMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const adguardPanelUrl = (() => {
     if (typeof window === 'undefined') return ':8081/#';
     const host = window.location.hostname || '127.0.0.1';
@@ -99,6 +103,44 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   const abortControllerRef = useRef<AbortController | null>(null);
   const isPollingBusyRef = useRef<boolean>(false);
 
+  const loadFilteringStatus = async () => {
+    try {
+      const st = await adguardService.getFilteringStatus();
+      setUserRules(Array.isArray(st?.user_rules) ? st.user_rules.filter(Boolean) : []);
+    } catch {
+      // silencioso; mantém último estado conhecido
+    }
+  };
+
+  const isDomainBlockedByUserRule = (domain: string): boolean => {
+    if (!domain) return false;
+    const esc = domain.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blockRe = new RegExp(`^\\|\\|${esc}\\^`, 'i');
+    const allowRe = new RegExp(`^@@\\|\\|${esc}\\^`, 'i');
+    const hasAllow = userRules.some(r => allowRe.test(String(r).trim()));
+    if (hasAllow) return false;
+    return userRules.some(r => blockRe.test(String(r).trim()));
+  };
+
+  const handleDomainAction = async (domain: string, blocked: boolean) => {
+    const d = domain.trim();
+    if (!d) return;
+    setDomainActionBusy(`${blocked ? 'block' : 'allow'}:${d}`);
+    setDomainActionMsg(null);
+    try {
+      const res = await adguardService.setDomainBlocked(d, blocked);
+      setDomainActionMsg({ type: 'ok', text: res.message || (blocked ? 'Domínio bloqueado.' : 'Domínio desbloqueado/permitido.') });
+      if (Array.isArray(res.user_rules)) setUserRules(res.user_rules.filter(Boolean));
+      else await loadFilteringStatus();
+      fetchAdGuardData(true);
+    } catch (e: any) {
+      setDomainActionMsg({ type: 'err', text: e?.message || 'Falha ao aplicar regra no AdGuard.' });
+    } finally {
+      setDomainActionBusy(null);
+      setTimeout(() => setDomainActionMsg(null), 4500);
+    }
+  };
+
   const fetchAdGuardData = async (isManual = false) => {
     if (isPollingBusyRef.current) return;
     isPollingBusyRef.current = true;
@@ -128,15 +170,20 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
   };
 
   useEffect(() => {
-    fetchAdGuardData();
+    fetchAdGuardData(true);
+    loadFilteringStatus();
 
     // Polling centralizado a cada 3 segundos
     const interval = setInterval(() => {
       fetchAdGuardData(false);
     }, 3000);
+    const rulesInterval = setInterval(() => {
+      loadFilteringStatus();
+    }, 15000);
 
     return () => {
       clearInterval(interval);
+      clearInterval(rulesInterval);
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -334,7 +381,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         {/* Consultas Totais */}
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 flex flex-col justify-between">
           <div className="flex items-center justify-between text-[#4A4A68] text-xs font-bold uppercase tracking-wider">
-            <span>Consultas DNS (24h)</span>
+            <span>Consultas DNS (período)</span>
             <Globe className="w-4 h-4 text-[#00A6FB]" />
           </div>
           <div className="mt-3">
@@ -342,7 +389,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
               {isOnline && stats ? stats.num_dns_queries.toLocaleString('pt-BR') : '--'}
             </div>
             <div className="text-xs text-[#717188] mt-1 font-mono font-medium">
-              {isOnline && stats ? 'Consultas totais processadas' : 'Desconectado'}
+              {isOnline && stats ? 'Consultas totais no período configurado' : 'Desconectado'}
             </div>
           </div>
         </div>
@@ -391,13 +438,13 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b-2 border-[#1A1A2E]">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-[#12B76A]" />
-              <h3 className="text-sm font-black text-[#1A1A2E] font-title">Histórico de consultas DNS (últimas 24 horas)</h3>
+              <h3 className="text-sm font-black text-[#1A1A2E] font-title">Histórico de consultas DNS</h3>
               <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-[#FFF7E8] text-[#1A1A2E] border border-[#1A1A2E]">
-                Sobreposição em tempo real
+                Padrão: últimas 24h (filtro: hora/dia/7d)
               </span>
             </div>
             <div className="text-xs font-mono font-medium text-[#717188]">
-              Passe o mouse no gráfico para ver detalhes
+              Dados por hora (retenção 7 dias) — altere o filtro no gráfico
             </div>
           </div>
 
@@ -406,10 +453,59 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
             blockedData={chartQueriesData.blocked}
             totalData={chartQueriesData.total}
             height={130}
-            timeUnits="Últimas 24 horas"
+            defaultTimeRange="24h"
           />
         </div>
       )}
+
+      {/* Controle rápido: bloquear/desbloquear domínio (user rules do AdGuard) */}
+      <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Ban className="w-4 h-4 text-[#F04438]" />
+            <h3 className="text-sm font-black text-[#1A1A2E] font-title">Bloquear / Desbloquear domínio no AdGuard</h3>
+            <span className="text-[11px] font-mono font-bold text-[#717188]">User rules (DNS)</span>
+          </div>
+          <span className="text-[11px] font-mono text-[#717188]">Regras personalizadas: {userRules.length}</span>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={domainInput}
+            onChange={(e) => setDomainInput(e.target.value)}
+            placeholder="ex.: ads.exemplo.com"
+            className="flex-1 px-3 py-2 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs text-[#1A1A2E] font-bold placeholder-[#717188] focus:outline-none focus:ring-2 focus:ring-[#FF5A36] font-mono shadow-[2px_2px_0px_#1A1A2E]"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleDomainAction(domainInput, true)}
+              disabled={!isOnline || !domainInput.trim() || domainActionBusy !== null}
+              className="px-3 py-2 bg-[#F04438] hover:bg-[#D92D20] disabled:opacity-50 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-white transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none flex items-center gap-1.5"
+              title="Adicionar regra de bloqueio (||dominio^$important)"
+            >
+              <Ban className="w-3.5 h-3.5" />
+              <span>{domainActionBusy === `block:${domainInput.trim()}` ? 'Aplicando...' : 'Bloquear'}</span>
+            </button>
+            <button
+              onClick={() => handleDomainAction(domainInput, false)}
+              disabled={!isOnline || !domainInput.trim() || domainActionBusy !== null}
+              className="px-3 py-2 bg-[#12B76A] hover:bg-[#039855] disabled:opacity-50 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-white transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none flex items-center gap-1.5"
+              title="Adicionar regra de permissão/whitelist (@@||dominio^$important)"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>{domainActionBusy === `allow:${domainInput.trim()}` ? 'Aplicando...' : 'Desbloquear/Permitir'}</span>
+            </button>
+          </div>
+        </div>
+        <p className="text-[11px] text-[#4A4A68]">
+          Bloquear cria regra <code className="font-mono bg-[#FFF7E8] px-1 rounded border border-[#1A1A2E]">||domínio^$important</code>. Desbloquear/permitir cria exceção <code className="font-mono bg-[#FFF7E8] px-1 rounded border border-[#1A1A2E]">@@||domínio^$important</code> nas regras do usuário do AdGuard.
+        </p>
+        {domainActionMsg && (
+          <div className={`text-xs font-mono font-bold p-2.5 rounded-lg border-2 ${domainActionMsg.type === 'ok' ? 'bg-[#D1FADF] border-[#12B76A] text-[#027A48]' : 'bg-[#FEE4E2] border-[#F04438] text-[#B42318]'}`}>
+            {domainActionMsg.text}
+          </div>
+        )}
+      </div>
 
       {/* Navigation Sub-Tabs & Search Filter */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-3.5">
@@ -502,25 +598,29 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   {isOnline ? 'Nenhum bloqueio registrado com este filtro' : 'AdGuard Home offline'}
                 </div>
               ) : (
-                filteredBlockedDomains.slice(0, 15).map((item, idx) => (
-                  <div key={item.domain + idx} className="py-2.5 flex items-center justify-between text-xs hover:bg-[#FFF7E8]/60 transition px-1">
-                    <div className="flex items-center gap-2.5 min-w-0 pr-3">
+                filteredBlockedDomains.slice(0, 15).map((item, idx) => {
+                  const busy = domainActionBusy === `allow:${item.domain}` || domainActionBusy === `block:${item.domain}`;
+                  return (
+                  <div key={item.domain + idx} className="py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-[#FFF7E8]/60 transition px-1">
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2 flex-1">
                       <span className="w-5 text-right font-mono font-bold text-[#717188]">{idx + 1}.</span>
-                      <span className="font-mono font-bold text-[#1A1A2E] truncate">{item.domain}</span>
+                      <span className="font-mono font-bold text-[#1A1A2E] truncate" title={item.domain}>{item.domain}</span>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="w-16 bg-[#FFF7E8] border border-[#1A1A2E] rounded h-2 hidden sm:block overflow-hidden">
-                        <div 
-                          className="bg-[#F04438] h-full" 
-                          style={{ width: `${Math.min(100, item.percentage)}%` }} 
-                        />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="w-14 bg-[#FFF7E8] border border-[#1A1A2E] rounded h-2 hidden sm:block overflow-hidden">
+                        <div className="bg-[#F04438] h-full" style={{ width: `${Math.min(100, item.percentage)}%` }} />
                       </div>
-                      <span className="font-mono text-[#F04438] font-black w-12 text-right tabular-nums">
-                        {item.count}
-                      </span>
+                      <span className="font-mono text-[#F04438] font-black w-10 text-right tabular-nums">{item.count}</span>
+                      <button
+                        onClick={() => handleDomainAction(item.domain, false)}
+                        disabled={!isOnline || busy}
+                        className="px-2 py-1 rounded border border-[#12B76A] bg-[#D1FADF] text-[#027A48] font-mono font-bold text-[10px] hover:bg-[#A6F4C5] disabled:opacity-50"
+                        title="Permitir/desbloquear este domínio"
+                      >{busy ? '...' : 'Permitir'}</button>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -545,25 +645,27 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   {isOnline ? 'Nenhuma consulta registrada com este filtro' : 'AdGuard Home offline'}
                 </div>
               ) : (
-                filteredQueriedDomains.slice(0, 15).map((item, idx) => (
-                  <div key={item.domain + idx} className="py-2.5 flex items-center justify-between text-xs hover:bg-[#FFF7E8]/60 transition px-1">
-                    <div className="flex items-center gap-2.5 min-w-0 pr-3">
+                filteredQueriedDomains.slice(0, 15).map((item, idx) => {
+                  const blockedByRule = isDomainBlockedByUserRule(item.domain);
+                  const busy = domainActionBusy === `allow:${item.domain}` || domainActionBusy === `block:${item.domain}`;
+                  return (
+                  <div key={item.domain + idx} className="py-2.5 flex items-center justify-between gap-2 text-xs hover:bg-[#FFF7E8]/60 transition px-1">
+                    <div className="flex items-center gap-2.5 min-w-0 pr-2 flex-1">
                       <span className="w-5 text-right font-mono font-bold text-[#717188]">{idx + 1}.</span>
-                      <span className="font-mono font-bold text-[#1A1A2E] truncate">{item.domain}</span>
+                      <span className="font-mono font-bold text-[#1A1A2E] truncate" title={item.domain}>{item.domain}</span>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="w-16 bg-[#FFF7E8] border border-[#1A1A2E] rounded h-2 hidden sm:block overflow-hidden">
-                        <div 
-                          className="bg-[#00A6FB] h-full" 
-                          style={{ width: `${Math.min(100, item.percentage)}%` }} 
-                        />
-                      </div>
-                      <span className="font-mono text-[#00A6FB] font-black w-12 text-right tabular-nums">
-                        {item.count}
-                      </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-[#00A6FB] font-black w-10 text-right tabular-nums">{item.count}</span>
+                      <button
+                        onClick={() => handleDomainAction(item.domain, !blockedByRule)}
+                        disabled={!isOnline || busy}
+                        className={`px-2 py-1 rounded border font-mono font-bold text-[10px] disabled:opacity-50 ${blockedByRule ? 'border-[#12B76A] bg-[#D1FADF] text-[#027A48] hover:bg-[#A6F4C5]' : 'border-[#F04438] bg-[#FEE4E2] text-[#B42318] hover:bg-[#FECDCA]'}`}
+                        title={blockedByRule ? 'Remover bloqueio/permitir domínio' : 'Bloquear domínio'}
+                      >{busy ? '...' : blockedByRule ? 'Permitir' : 'Bloquear'}</button>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -586,24 +688,32 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   <th className="py-2.5 px-3.5">Domínio</th>
                   <th className="py-2.5 px-3.5 text-right">Consultas</th>
                   <th className="py-2.5 px-3.5 text-right">% do total</th>
+                  <th className="py-2.5 px-3.5 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E2DFD8]">
                 {filteredQueriedDomains.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 text-center text-[#717188] font-bold">
+                    <td colSpan={5} className="py-8 text-center text-[#717188] font-bold">
                       {isOnline ? 'Nenhum domínio encontrado' : 'AdGuard Home offline'}
                     </td>
                   </tr>
                 ) : (
-                  filteredQueriedDomains.map((item, idx) => (
+                  filteredQueriedDomains.map((item, idx) => {
+                    const blockedByRule = isDomainBlockedByUserRule(item.domain);
+                    const busy = domainActionBusy === `allow:${item.domain}` || domainActionBusy === `block:${item.domain}`;
+                    return (
                     <tr key={item.domain + idx} className="hover:bg-[#FFF7E8]/70 transition">
                       <td className="py-2.5 px-3.5 text-[#717188] font-bold">{idx + 1}</td>
                       <td className="py-2.5 px-3.5 text-[#1A1A2E] font-black">{item.domain}</td>
                       <td className="py-2.5 px-3.5 text-right text-[#00A6FB] font-black tabular-nums">{item.count.toLocaleString('pt-BR')}</td>
                       <td className="py-2.5 px-3.5 text-right text-[#717188] font-bold tabular-nums">{item.percentage}%</td>
+                      <td className="py-2.5 px-3.5 text-right">
+                        <button onClick={() => handleDomainAction(item.domain, !blockedByRule)} disabled={!isOnline || busy} className={`px-2.5 py-1 rounded border-2 font-mono font-bold text-[11px] disabled:opacity-50 ${blockedByRule ? 'border-[#12B76A] bg-[#D1FADF] text-[#027A48]' : 'border-[#F04438] bg-[#FEE4E2] text-[#B42318]'}`}>{busy ? '...' : blockedByRule ? 'Permitir' : 'Bloquear'}</button>
+                      </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -627,24 +737,31 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   <th className="py-2.5 px-3.5">Domínio bloqueado</th>
                   <th className="py-2.5 px-3.5 text-right">Bloqueios</th>
                   <th className="py-2.5 px-3.5 text-right">% dos bloqueios</th>
+                  <th className="py-2.5 px-3.5 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E2DFD8]">
                 {filteredBlockedDomains.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-8 text-center text-[#717188] font-bold">
+                    <td colSpan={5} className="py-8 text-center text-[#717188] font-bold">
                       {isOnline ? 'Nenhum domínio bloqueado' : 'AdGuard Home offline'}
                     </td>
                   </tr>
                 ) : (
-                  filteredBlockedDomains.map((item, idx) => (
+                  filteredBlockedDomains.map((item, idx) => {
+                    const busy = domainActionBusy === `allow:${item.domain}` || domainActionBusy === `block:${item.domain}`;
+                    return (
                     <tr key={item.domain + idx} className="hover:bg-[#FFF7E8]/70 transition">
                       <td className="py-2.5 px-3.5 text-[#717188] font-bold">{idx + 1}</td>
                       <td className="py-2.5 px-3.5 text-[#1A1A2E] font-black">{item.domain}</td>
                       <td className="py-2.5 px-3.5 text-right text-[#F04438] font-black tabular-nums">{item.count.toLocaleString('pt-BR')}</td>
                       <td className="py-2.5 px-3.5 text-right text-[#717188] font-bold tabular-nums">{item.percentage}%</td>
+                      <td className="py-2.5 px-3.5 text-right">
+                        <button onClick={() => handleDomainAction(item.domain, false)} disabled={!isOnline || busy} className="px-2.5 py-1 rounded border-2 border-[#12B76A] bg-[#D1FADF] text-[#027A48] font-mono font-bold text-[11px] hover:bg-[#A6F4C5] disabled:opacity-50">{busy ? '...' : 'Permitir'}</button>
+                      </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -755,12 +872,13 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                   <th className="py-2.5 px-3.5">Status</th>
                   <th className="py-2.5 px-3.5">Regra / motivo</th>
                   <th className="py-2.5 px-3.5 text-right">Latência</th>
+                  <th className="py-2.5 px-3.5 text-right">Ação</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E2DFD8]">
                 {filteredLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-[#717188] font-bold">
+                    <td colSpan={8} className="py-8 text-center text-[#717188] font-bold">
                       {isOnline ? 'Nenhum registro de consulta disponível no momento' : 'AdGuard Home offline'}
                     </td>
                   </tr>
@@ -812,6 +930,20 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
                               {item.elapsed_ms} ms
                             </span>
                           </div>
+                        </td>
+                        <td className="py-2.5 px-3.5 text-right">
+                          {(() => {
+                            const blockedByRule = isDomainBlockedByUserRule(item.domain);
+                            const busy = domainActionBusy === `allow:${item.domain}` || domainActionBusy === `block:${item.domain}`;
+                            return (
+                              <button
+                                onClick={() => handleDomainAction(item.domain, !blockedByRule)}
+                                disabled={!isOnline || busy}
+                                className={`px-2 py-1 rounded border font-mono font-bold text-[10px] disabled:opacity-50 ${blockedByRule ? 'border-[#12B76A] bg-[#D1FADF] text-[#027A48]' : 'border-[#F04438] bg-[#FEE4E2] text-[#B42318]'}`}
+                                title={blockedByRule ? 'Permitir domínio' : 'Bloquear domínio'}
+                              >{busy ? '...' : blockedByRule ? 'Permitir' : 'Bloquear'}</button>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

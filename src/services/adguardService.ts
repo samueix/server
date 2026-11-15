@@ -289,6 +289,32 @@ export const adguardService = {
     return res.json();
   },
 
+  async getFilteringStatus(): Promise<{ enabled?: boolean; user_rules: string[] }> {
+    const res = await fetch('/api/adguard/filtering/status', {
+      headers: { 'Accept': 'application/json', ...getAuthHeaders() }
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(txt || `Falha ao obter regras do AdGuard (HTTP ${res.status})`);
+    }
+    return res.json();
+  },
+
+  async setDomainBlocked(domain: string, blocked: boolean): Promise<{ success: boolean; message?: string; user_rules?: string[] }> {
+    const headers = { 'Content-Type': 'application/json', ...getAuthHeaders() };
+    const res = await fetch('/api/adguard/filtering/block', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ domain, blocked })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Falha ao atualizar bloqueio do domínio (HTTP ${res.status})`);
+    }
+    setTimeout(() => { adguardDirectClient.fetchRealtimeCycle(); }, 400);
+    return data;
+  },
+
   async fetchFullAdGuard(_signal?: AbortSignal): Promise<AdGuardFullTelemetry> {
     // Garante que um ciclo recente seja disparado se o cliente estiver desatualizado
     const lastUpdate = adguardDirectClient.getLastRealUpdate();

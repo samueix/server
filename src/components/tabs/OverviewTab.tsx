@@ -69,6 +69,14 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   const ramUsed = server?.memoria?.usada_gb ?? status?.memoria?.usada_gb ?? 0;
   const ramAvail = server?.memoria?.disponivel_gb ?? status?.memoria?.disponivel_gb ?? 0;
   const ramPercent = server?.memoria?.uso_percentual ?? status?.memoria?.uso_percentual ?? 0;
+  const swapTotalGb = server?.memoria?.swap_total_gb ?? (server as any)?.memoria?.swap?.total_gb ?? 0;
+  const swapUsedGb = server?.memoria?.swap_usada_gb ?? (server as any)?.memoria?.swap?.used_gb ?? 0;
+  const swapPercent = swapTotalGb > 0 ? Math.round((swapUsedGb / swapTotalGb) * 1000) / 10 : 0;
+  const swapLabel = !isConnected
+    ? 'Indisponível'
+    : swapTotalGb > 0
+      ? `${swapUsedGb.toFixed(2)} / ${swapTotalGb.toFixed(2)} GB (${swapPercent.toFixed(1)}%)`
+      : 'Desativado (0.00 GB)';
 
   const diskTotal = server?.disco?.total_gb ?? status?.disco?.total_gb ?? 0;
   const diskUsed = server?.disco?.usado_gb ?? status?.disco?.usado_gb ?? 0;
@@ -265,7 +273,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               </div>
               <div className="text-xs text-[#4A4A68] bg-[#FFF7E8] px-3 py-1.5 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
                 <span className="font-sans font-bold mr-1.5">Swap:</span>
-                <span className="font-mono font-bold text-[#1A1A2E]">{isConnected ? 'Ativo (0.00 GB)' : 'Inativo'}</span>
+                <span className="font-mono font-bold text-[#1A1A2E]">{swapLabel}</span>
               </div>
             </div>
 

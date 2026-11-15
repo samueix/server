@@ -140,6 +140,10 @@ export function recordPanelFailedLogin(ip: string, user: string) {
   }
 }
 
+export function getSecurityHistoryClearedAt(): Date | null {
+  return historyClearedAt;
+}
+
 export async function clearSecurityHistory() {
   panelFailedAttempts = [];
   historyClearedAt = new Date();
@@ -151,10 +155,18 @@ export async function clearSecurityHistory() {
   try {
     await execAsync('sudo truncate -s 0 /var/log/btmp 2>/dev/null || true');
   } catch {}
+  try {
+    await execAsync('sudo truncate -s 0 /var/log/wtmp 2>/dev/null || true');
+  } catch {}
+  // Rotaciona journal para reduzir reingestão imediata (melhor esforço)
+  try {
+    await execAsync('sudo journalctl --rotate 2>/dev/null || true');
+    await execAsync('sudo journalctl --vacuum-time=1s 2>/dev/null || true');
+  } catch {}
 
   return { 
     success: true, 
-    message: 'Histórico de tentativas e logs de autenticação zerados com sucesso!' 
+    message: 'Histórico limpo (memória e logs locais/journal em melhor esforço). Novos eventos voltam a aparecer conforme ocorrerem.' 
   };
 }
 
@@ -263,7 +275,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
   } catch {}
 
   // 1. Ingestão robusta de logs do SSH com detecção detalhada do motivo e hora exata
-  if (!historyClearedAt || (now.getTime() - historyClearedAt.getTime() > 10000)) {
+  {
     try {
       let authLogContent = '';
       
@@ -366,6 +378,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
             // Horário do evento para o gráfico e auditoria
             let incidentTime = new Date().toLocaleTimeString('pt-BR');
             let incidentHour = `${String(new Date().getHours()).padStart(2, '0')}:00`;
+            let incidentDate: Date | null = null;
             const dateMatch = line.match(/^([A-Za-z]{3}\s+\d+\s+\d{2}:\d{2}:\d{2})/);
             const isoMatch = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/);
 
@@ -373,10 +386,25 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
               incidentTime = dateMatch[1];
               const hMatch = dateMatch[1].match(/(\d{2}):/);
               if (hMatch) incidentHour = `${hMatch[1]}:00`;
+              // Ex: "Oct  5 05:30:12" - assume ano atual
+              const parsed = new Date(`${dateMatch[1]} ${now.getFullYear()}`);
+              if (!isNaN(parsed.getTime())) incidentDate = parsed;
             } else if (isoMatch) {
               const d = new Date(isoMatch[1]);
-              incidentTime = `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR')}`;
-              incidentHour = `${String(d.getHours()).padStart(2, '0')}:00`;
+              if (!isNaN(d.getTime())) {
+                incidentDate = d;
+                incidentTime = `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR')}`;
+                incidentHour = `${String(d.getHours()).padStart(2, '0')}:00`;
+              }
+            }
+
+            // Respeita limpeza de histórico: ignora eventos anteriores ao clear
+            if (historyClearedAt && incidentDate && incidentDate.getTime() <= historyClearedAt.getTime()) {
+              continue;
+            }
+            if (historyClearedAt && !incidentDate && (now.getTime() - historyClearedAt.getTime() < 300000)) {
+              // Sem timestamp confiável logo após limpar: evita reexibir lixo antigo
+              continue;
             }
 
             if (hourlyBuckets[incidentHour] !== undefined) {
@@ -465,6 +493,7 @@ export async function getSecurityAttackStatus(): Promise<SecurityStatusResponse>
 
   // 3. Incorporar tentativas registradas no painel
   for (const item of panelFailedAttempts) {
+    if (historyClearedAt && item.timestamp <= historyClearedAt) continue;
     if (item.timestamp >= oneDayAgo) {
       totalFailedAttempts24h++;
       if (item.timestamp >= oneHourAgo) {

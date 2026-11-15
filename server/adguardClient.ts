@@ -279,3 +279,110 @@ export async function fetchAdGuardQueryLog(limit: number = 30) {
 
   return [];
 }
+
+
+export async function getAdGuardFilteringStatus() {
+  const result = await makeAdGuardRequest('/control/filtering/status');
+  if (!result.ok) {
+    throw new Error(result.error || 'Falha ao obter status de filtragem do AdGuard');
+  }
+  const data = result.data || {};
+  return {
+    enabled: data.enabled ?? true,
+    interval: data.interval ?? 24,
+    filters: Array.isArray(data.filters) ? data.filters : [],
+    user_rules: Array.isArray(data.user_rules) ? data.user_rules : [],
+    whitelist_filters: Array.isArray(data.whitelist_filters) ? data.whitelist_filters : []
+  };
+}
+
+function normalizeAdGuardDomain(input: string): string {
+  let d = String(input || '').trim().toLowerCase();
+  if (!d) throw new Error('Domínio inválido');
+  d = d.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+  d = d.replace(/^\*\./, '').replace(/^\.+|\.+$/g, '');
+  if (!d || !/^[a-z0-9.-]+$/.test(d) || !d.includes('.')) {
+    throw new Error('Domínio inválido. Use por exemplo: ads.exemplo.com');
+  }
+  return d;
+}
+
+function adGuardBlockRule(domain: string): string {
+  return `||${domain}^$important`;
+}
+
+function adGuardAllowRule(domain: string): string {
+  return `@@||${domain}^$important`;
+}
+
+export async function setAdGuardUserRules(rules: string[]) {
+  const cleaned = (rules || []).map(r => String(r)).filter(r => r.trim() !== '');
+  // remove duplicatas exatas preservando ordem
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const r of cleaned) {
+    if (!seen.has(r)) { seen.add(r); unique.push(r); }
+  }
+  const result = await makeAdGuardRequest('/control/filtering/set_rules', 'POST', { rules: unique });
+  if (!result.ok) {
+    throw new Error(result.error || 'Falha ao salvar regras de usuário do AdGuard');
+  }
+  return { success: true, user_rules: unique };
+}
+
+export async function setAdGuardDomainBlocked(domainInput: string, blocked: boolean) {
+  const domain = normalizeAdGuardDomain(domainInput);
+  const status = await getAdGuardFilteringStatus();
+  const current: string[] = Array.isArray(status.user_rules) ? status.user_rules.filter(Boolean) : [];
+  const blockRule = adGuardBlockRule(domain);
+  const allowRule = adGuardAllowRule(domain);
+
+  // remove regras equivalentes existentes para o domínio (bloqueio/allow simples)
+  const domainRe = domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`^\\|\\|${domainRe}\\^`, 'i'),
+    new RegExp(`^@@\\|\\|${domainRe}\\^`, 'i'),
+    new RegExp(`^${domainRe}$`, 'i'),
+  ];
+  let next = current.filter(r => !patterns.some(p => p.test(r.trim())));
+
+  if (blocked) {
+    next.push(blockRule);
+  } else {
+    next.push(allowRule);
+  }
+
+  await setAdGuardUserRules(next);
+  const after = await getAdGuardFilteringStatus();
+  return {
+    success: true,
+    domain,
+    blocked,
+    rule: blocked ? blockRule : allowRule,
+    user_rules: Array.isArray(after.user_rules) ? after.user_rules : next,
+    message: blocked
+      ? `Domínio "${domain}" bloqueado com sucesso no AdGuard (user rules).`
+      : `Domínio "${domain}" desbloqueado/permitido com sucesso no AdGuard (user rules).`
+  };
+}
+
+export async function removeAdGuardDomainRule(domainInput: string) {
+  const domain = normalizeAdGuardDomain(domainInput);
+  const status = await getAdGuardFilteringStatus();
+  const current: string[] = Array.isArray(status.user_rules) ? status.user_rules.filter(Boolean) : [];
+  const domainRe = domain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [
+    new RegExp(`^\\|\\|${domainRe}\\^`, 'i'),
+    new RegExp(`^@@\\|\\|${domainRe}\\^`, 'i'),
+    new RegExp(`^${domainRe}$`, 'i'),
+  ];
+  const next = current.filter(r => !patterns.some(p => p.test(r.trim())));
+  await setAdGuardUserRules(next);
+  const after = await getAdGuardFilteringStatus();
+  return {
+    success: true,
+    domain,
+    user_rules: Array.isArray(after.user_rules) ? after.user_rules : next,
+    message: `Regras personalizadas para "${domain}" removidas.`
+  };
+}

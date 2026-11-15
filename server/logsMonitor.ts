@@ -191,16 +191,9 @@ export function getSystemLogs(source: string = 'syslog', linesCount: number = 50
     }
 
     if (rawLines.length === 0) {
-      rawLines = [
-        `Oct 05 05:10:00 ubuntu-server AdGuardHome[1020]: [info] AdGuard Home version v0.107.50 is starting`,
-        `Oct 05 05:10:01 ubuntu-server AdGuardHome[1020]: [info] Web interface listening on http://0.0.0.0:8081`,
-        `Oct 05 05:10:01 ubuntu-server AdGuardHome[1020]: [info] DNS server listening on 0.0.0.0:53 (UDP/TCP)`,
-        `Oct 05 05:10:02 ubuntu-server AdGuardHome[1020]: [info] 4 filter lists loaded with 284,120 rules`,
-        `Oct 05 05:10:05 ubuntu-server AdGuardHome[1020]: [info] Upstream servers: 1.1.1.1, 8.8.8.8, https://dns.cloudflare.com/dns-query`,
-        `Oct 05 05:15:20 ubuntu-server AdGuardHome[1020]: [info] 192.168.100.45: query 'google.com' allowed (type A)`,
-        `Oct 05 05:16:12 ubuntu-server AdGuardHome[1020]: [info] 192.168.100.82: query 'telemetry.app.net' blocked by filter rule`,
-        `Oct 05 05:22:30 ubuntu-server AdGuardHome[1020]: [info] Statistics synchronized with NOC Panel API`
-      ];
+      // Sem dados reais: não inventa logs. UI exibirá estado vazio/hint.
+      rawLines = [];
+      fileExists = false;
     }
   } else if (source === 'auth') {
     sourcePath = '/var/log/auth.log';

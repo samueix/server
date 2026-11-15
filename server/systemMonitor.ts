@@ -168,8 +168,8 @@ export function getMemoryInfo() {
     : Math.max(0, Math.round((availableGb - freeGb) * 100) / 100);
   const usagePercent = Math.round((usedBytes / totalBytes) * 1000) / 10;
 
-  const swapTotalGb = swapTotalBytes > 0 ? Math.round((swapTotalBytes / (1024 ** 3)) * 100) / 100 : 2.0;
-  const swapFreeGb = swapFreeBytes > 0 ? Math.round((swapFreeBytes / (1024 ** 3)) * 100) / 100 : 2.0;
+  const swapTotalGb = Math.round((swapTotalBytes / (1024 ** 3)) * 100) / 100;
+  const swapFreeGb = Math.round((swapFreeBytes / (1024 ** 3)) * 100) / 100;
   const swapUsedGb = Math.max(0, Math.round((swapTotalGb - swapFreeGb) * 100) / 100);
   const swapPercent = swapTotalGb > 0 ? Math.round((swapUsedGb / swapTotalGb) * 1000) / 10 : 0;
 

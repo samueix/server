@@ -577,13 +577,24 @@ export const LogsTab: React.FC = () => {
               <span className="font-bold">Conectando ao daemon de logs do Ubuntu ({selectedSource})...</span>
             </div>
           ) : filteredLogs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-[#717188] gap-2">
+            <div className="flex flex-col items-center justify-center py-20 text-[#717188] gap-2 px-4 text-center">
               <SlidersHorizontal className="w-6 h-6 text-[#717188]" />
               <span className="text-[#1A1A2E] font-black font-title">Nenhum registro encontrado</span>
-              {searchTerm && (
+              {searchTerm ? (
                 <span className="text-xs text-[#717188]">
                   Nenhuma linha corresponde ao termo de busca "{searchTerm}".
                 </span>
+              ) : (
+                <>
+                  <span className="text-xs text-[#717188] font-mono">
+                    Fonte: {logsData?.source_path || selectedSource} {logsData?.file_exists ? '(disponível)' : '(fallback/journal)'}
+                  </span>
+                  <span className="text-xs text-[#4A4A68] max-w-xl">
+                    {selectedSource === 'adguard'
+                      ? 'Sem linhas recentes retornadas do AdGuard Home. Verifique se o serviço está ativo e gerando logs (journalctl -u AdGuardHome.service) ou se o arquivo de log existe.'
+                      : 'A fonte não retornou linhas no momento. Tente atualizar, aumentar o número de linhas ou verificar o serviço.'}
+                  </span>
+                </>
               )}
             </div>
           ) : (
@@ -626,7 +637,7 @@ export const LogsTab: React.FC = () => {
 
                     {/* Message / Raw text */}
                     <span className="break-all whitespace-pre-wrap flex-1 font-medium">
-                      {entry.message}
+                      {entry.message || entry.raw}
                     </span>
                   </div>
                 );

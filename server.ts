@@ -25,7 +25,10 @@ import {
   updateAdGuardConfig,
   updateAdGuardRawStats,
   clearAdGuardHistory,
-  getAdGuardClearCommand
+  getAdGuardClearCommand,
+  getAdGuardFilteringStatus,
+  setAdGuardDomainBlocked,
+  setAdGuardUserRules
 } from './server/adguardClient.js';
 import { 
   getAnalyzedDomain, 
@@ -414,6 +417,39 @@ export function createApp() {
   // Retornar o comando de shell para limpar histórico no Ubuntu
   app.get('/api/adguard/clear-command', (req, res) => {
     res.json({ shellCommand: getAdGuardClearCommand() });
+  });
+
+  // Filtragem AdGuard: listar regras de usuário e bloquear/desbloquear domínio (admin)
+  app.get('/api/adguard/filtering/status', requireUserOrAdminAuth, async (req, res) => {
+    try {
+      const data = await getAdGuardFilteringStatus();
+      return res.json(data);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/adguard/filtering/block', requireAdminAuth, async (req, res) => {
+    try {
+      const domain = String(req.body?.domain || '').trim();
+      const blocked = req.body?.blocked !== false;
+      if (!domain) return res.status(400).json({ error: 'Domínio é obrigatório.' });
+      const result = await setAdGuardDomainBlocked(domain, blocked);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/adguard/filtering/set-rules', requireAdminAuth, async (req, res) => {
+    try {
+      const rules = Array.isArray(req.body?.rules) ? req.body.rules : null;
+      if (!rules) return res.status(400).json({ error: 'Lista de regras inválida.' });
+      const result = await setAdGuardUserRules(rules);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
   });
 
   // Rate limiting de tentativas de login por IP (5 tentativas incorretas em 5 minutos -> HTTP 429)
@@ -1031,7 +1067,7 @@ export function createApp() {
   // Limpar histórico de auditoria e falhas
   app.post('/api/security/clear-history', requireAdminAuth, async (req, res) => {
     try {
-      const result = clearSecurityHistory();
+      const result = await clearSecurityHistory();
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
