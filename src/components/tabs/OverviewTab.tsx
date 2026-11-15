@@ -45,9 +45,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   serverIp = SERVER_IPV4
 }) => {
   const hostname = server?.sistema?.hostname || server?.servidor || status?.servidor || (isConnected ? 'samuelserver' : 'Servidor');
-  const osName = server?.sistema?.nome || (isConnected ? 'Ubuntu Linux' : 'Não disponível');
-  const osVersion = server?.sistema?.versao || (isConnected ? '24.04 LTS' : 'Não disponível');
-  const kernel = isConnected ? (server?.sistema?.versao?.includes('Linux') ? server.sistema.versao : 'Linux 6.8.0-generic') : 'Não disponível';
+  const osName = server?.sistema?.nome || (isConnected ? 'Linux' : 'Não disponível');
+  const osVersion = server?.sistema?.versao || (isConnected ? '—' : 'Não disponível');
+  const kernel = server?.sistema?.kernel || (isConnected ? '—' : 'Não disponível');
   
   const currentIpv4 = network?.primaryIp || serverIp || SERVER_IPV4;
   const currentIpv6 = network?.primaryIpv6 || (network?.interfaces?.find(i => i.ipv6)?.ipv6) || SERVER_IPV6;

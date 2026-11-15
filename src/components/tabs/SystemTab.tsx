@@ -32,10 +32,10 @@ export const SystemTab: React.FC<SystemTabProps> = ({
   onOpenCodeViewer
 }) => {
   const hostname = server?.sistema?.hostname || server?.servidor || 'samuelserver';
-  const osName = server?.sistema?.nome || (isConnected ? 'Ubuntu Linux' : 'Não disponível');
-  const osVersion = server?.sistema?.versao || (isConnected ? '24.04 LTS (Noble Numbat)' : 'Não disponível');
-  const arch = server?.sistema?.arquitetura || (isConnected ? 'x86_64 (64-bit)' : 'Não disponível');
-  const kernel = isConnected ? (server?.sistema?.versao?.includes('Linux') ? server.sistema.versao : 'Linux 6.8.0-generic') : 'Não disponível';
+  const osName = server?.sistema?.nome || (isConnected ? 'Linux' : 'Não disponível');
+  const osVersion = server?.sistema?.versao || (isConnected ? '—' : 'Não disponível');
+  const arch = server?.sistema?.arquitetura || (isConnected ? 'x86_64' : 'Não disponível');
+  const kernel = server?.sistema?.kernel || (isConnected ? '—' : 'Não disponível');
 
   const cpuPhysical = server?.cpu?.nucleos_fisicos || (isConnected ? 2 : 0);
   const cpuLogical = server?.cpu?.nucleos_logicos || (isConnected ? 4 : 0);
