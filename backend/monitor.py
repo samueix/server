@@ -101,31 +101,155 @@ def get_disk_info():
     }
 
 def get_temperature_info():
-    sensores = []
-    main_temp = None
+    import re, os
 
+    sensores = []
+    cores = []
+
+    # 1) psutil (quando disponível)
     if hasattr(psutil, "sensors_temperatures"):
         try:
-            temps = psutil.sensors_temperatures()
+            temps = psutil.sensors_temperatures() or {}
             for name, entries in temps.items():
                 for entry in entries:
-                    sensor_item = {
+                    if not entry or entry.current is None:
+                        continue
+                    label = entry.label or name
+                    lower = str(label).lower()
+                    is_core = "core" in lower
+                    m = re.search(r"core\s*(\d+)", lower)
+                    item = {
                         "sensor": name,
-                        "nome": entry.label or name,
-                        "temperatura_c": round(entry.current, 1) if entry.current else 0,
-                        "critica": entry.critical or 85,
-                        "alta": entry.high or 75
+                        "nome": label,
+                        "temperatura_c": round(float(entry.current), 1),
+                        "maxima_c": round(float(entry.high), 1) if entry.high else None,
+                        "critica_c": round(float(entry.critical), 1) if entry.critical else None,
+                        "isCore": is_core,
                     }
-                    sensores.append(sensor_item)
-                    if main_temp is None and entry.current:
-                        main_temp = round(entry.current, 1)
+                    if m:
+                        item["coreIndex"] = int(m.group(1))
+                    sensores.append(item)
+                    if is_core:
+                        cores.append(item)
         except Exception:
             pass
+
+    # 2) Fallback via sysfs hwmon (mais confiável em alguns hosts)
+    if not sensores:
+        try:
+            base_hw = "/sys/class/hwmon"
+            if os.path.isdir(base_hw):
+                for hw in os.listdir(base_hw):
+                    base = os.path.join(base_hw, hw)
+                    try:
+                        with open(os.path.join(base, "name")) as f:
+                            chip = f.read().strip() or hw
+                    except Exception:
+                        chip = hw
+                    try:
+                        files = os.listdir(base)
+                    except Exception:
+                        continue
+                    for fn in files:
+                        if not fn.startswith("temp") or not fn.endswith("_input"):
+                            continue
+                        tid = fn.replace("_input", "")
+                        try:
+                            with open(os.path.join(base, fn)) as f:
+                                raw = f.read().strip()
+                            val = float(raw)
+                            temp_c = round((val / 1000.0) if val > 200 else val, 1)
+                        except Exception:
+                            continue
+                        if temp_c <= 0 or temp_c >= 130:
+                            continue
+                        label = f"{chip} {tid}"
+                        try:
+                            lf = os.path.join(base, f"{tid}_label")
+                            if os.path.exists(lf):
+                                with open(lf) as f:
+                                    label = f.read().strip() or label
+                        except Exception:
+                            pass
+                        def read_t(suffix):
+                            p = os.path.join(base, f"{tid}_{suffix}")
+                            if not os.path.exists(p):
+                                return None
+                            try:
+                                with open(p) as f:
+                                    v = float(f.read().strip())
+                                return round((v / 1000.0) if v > 200 else v, 1)
+                            except Exception:
+                                return None
+                        lower = label.lower()
+                        is_core = "core" in lower
+                        m = re.search(r"core\s*(\d+)", lower)
+                        item = {
+                            "sensor": chip,
+                            "nome": label,
+                            "temperatura_c": temp_c,
+                            "maxima_c": read_t("max"),
+                            "critica_c": read_t("crit"),
+                            "isCore": is_core,
+                        }
+                        if m:
+                            item["coreIndex"] = int(m.group(1))
+                        sensores.append(item)
+                        if is_core:
+                            cores.append(item)
+        except Exception:
+            pass
+
+    # 3) Complemento thermal_zone
+    try:
+        tz_base = "/sys/class/thermal"
+        if os.path.isdir(tz_base):
+            existing = {(s.get("nome"), s.get("temperatura_c")) for s in sensores}
+            for tz in os.listdir(tz_base):
+                if not tz.startswith("thermal_zone"):
+                    continue
+                base = os.path.join(tz_base, tz)
+                try:
+                    with open(os.path.join(base, "type")) as f:
+                        tname = f.read().strip() or tz
+                    with open(os.path.join(base, "temp")) as f:
+                        raw = float(f.read().strip())
+                    temp_c = round((raw / 1000.0) if raw > 200 else raw, 1)
+                except Exception:
+                    continue
+                if temp_c <= 0 or temp_c >= 130:
+                    continue
+                if (tname, temp_c) in existing:
+                    continue
+                sensores.append({
+                    "sensor": "thermal_zone",
+                    "nome": tname,
+                    "temperatura_c": temp_c,
+                    "isCore": False,
+                })
+    except Exception:
+        pass
+
+    # escolher temperatura principal (CPU package preferencial)
+    def pick_main():
+        if not sensores:
+            return None
+        def find(rx):
+            for s in sensores:
+                if re.search(rx, (s.get("nome") or "").lower()):
+                    return s
+            return None
+        return (find(r"package id") or find(r"x86_pkg_temp") or find(r"tctl") or
+                find(r"cpu") or (cores[0] if cores else None) or sensores[0])
+
+    main = pick_main()
+    main_temp = main.get("temperatura_c") if main else None
 
     return {
         "disponivel": len(sensores) > 0,
         "temperatura_c": main_temp,
-        "sensores": sensores
+        "sensores": sensores,
+        "cores": cores,
     }
 
 def get_network_info():

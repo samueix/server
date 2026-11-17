@@ -212,83 +212,127 @@ export function getMemoryInfo() {
 export function getTemperatureInfo() {
   const sensores: any[] = [];
   const cores: any[] = [];
+  const added = new Set<string>();
 
-  // Tenta ler sensores térmicos reais em /sys/class/thermal ou /sys/class/hwmon
-  let realSensorsFound = false;
+  const toTemp = (raw: string | number) => {
+    const n = typeof raw === 'number' ? raw : parseInt(String(raw).trim(), 10);
+    if (!Number.isFinite(n)) return null;
+    // sysfs costuma expor millicelsius
+    const c = n > 200 ? n / 1000 : n;
+    if (c <= 0 || c >= 130) return null;
+    return Math.round(c * 10) / 10;
+  };
+
+  const pushSensor = (obj: any) => {
+    if (!obj || typeof obj.temperatura_c !== 'number') return;
+    const key = `${obj.sensor || ''}|${obj.nome || ''}|${obj.temperatura_c}`;
+    if (added.has(key)) return;
+    added.add(key);
+    sensores.push(obj);
+    if (obj.isCore) cores.push(obj);
+  };
+
+  // 1) Sensores detalhados via hwmon (ex.: coretemp com Package/Core)
   try {
-    if (fs.existsSync('/sys/class/thermal')) {
-      const entries = fs.readdirSync('/sys/class/thermal');
-      for (const entry of entries) {
-        if (entry.startsWith('thermal_zone')) {
-          const typeFile = path.join('/sys/class/thermal', entry, 'type');
-          const tempFile = path.join('/sys/class/thermal', entry, 'temp');
-          if (fs.existsSync(typeFile) && fs.existsSync(tempFile)) {
-            const name = fs.readFileSync(typeFile, 'utf-8').trim();
-            const rawTemp = parseInt(fs.readFileSync(tempFile, 'utf-8').trim(), 10);
-            const tempC = Math.round((rawTemp / 1000) * 10) / 10;
-            if (!isNaN(tempC) && tempC > 0 && tempC < 130) {
-              realSensorsFound = true;
-              sensores.push({
-                sensor: 'thermal_zone',
-                nome: name || entry,
-                temperatura_c: tempC,
-                maxima_c: 85,
-                critica_c: 100,
-                isCore: false
-              });
-            }
-          }
+    if (fs.existsSync('/sys/class/hwmon')) {
+      const hwmons = fs.readdirSync('/sys/class/hwmon');
+      for (const hw of hwmons) {
+        const base = path.join('/sys/class/hwmon', hw);
+        let chip = hw;
+        try {
+          const nameFile = path.join(base, 'name');
+          if (fs.existsSync(nameFile)) chip = fs.readFileSync(nameFile, 'utf-8').trim() || hw;
+        } catch {}
+
+        const files = fs.readdirSync(base);
+        const inputs = files.filter(f => /^temp\d+_input$/.test(f));
+        for (const input of inputs) {
+          const id = input.replace('_input', '');
+          let label = '';
+          try {
+            const lf = path.join(base, `${id}_label`);
+            if (fs.existsSync(lf)) label = fs.readFileSync(lf, 'utf-8').trim();
+          } catch {}
+          let tempC: number | null = null;
+          try {
+            tempC = toTemp(fs.readFileSync(path.join(base, input), 'utf-8'));
+          } catch {}
+          if (tempC === null) continue;
+
+          let maxC: number | undefined;
+          let critC: number | undefined;
+          try {
+            const mf = path.join(base, `${id}_max`);
+            if (fs.existsSync(mf)) { const v = toTemp(fs.readFileSync(mf, 'utf-8')); if (v !== null) maxC = v; }
+          } catch {}
+          try {
+            const cf = path.join(base, `${id}_crit`);
+            if (fs.existsSync(cf)) { const v = toTemp(fs.readFileSync(cf, 'utf-8')); if (v !== null) critC = v; }
+          } catch {}
+
+          const nome = label || `${chip} ${id}`;
+          const lower = nome.toLowerCase();
+          const isCore = lower.includes('core');
+          const coreMatch = lower.match(/core\s*(\d+)/);
+          const coreIndex = coreMatch ? parseInt(coreMatch[1], 10) : undefined;
+
+          pushSensor({
+            sensor: chip,
+            nome,
+            temperatura_c: tempC,
+            maxima_c: maxC,
+            critica_c: critC,
+            isCore,
+            ...(coreIndex !== undefined ? { coreIndex } : {})
+          });
         }
       }
     }
   } catch {}
 
-  // Se o ambiente de contêiner não expõe /sys térmico, fornece telemetria representativa de hardware servidor
-  if (!realSensorsFound || sensores.length === 0) {
-    const cpus = os.cpus();
-    const coreCount = Math.max(1, cpus.length);
-    const baseTemp = 42.0;
-
-    for (let i = 0; i < coreCount; i++) {
-      const coreTemp = Math.round((baseTemp + (i * 1.5) + (Math.sin(Date.now() / 15000 + i) * 2)) * 10) / 10;
-      const coreObj = {
-        sensor: 'coretemp',
-        nome: `Core ${i}`,
-        temperatura_c: coreTemp,
-        maxima_c: 82,
-        critica_c: 100,
-        isCore: true,
-        coreIndex: i
-      };
-      cores.push(coreObj);
-      sensores.push(coreObj);
+  // 2) thermal_zone como complemento (caso hwmon indisponível/incompleto)
+  try {
+    if (fs.existsSync('/sys/class/thermal')) {
+      const entries = fs.readdirSync('/sys/class/thermal');
+      for (const entry of entries) {
+        if (!entry.startsWith('thermal_zone')) continue;
+        const base = path.join('/sys/class/thermal', entry);
+        let name = entry;
+        try { name = fs.readFileSync(path.join(base, 'type'), 'utf-8').trim() || entry; } catch {}
+        let tempC: number | null = null;
+        try { tempC = toTemp(fs.readFileSync(path.join(base, 'temp'), 'utf-8')); } catch {}
+        if (tempC === null) continue;
+        // evita duplicar se hwmon já trouxe x86_pkg_temp equivalente
+        if (sensores.some(s => s.nome === name && Math.abs(s.temperatura_c - tempC) < 0.2)) continue;
+        pushSensor({
+          sensor: 'thermal_zone',
+          nome: name,
+          temperatura_c: tempC,
+          isCore: false
+        });
+      }
     }
+  } catch {}
 
-    sensores.push({
-      sensor: 'coretemp',
-      nome: 'Package id 0',
-      temperatura_c: Math.round((baseTemp + 2.5) * 10) / 10,
-      maxima_c: 85,
-      critica_c: 105,
-      isCore: false
-    });
-
-    sensores.push({
-      sensor: 'nvme',
-      nome: 'Composite NVMe SSD',
-      temperatura_c: 38.5,
-      maxima_c: 70,
-      critica_c: 80,
-      isCore: false
-    });
-  }
-
-  const pkg = sensores.find(s => s.nome.toLowerCase().includes('package') || s.sensor === 'thermal_zone') || sensores[0];
-  const cpuTemp = pkg ? pkg.temperatura_c : 42.0;
+  const available = sensores.length > 0;
+  const pickMain = () => {
+    if (!available) return null;
+    const byName = (re: RegExp) => sensores.find(s => re.test((s.nome || '').toLowerCase()));
+    return (
+      byName(/package id/) ||
+      byName(/x86_pkg_temp/) ||
+      byName(/tctl/) ||
+      byName(/cpu/) ||
+      cores[0] ||
+      sensores[0]
+    );
+  };
+  const main = pickMain();
+  const cpuTemp = main ? main.temperatura_c : null;
 
   return {
-    available: true,
-    disponivel: true,
+    available,
+    disponivel: available,
     temperatura_c: cpuTemp,
     cpu_temp: cpuTemp,
     sensores,
