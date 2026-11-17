@@ -252,54 +252,142 @@ def get_temperature_info():
         "cores": cores,
     }
 
+# estado para cálculo de velocidade de rede (bytes/s) por delta real
+_last_net_sample = {"time": 0.0, "rx": 0, "tx": 0}
+
 def get_network_info():
+    global _last_net_sample
     addrs = psutil.net_if_addrs()
     stats = psutil.net_if_stats()
     io = psutil.net_io_counters(pernic=True)
 
+    # tenta identificar interface/gateway padrão
+    default_iface = None
+    default_gateway = None
+    try:
+        import subprocess
+        out = subprocess.check_output(["ip", "route", "show", "default"], text=True, timeout=0.8)
+        for line in out.splitlines():
+            parts = line.split()
+            if "dev" in parts:
+                default_iface = parts[parts.index("dev") + 1]
+            if parts and parts[0] == "default" and len(parts) > 2:
+                default_gateway = parts[2]
+            if default_iface:
+                break
+    except Exception:
+        pass
+
     interfaces = []
     primary_ip = None
     primary_ipv6 = None
+    total_rx = 0
+    total_tx = 0
 
     for iface, addr_list in addrs.items():
-        if iface.startswith('lo'):
+        if iface == 'lo':
             continue
         stat = stats.get(iface)
         is_up = stat.isup if stat else False
         ipv4 = None
         ipv6 = None
         mac = None
+        netmask = None
 
         for a in addr_list:
             if a.family == socket.AF_INET:
                 ipv4 = a.address
+                netmask = a.netmask
             elif a.family == socket.AF_INET6:
                 if not a.address.startswith('fe80'):
                     ipv6 = a.address
             elif hasattr(psutil, 'AF_LINK') and a.family == psutil.AF_LINK:
                 mac = a.address
 
-        if is_up and ipv4 and not primary_ip:
+        # seleciona IP primário preferindo interface default/up
+        if is_up and ipv4 and (default_iface == iface or primary_ip is None):
             primary_ip = ipv4
-        if is_up and ipv6 and not primary_ipv6:
+        if is_up and ipv6 and (default_iface == iface or primary_ipv6 is None):
             primary_ipv6 = ipv6
 
         nic_io = io.get(iface)
+        rx = nic_io.bytes_recv if nic_io else 0
+        tx = nic_io.bytes_sent if nic_io else 0
+        rxp = nic_io.packets_recv if nic_io else 0
+        txp = nic_io.packets_sent if nic_io else 0
+        errs = ((nic_io.errin + nic_io.errout) if nic_io else 0)
+        total_rx += rx
+        total_tx += tx
+
+        speed = 0
+        if stat and getattr(stat, 'speed', 0):
+            try:
+                speed = int(stat.speed)
+            except Exception:
+                speed = 0
+        if speed <= 0 and is_up:
+            speed = 1000
+
         interfaces.append({
             "nome": iface,
+            "interface": iface,
             "status": "UP" if is_up else "DOWN",
             "ipv4": ipv4,
             "ipv6": ipv6,
-            "mac": mac,
-            "velocidade_mbps": stat.speed if stat else 0,
-            "bytes_enviados": nic_io.bytes_sent if nic_io else 0,
-            "bytes_recebidos": nic_io.bytes_recv if nic_io else 0
+            "ip": ipv4 or primary_ip or "--",
+            "mac": mac or "--",
+            "gateway": default_gateway if ipv4 else None,
+            "mascara": netmask,
+            "netmask": netmask,
+            "velocidade_mbps": speed,
+            "speed_mbps": speed,
+            "mtu": stat.mtu if stat else 1500,
+            "bytes_enviados": tx,
+            "bytes_recebidos": rx,
+            "bytes_sent": tx,
+            "bytes_recv": rx,
+            "pacotes_enviados": txp,
+            "pacotes_recebidos": rxp,
+            "packets_sent": txp,
+            "packets_recv": rxp,
+            "erros": errs,
+            "errors": errs,
         })
+
+    # velocidade global por delta real entre amostras
+    now = time.time()
+    download_bps = 0.0
+    upload_bps = 0.0
+    try:
+        if _last_net_sample["time"] > 0:
+            dt = max(0.2, now - _last_net_sample["time"])
+            if total_rx >= _last_net_sample["rx"] and total_tx >= _last_net_sample["tx"]:
+                download_bps = (total_rx - _last_net_sample["rx"]) / dt
+                upload_bps = (total_tx - _last_net_sample["tx"]) / dt
+        _last_net_sample = {"time": now, "rx": total_rx, "tx": total_tx}
+    except Exception:
+        pass
+
+    # fallback primary
+    if not primary_ip:
+        for itf in interfaces:
+            if itf.get("ipv4"):
+                primary_ip = itf["ipv4"]
+                break
+    if not default_iface and interfaces:
+        default_iface = interfaces[0].get("nome")
 
     return {
         "primaryIp": primary_ip or "127.0.0.1",
+        "primary_ip": primary_ip or "127.0.0.1",
         "primaryIpv6": primary_ipv6,
-        "interfaces": interfaces
+        "primary_ipv6": primary_ipv6,
+        "primary_interface": default_iface,
+        "interfaces": interfaces,
+        "download_bytes_sec": round(download_bps),
+        "upload_bytes_sec": round(upload_bps),
+        "rawBytesRecv": total_rx,
+        "rawBytesSent": total_tx,
     }
 
 def get_top_processes(limit=30, sort_by="cpu"):

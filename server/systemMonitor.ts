@@ -473,17 +473,64 @@ function getActiveNetworkClients() {
   return Array.from(clients.values()).sort((a, b) => (a.ipv4 || a.ipv6 || '').localeCompare(b.ipv4 || b.ipv6 || '', undefined, { numeric: true }));
 }
 
+
+function readInterfaceCounters() {
+  const counters: Record<string, { rxBytes: number; rxPackets: number; rxErrors: number; txBytes: number; txPackets: number; txErrors: number }> = {};
+  try {
+    const text = fs.readFileSync('/proc/net/dev', 'utf-8');
+    const lines = text.split('\n').slice(2);
+    for (const line of lines) {
+      if (!line || !line.includes(':')) continue;
+      const [namePart, restPart] = line.split(':');
+      const name = namePart.trim();
+      if (!name) continue;
+      const cols = restPart.trim().split(/\s+/).map(n => Number(n) || 0);
+      // rx: bytes packets errs drop fifo frame compressed multicast
+      // tx: bytes packets errs drop fifo colls carrier compressed
+      counters[name] = {
+        rxBytes: cols[0] || 0,
+        rxPackets: cols[1] || 0,
+        rxErrors: cols[2] || 0,
+        txBytes: cols[8] || 0,
+        txPackets: cols[9] || 0,
+        txErrors: cols[10] || 0,
+      };
+    }
+  } catch {}
+  return counters;
+}
+
+function readInterfaceMtu(name: string) {
+  try {
+    return Number(fs.readFileSync(`/sys/class/net/${name}/mtu`, 'utf-8').trim()) || 1500;
+  } catch { return 1500; }
+}
+
+function readInterfaceSpeedMbps(name: string) {
+  try {
+    const v = fs.readFileSync(`/sys/class/net/${name}/speed`, 'utf-8').trim();
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {}
+  return undefined;
+}
+
 export function getNetworkInfo() {
   const nics = os.networkInterfaces();
+  const counters = readInterfaceCounters();
   const interfaces: any[] = [];
   let primaryIp = '127.0.0.1';
   let primaryIpv6: string | undefined = undefined;
-  let primaryInterface = 'eth0';
+  let primaryInterface = '';
   let defaultGateway = '--';
 
   try {
     const gw = execSync("ip route show default 2>/dev/null | awk '/default/ {print $3; exit}'", { encoding: 'utf-8', timeout: 800 }).trim();
     if (gw) defaultGateway = gw;
+  } catch {}
+  try {
+    const defIf = execSync("ip route show default 2>/dev/null | awk '/default/ {print $5; exit}'", { encoding: 'utf-8', timeout: 800 }).trim();
+    if (defIf) primaryInterface = defIf;
   } catch {}
 
   for (const [name, addrList] of Object.entries(nics)) {
@@ -498,9 +545,9 @@ export function getNetworkInfo() {
         ipv4 = addr.address;
         netmask = addr.netmask;
         mac = addr.mac && addr.mac !== '00:00:00:00:00:00' ? addr.mac : mac;
-        if (primaryIp === '127.0.0.1') {
+        if (primaryInterface ? name === primaryInterface : primaryIp === '127.0.0.1') {
           primaryIp = addr.address;
-          primaryInterface = name;
+          if (!primaryInterface) primaryInterface = name;
         }
       } else if (addr.family === 'IPv6' && !addr.internal && !addr.address.startsWith('fe80:')) {
         ipv6 = addr.address;
@@ -510,24 +557,32 @@ export function getNetworkInfo() {
       }
     }
 
+    const c = counters[name] || { rxBytes: 0, rxPackets: 0, rxErrors: 0, txBytes: 0, txPackets: 0, txErrors: 0 };
+    let isUp = true;
+    try {
+      const oper = fs.readFileSync(`/sys/class/net/${name}/operstate`, 'utf-8').trim().toLowerCase();
+      if (oper && oper !== 'unknown') isUp = oper === 'up';
+    } catch {}
+    const speedMbps = readInterfaceSpeedMbps(name) ?? (isUp ? 1000 : 0);
+
     interfaces.push({
       interface: name,
       nome: name,
-      ip: ipv4 || primaryIp,
+      ip: ipv4 || (isUp ? primaryIp : '--'),
       ipv4: ipv4 || null,
       ipv6: ipv6 || null,
       mac,
       netmask,
       gateway: ipv4 ? defaultGateway : '--',
-      is_up: true,
-      status: 'UP',
-      speed_mbps: 1000,
-      mtu: 1500,
-      bytes_enviados: 14205840,
-      bytes_recebidos: 89451200,
-      pacotes_enviados: 12500,
-      pacotes_recebidos: 68400,
-      erros: 0
+      is_up: isUp,
+      status: isUp ? 'UP' : 'DOWN',
+      speed_mbps: speedMbps,
+      mtu: readInterfaceMtu(name),
+      bytes_enviados: c.txBytes,
+      bytes_recebidos: c.rxBytes,
+      pacotes_enviados: c.txPackets,
+      pacotes_recebidos: c.rxPackets,
+      erros: c.rxErrors + c.txErrors
     });
   }
 
@@ -554,6 +609,35 @@ export function getNetworkInfo() {
     primaryIp = '192.168.100.23';
   }
 
+  if (!primaryInterface) {
+    const upWithIp = interfaces.find(i => i.status === 'UP' && i.ipv4);
+    primaryInterface = upWithIp?.nome || interfaces[0]?.nome || 'lo';
+  }
+
+  // velocidade em bytes/s calculada por delta real de /proc/net/dev
+  let download_bytes_sec = 0;
+  let upload_bytes_sec = 0;
+  try {
+    const now = Date.now();
+    let totalRx = 0;
+    let totalTx = 0;
+    const nicNames = new Set(Object.keys(nics || {}));
+    for (const [name, c] of Object.entries(counters)) {
+      if (name === 'lo') continue;
+      if (nicNames.size > 0 && !nicNames.has(name)) continue;
+      totalRx += c.rxBytes;
+      totalTx += c.txBytes;
+    }
+    if (lastNetSample.time > 0) {
+      const dt = Math.max(0.2, (now - lastNetSample.time) / 1000);
+      if (totalRx >= lastNetSample.bytesRecv && totalTx >= lastNetSample.bytesSent) {
+        download_bytes_sec = Math.max(0, (totalRx - lastNetSample.bytesRecv) / dt);
+        upload_bytes_sec = Math.max(0, (totalTx - lastNetSample.bytesSent) / dt);
+      }
+    }
+    lastNetSample = { time: now, bytesRecv: totalRx, bytesSent: totalTx };
+  } catch {}
+
   const activeClients = getActiveNetworkClients();
 
   return {
@@ -561,8 +645,8 @@ export function getNetworkInfo() {
     primary_interface: primaryInterface,
     primary_ip: primaryIp,
     primary_ipv6: primaryIpv6,
-    download_bytes_sec: 24500,
-    upload_bytes_sec: 8400,
+    download_bytes_sec: Math.round(download_bytes_sec),
+    upload_bytes_sec: Math.round(upload_bytes_sec),
     active_clients: activeClients,
     activeClients
   };
