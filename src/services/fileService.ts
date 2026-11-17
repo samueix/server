@@ -64,3 +64,18 @@ export async function saveFile(filePath: string, content: string): Promise<{ suc
   }
   return res.json();
 }
+
+export async function fetchFileRaw(filePath: string): Promise<{ blob: Blob; mimeType: string }> {
+  const query = `?path=${encodeURIComponent(filePath)}`;
+  const headers = {
+    ...getAuthHeaders()
+  };
+  const res = await fetch(`/api/files/raw${query}`, { headers });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '');
+    throw new Error(msg || `Erro ${res.status} ao carregar arquivo`);
+  }
+  const mimeType = res.headers.get('content-type') || 'application/octet-stream';
+  const blob = await res.blob();
+  return { blob, mimeType };
+}

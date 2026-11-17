@@ -36,7 +36,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import { FileItem, FileExplorerResponse, FileReadResponse } from '../../types';
-import { fetchDirectory, fetchFileContent, createFile, saveFile } from '../../services/fileService';
+import { fetchDirectory, fetchFileContent, fetchFileRaw, createFile, saveFile } from '../../services/fileService';
 
 type SortField = 'name' | 'date' | 'size' | 'type';
 type SortDirection = 'asc' | 'desc';
@@ -75,6 +75,18 @@ export const FilesTab: React.FC = () => {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
+
+  const clearPreviewUrl = () => {
+    if (previewUrlRef.current) {
+      try { URL.revokeObjectURL(previewUrlRef.current); } catch {}
+      previewUrlRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearPreviewUrl();
+  }, []);
 
   const loadFolder = async (targetPath: string) => {
     setLoading(true);
@@ -121,16 +133,43 @@ export const FilesTab: React.FC = () => {
     setSelectedFile(item);
     setReadingFile(true);
     setFileError(null);
+    clearPreviewUrl();
     setFileContent(null);
     setCopiedContent(false);
     setImageZoom(1);
     setImageRotation(0);
+    setIsEditing(false);
 
     try {
+      if (item.typeCategory === 'image') {
+        try {
+          const { blob, mimeType } = await fetchFileRaw(item.path);
+          const url = URL.createObjectURL(blob);
+          previewUrlRef.current = url;
+          setFileContent({
+            name: item.name,
+            path: item.path,
+            size: item.size,
+            content: `[Imagem ${item.name}]`,
+            isBinary: true,
+            isImage: true,
+            mimeType: mimeType || 'image/*',
+            dataUrl: url,
+            truncated: false,
+            mtime: item.mtime
+          });
+          return;
+        } catch {
+          // fallback para leitura padrão (base64/texto) se raw falhar
+        }
+      }
+
       const contentRes = await fetchFileContent(item.path);
+      if (contentRes.dataUrl && contentRes.dataUrl.startsWith('blob:')) {
+        previewUrlRef.current = contentRes.dataUrl;
+      }
       setFileContent(contentRes);
       setEditedText(contentRes.content || '');
-      setIsEditing(false);
     } catch (err: any) {
       if (err.message && (err.message.includes('diretório') || err.message.includes('pasta'))) {
         setSelectedFile(null);
@@ -736,7 +775,9 @@ export const FilesTab: React.FC = () => {
                 )}
                 <button
                   onClick={() => {
+                    clearPreviewUrl();
                     setSelectedFile(null);
+                    setFileContent(null);
                     setIsEditing(false);
                   }}
                   className="p-1.5 bg-white hover:bg-[#FEE4E2] border-2 border-[#1A1A2E] rounded-lg text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
@@ -796,11 +837,13 @@ export const FilesTab: React.FC = () => {
                     <a
                       href={fileContent.dataUrl}
                       download={selectedFile.name}
+                      target="_blank"
+                      rel="noreferrer"
                       className="flex items-center gap-1 px-3 py-1 bg-[#FF5A36] hover:bg-[#E04522] rounded text-white text-xs font-mono font-bold ml-2 shadow-[2px_2px_0px_#000]"
-                      title="Baixar imagem original para seu dispositivo"
+                      title="Abrir/baixar imagem original"
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span>Baixar Foto</span>
+                      <span>Abrir/Baixar</span>
                     </a>
                   </div>
 
@@ -818,10 +861,13 @@ export const FilesTab: React.FC = () => {
                     />
                   </div>
 
-                  <div className="text-[11px] font-mono text-[#FFF7E8]/70 flex items-center gap-3">
+                  <div className="text-[11px] font-mono text-[#FFF7E8]/70 flex items-center gap-3 flex-wrap justify-center">
                     <span>MIME: {fileContent.mimeType || 'imagem'}</span>
                     <span>•</span>
                     <span>Tamanho: {selectedFile.sizeFormatted}</span>
+                    {['image/heic','image/heif','image/avif'].includes((fileContent.mimeType || '').toLowerCase()) && (
+                      <span className="text-[#FFC857]">Se não renderizar no navegador, use “Abrir/Baixar”.</span>
+                    )}
                   </div>
                 </div>
               ) : fileContent?.isBinary ? (

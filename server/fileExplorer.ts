@@ -90,7 +90,7 @@ function getFileCategory(name: string, isDir: boolean): FileItem['typeCategory']
   if (isDir) return 'folder';
   const ext = path.extname(name).toLowerCase();
   
-  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp'];
+  const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.avif', '.heic', '.heif', '.tif', '.tiff', '.jfif'];
   const videoExts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.flv'];
   const audioExts = ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac'];
   const docExts = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.txt', '.md', '.csv'];
@@ -237,12 +237,18 @@ export async function readTargetFile(filePath: string): Promise<FileReadResponse
     '.svg': 'image/svg+xml',
     '.webp': 'image/webp',
     '.ico': 'image/x-icon',
-    '.bmp': 'image/bmp'
+    '.bmp': 'image/bmp',
+    '.avif': 'image/avif',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+    '.tif': 'image/tiff',
+    '.tiff': 'image/tiff',
+    '.jfif': 'image/jpeg'
   };
 
   const mimeType = imageMimeMap[ext];
   if (mimeType) {
-    const maxImageBytes = 8 * 1024 * 1024; // 8 MB para base64
+    const maxImageBytes = 15 * 1024 * 1024; // 15 MB para base64
     if (size <= maxImageBytes) {
       try {
         const fullBuffer = await fs.promises.readFile(resolvedPath);
