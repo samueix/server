@@ -38,9 +38,8 @@ type Telemetry = {
   os_version?: string;
 };
 
-function formatUptime(seconds?: number, human?: string) {
-  if (human && human.trim()) return human;
-  if (typeof seconds !== 'number' || !isFinite(seconds)) return '—';
+function formatUptime(seconds?: number, _human?: string) {
+  if (typeof seconds !== 'number' || !isFinite(seconds) || seconds < 0) return '—';
   const d = Math.floor(seconds / 86400);
   const h = Math.floor((seconds % 86400) / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -112,9 +111,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
   }, [lastUpdated, tick]);
 
   const systemVersion = useMemo(() => {
-    const os = telemetry?.os || 'Ubuntu Server';
-    const ver = telemetry?.os_version ? ` ${telemetry.os_version}` : '';
-    return `${os}${ver}`.trim();
+    const os = (telemetry?.os || 'Ubuntu Server').trim();
+    const ver = (telemetry?.os_version || '').trim();
+    if (!ver) return os;
+    if (os.includes(ver)) return os;
+    return `${os} ${ver}`.trim();
   }, [telemetry]);
 
   const isExpiredNotice = useMemo(() => {
@@ -156,7 +157,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
   const iface = telemetry?.primary_interface || '—';
 
   return (
-    <div className="min-h-screen bg-[#FFF7E8] text-[#1A1A2E] flex flex-col justify-center items-center p-4 sm:p-6 font-sans relative overflow-hidden">
+    <div className="min-h-screen bg-[#FFF7E8] text-[#1A1A2E] flex flex-col justify-center items-center p-4 sm:p-6 font-sans relative overflow-hidden select-none">
       <div
         className="absolute inset-0 pointer-events-none opacity-25 -z-0"
         style={{ backgroundImage: 'radial-gradient(#1A1A2E 1.2px, transparent 1.2px)', backgroundSize: '24px 24px' }}
@@ -178,7 +179,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                 <span className={`w-2.5 h-2.5 rounded-full border border-[#1A1A2E] ${apiHealth === 'online' ? 'bg-[#12B76A]' : apiHealth === 'offline' ? 'bg-[#F04438]' : 'bg-[#FFC857]'}`} />
                 <span>samuelserver</span>
               </div>
-              <div className="text-[10px] font-mono font-bold bg-black/20 border border-white/30 px-2 py-1 rounded-md">
+              <div className="text-[10px] font-mono font-bold bg-black/20 border border-white/30 px-2 py-1 rounded-md max-w-[55%] truncate text-right" title={systemVersion}>
                 {systemVersion}
               </div>
             </div>
@@ -220,9 +221,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                   <div className="flex items-center gap-1.5 text-white/85"><Thermometer className="w-3.5 h-3.5 text-[#FFC857]" /><span>Temp</span></div>
                   <span className="font-bold text-white tabular-nums">{temp !== null ? `${temp.toFixed(1)}°C` : 'N/D'}</span>
                 </div>
-                <div className="p-2.5 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-white/85"><Clock className="w-3.5 h-3.5 text-white" /><span>Uptime</span></div>
-                  <span className="font-bold text-white tabular-nums text-[11px]">{uptime}</span>
+                <div className="p-2.5 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 text-white/85 shrink-0"><Clock className="w-3.5 h-3.5 text-white" /><span>Uptime</span></div>
+                  <span className="font-bold text-white tabular-nums text-[11px] sm:text-xs text-right leading-tight whitespace-nowrap">{uptime}</span>
                 </div>
               </div>
 
@@ -236,10 +237,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
           <div className="pt-4 mt-4 border-t border-white/20 text-[11px] font-mono text-white/90 space-y-1.5">
             <div className="flex items-center gap-1.5"><Globe className="w-3.5 h-3.5 text-[#FFC857] shrink-0" /><span className="truncate font-semibold">IPv4: {telemetry?.ipv4 || '—'}</span></div>
             <div className="text-[10px] text-white/80 truncate font-medium pl-5">IPv6: {telemetry?.ipv6 || '—'}</div>
-            <div className="flex items-center justify-between pt-1 text-[10px] text-white/80">
-              <span>Última atualização: <strong className="text-white">{lastUpdatedLabel}</strong></span>
-              <span className="opacity-80">auto 5s</span>
-            </div>
+            <div className="h-1" />
           </div>
         </section>
 
@@ -251,8 +249,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                 <h2 className="text-lg sm:text-xl font-bold font-title text-[#1A1A2E]">Acesso ao Sistema</h2>
                 <p className="text-xs text-[#4A4A68] mt-0.5">Autentique-se para gerenciar o servidor Ubuntu</p>
               </div>
-              <div className="flex items-center gap-1.5 text-xs font-mono font-bold px-2.5 py-1 rounded-full bg-[#FFC857] border-2 border-[#1A1A2E] shrink-0">
-                <span>Login seguro</span>
+              <div className="flex items-center text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FFF7E8] border border-[#1A1A2E]/30 text-[#4A4A68] shrink-0">
+                <span>Acesso</span>
               </div>
             </div>
 
@@ -336,8 +334,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-3 pt-1">
-                <label className="inline-flex items-center gap-2 text-xs text-[#1A1A2E] font-medium cursor-pointer select-none">
+              <div className="flex items-center gap-3 pt-1">
+                <label className="inline-flex items-center gap-2 text-xs text-[#1A1A2E] font-medium cursor-pointer">
                   <input
                     type="checkbox"
                     checked={rememberSession}
@@ -346,7 +344,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                   />
                   <span>Lembrar sessão neste dispositivo</span>
                 </label>
-                <span className="text-[10px] text-[#4A4A68] font-mono">timeout 10min</span>
               </div>
 
               <button
@@ -374,14 +371,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
             </form>
           </div>
 
-          <div className="pt-4 mt-5 border-t-2 border-[#1A1A2E]/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] font-mono text-[#4A4A68]">
-            <span>samuelserver • {systemVersion}</span>
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center gap-1.5 font-bold text-[#12B76A]"><span className="w-2 h-2 rounded-full bg-[#12B76A]" />Seguro</span>
-              <span className="text-[#4A4A68]/80">v{(window as any).__APP_VERSION__ || 'panel'}</span>
-            </div>
+          <div className="pt-4 mt-5 border-t-2 border-[#1A1A2E]/10 flex items-center text-[11px] font-mono text-[#4A4A68]">
+            <span className="truncate">samuelserver • {systemVersion}</span>
           </div>
         </section>
+      </div>
+
+      <div className="fixed bottom-3 right-4 text-[10px] font-mono text-[#4A4A68] pointer-events-none select-none z-20">
+        Última atualização: <span className="font-semibold text-[#1A1A2E]">{lastUpdatedLabel}</span>
       </div>
     </div>
   );
