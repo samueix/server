@@ -159,12 +159,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
   return (
     <div className="min-h-screen bg-[#FFF7E8] text-[#1A1A2E] flex flex-col justify-center items-center p-4 sm:p-6 font-sans relative overflow-hidden select-none">
       <div
-        className="absolute inset-0 pointer-events-none opacity-25 -z-0"
+        className="absolute inset-0 pointer-events-none opacity-20 -z-0"
         style={{ backgroundImage: 'radial-gradient(#1A1A2E 1.2px, transparent 1.2px)', backgroundSize: '24px 24px' }}
       />
-      <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-[#FFC857] border-4 border-[#1A1A2E] -z-0 opacity-50 pointer-events-none shadow-[4px_4px_0px_#1A1A2E] login-float" />
-      <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-3xl bg-[#00A6FB] border-4 border-[#1A1A2E] rotate-12 -z-0 opacity-20 pointer-events-none shadow-[4px_4px_0px_#1A1A2E] login-float-slow" />
-      <div className="absolute top-1/4 -left-10 w-24 h-24 rounded-xl bg-[#FF5A36] border-2 border-[#1A1A2E] -rotate-12 -z-0 opacity-20 pointer-events-none" />
 
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-12 gap-5 md:gap-6 relative z-10 items-stretch login-enter">
         {/* Painel Esquerdo */}
@@ -242,16 +239,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
         </section>
 
         {/* Painel Direito */}
-        <section className="md:col-span-7 bg-white border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl p-5 sm:p-7 flex flex-col justify-between" aria-label="Autenticação">
+        <section className="md:col-span-7 bg-white border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl p-5 sm:p-7 flex flex-col justify-center" aria-label="Autenticação">
           <div>
-            <div className="flex items-start justify-between pb-3 mb-5 border-b-2 border-[#1A1A2E] gap-3">
-              <div>
-                <h2 className="text-lg sm:text-xl font-bold font-title text-[#1A1A2E]">Acesso ao Sistema</h2>
-                <p className="text-xs text-[#4A4A68] mt-0.5">Autentique-se para gerenciar o servidor Ubuntu</p>
-              </div>
-              <div className="flex items-center text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#FFF7E8] border border-[#1A1A2E]/30 text-[#4A4A68] shrink-0">
-                <span>Acesso</span>
-              </div>
+            <div className="pb-3 mb-5 border-b-2 border-[#1A1A2E]">
+              <h2 className="text-lg sm:text-xl font-bold font-title text-[#1A1A2E]">Acesso ao Sistema</h2>
+              <p className="text-xs text-[#4A4A68] mt-0.5">Autentique-se para gerenciar o servidor Ubuntu</p>
             </div>
 
             {logoutNotice && (
@@ -286,7 +278,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="admin ou user"
+                    placeholder="Digite seu usuário"
                     required
                     autoComplete="username"
                     autoCapitalize="none"
@@ -348,8 +340,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
 
               <button
                 type="submit"
-                disabled={loading || !username.trim() || !password}
-                className="w-full py-3 rounded-lg bg-[#FF5A36] hover:bg-[#E04522] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed mt-2 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+                disabled={loading}
+                className="w-full py-3 rounded-lg bg-[#FF5A36] hover:bg-[#E04522] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] transition-all flex items-center justify-center gap-2 cursor-pointer disabled:bg-[#4A4A68] disabled:text-white disabled:cursor-wait mt-2 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
               >
                 {loading ? (
                   <>
@@ -369,10 +361,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                 )}
               </button>
             </form>
-          </div>
-
-          <div className="pt-4 mt-5 border-t-2 border-[#1A1A2E]/10 flex items-center text-[11px] font-mono text-[#4A4A68]">
-            <span className="truncate">samuelserver • {systemVersion}</span>
           </div>
         </section>
       </div>
