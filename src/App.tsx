@@ -139,12 +139,21 @@ export default function App() {
   useEffect(() => {
     const onPop = () => {
       const t = tabFromPath(window.location.pathname);
-      if (t) setActiveTab(t);
+      if (t) {
+        setActiveTab(t);
+      } else if (authSession?.authenticated) {
+        // rota manual inválida enquanto autenticado -> visão geral
+        navigateToTab('overview');
+      } else {
+        // não autenticado em rota qualquer -> login
+        if (window.location.pathname !== '/login') {
+          window.history.replaceState({ auth: 'login' }, '', '/login');
+        }
+      }
     };
     window.addEventListener('popstate', onPop);
-    // if authenticated and on root/login-like, go to current tab path
     return () => window.removeEventListener('popstate', onPop);
-  }, []);
+  }, [authSession?.authenticated, navigateToTab]);
 
 
   // Connection & Telemetry State
@@ -457,7 +466,7 @@ export default function App() {
     const session = getStoredAuth();
     if (session && role) {
       session.role = role;
-      saveAuthSession(session);
+      saveAuthSession(session, Boolean((session as any).remember));
     }
     const s = session || getStoredAuth();
     setAuthSession(s);
@@ -465,16 +474,23 @@ export default function App() {
     setIsInitialLoad(true);
     try {
       const intended = sessionStorage.getItem(INTENDED_PATH_KEY);
-      if (intended) {
-        sessionStorage.removeItem(INTENDED_PATH_KEY);
-        const t = tabFromPath(intended);
-        if (t) { setActiveTab(t); window.history.replaceState({tab:t}, '', TAB_PATHS[t]); }
+      sessionStorage.removeItem(INTENDED_PATH_KEY);
+      const intendedTab = intended ? tabFromPath(intended) : null;
+      if (intendedTab) {
+        setActiveTab(intendedTab);
+        window.history.replaceState({ tab: intendedTab }, '', TAB_PATHS[intendedTab]);
       } else {
-        // ensure URL matches active tab
-        const target = TAB_PATHS[activeTab] || '/visao-geral';
-        if (window.location.pathname !== target) window.history.replaceState({tab:activeTab}, '', target);
+        // caminho desconhecido ou ausente: vai para visão geral (evita erro/página inválida)
+        const targetTab = (intended && intended !== '/login') ? activeTab : 'overview';
+        const safeTab = TAB_PATHS[targetTab] ? targetTab : 'overview';
+        setActiveTab(safeTab);
+        const target = TAB_PATHS[safeTab] || '/visao-geral';
+        window.history.replaceState({ tab: safeTab }, '', target);
       }
-    } catch {}
+    } catch {
+      setActiveTab('overview');
+      window.history.replaceState({ tab: 'overview' }, '', '/visao-geral');
+    }
     setTimeout(() => { executePoll(); }, 100);
   };
 
@@ -541,13 +557,18 @@ export default function App() {
     }, delay);
   }, [currentConfig.refreshIntervalSeconds, executePoll]);
 
-  // Ensure URL matches tab when authenticated
+  // Ensure URL matches tab when authenticated (rota inválida/manual -> visão geral)
   useEffect(() => {
     if (authSession?.authenticated) {
+      const current = tabFromPath(window.location.pathname);
+      if (!current) {
+        navigateToTab('overview');
+        return;
+      }
       const target = TAB_PATHS[activeTab] || '/visao-geral';
       if (window.location.pathname !== target) window.history.replaceState({tab:activeTab}, '', target);
     }
-  }, [authSession?.authenticated]);
+  }, [authSession?.authenticated, activeTab, navigateToTab]);
 
   // Periodic polling hook & visibilitychange listener
   useEffect(() => {
@@ -602,8 +623,18 @@ export default function App() {
   // Se não houver sessão ativa autenticada, exibe a tela de login
   if (!authSession || !authSession.authenticated) {
     try {
-      const p = window.location.pathname;
-      if (tabFromPath(p)) sessionStorage.setItem(INTENDED_PATH_KEY, p);
+      const p = window.location.pathname || '/';
+      const t = tabFromPath(p);
+      if (t) {
+        sessionStorage.setItem(INTENDED_PATH_KEY, TAB_PATHS[t]);
+      } else if (p !== '/' && p !== '/login') {
+        // caminho digitado manualmente/desconhecido: guarda para tentativa pós-login
+        sessionStorage.setItem(INTENDED_PATH_KEY, p);
+      }
+      // normaliza a barra para /login (evita exibir rotas internas/dados no path)
+      if (window.location.pathname !== '/login') {
+        window.history.replaceState({ auth: 'login' }, '', '/login');
+      }
     } catch {}
     return (
       <LoginScreen

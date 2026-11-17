@@ -75,7 +75,9 @@ import {
   getDiskInfo, 
   getNetworkInfo, 
   getTemperatureInfo, 
-  getProcessesList 
+  getProcessesList, 
+  getUptime, 
+  getOsInfo 
 } from './server/systemMonitor.js';
 import { getAllMonitoredServices } from './server/servicesMonitor.js';
 import {
@@ -334,9 +336,14 @@ export function createApp() {
   app.get('/api/health', (req, res) => {
     let cpuPercent = 0;
     let ramPercent = 0;
+    let tempC: number | null = null;
+    let uptimeHuman = '';
+    let uptimeSeconds = 0;
     let ipv4 = '192.168.100.23';
     let ipv6 = '2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445';
     let primaryInterface = 'wlo1';
+    let osName = 'Linux';
+    let osVersion = '';
 
     try {
       const cpuInfo = getCpuInfo();
@@ -346,6 +353,17 @@ export function createApp() {
     try {
       const memInfo = getMemoryInfo();
       ramPercent = memInfo.uso_percentual || memInfo.ram?.usage_percent || 0;
+    } catch {}
+
+    try {
+      const t = getTemperatureInfo();
+      if (t && t.disponivel && typeof t.temperatura_c === 'number') tempC = t.temperatura_c;
+    } catch {}
+
+    try {
+      const u = getUptime();
+      uptimeHuman = u.uptime_human || '';
+      uptimeSeconds = u.uptime_seconds || 0;
     } catch {}
 
     try {
@@ -361,6 +379,12 @@ export function createApp() {
       }
     } catch {}
 
+    try {
+      const osInfo = getOsInfo();
+      osName = osInfo.os || osName;
+      osVersion = osInfo.os_version || '';
+    } catch {}
+
     res.status(200).json({ 
       status: 'online', 
       service: 'Server Monitor & AdGuard AI', 
@@ -369,9 +393,14 @@ export function createApp() {
       telemetry: {
         cpu_percent: cpuPercent,
         ram_percent: ramPercent,
+        temp_c: tempC,
+        uptime_human: uptimeHuman,
+        uptime_seconds: uptimeSeconds,
         ipv4,
         ipv6,
-        primary_interface: primaryInterface
+        primary_interface: primaryInterface,
+        os: osName,
+        os_version: osVersion
       }
     });
   });

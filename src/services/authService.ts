@@ -8,6 +8,7 @@
  */
 
 const AUTH_STORAGE_KEY = 'server_panel_auth_v1';
+const REMEMBER_KEY = 'server_panel_remember_v1';
 
 export interface AuthSession {
   authenticated: boolean;
@@ -18,9 +19,23 @@ export interface AuthSession {
   authType: 'basic' | 'bearer' | 'apikey';
   savedAt: string;
   expiresAt?: number; // epoch ms, 10 min inactivity
+  remember?: boolean;
 }
 
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutos
+
+export function getRememberPreference(): boolean {
+  try {
+    return localStorage.getItem(REMEMBER_KEY) === '1';
+  } catch { return false; }
+}
+
+export function setRememberPreference(remember: boolean): void {
+  try {
+    if (remember) localStorage.setItem(REMEMBER_KEY, '1');
+    else localStorage.removeItem(REMEMBER_KEY);
+  } catch {}
+}
 
 export function isSessionExpired(session: AuthSession | null): boolean {
   if (!session) return true;
@@ -28,33 +43,55 @@ export function isSessionExpired(session: AuthSession | null): boolean {
   return false;
 }
 
+function getActiveStorageForSession(session: any): Storage {
+  // sessão "lembrada" persiste em localStorage; caso contrário sessionStorage
+  if (session && session.remember) return localStorage;
+  // compat: se preferência global de lembrar está ativa e sessão veio do localStorage, manter
+  return sessionStorage;
+}
+
 export function touchAuthSession(): void {
   const s = getStoredAuthInternal();
   if (s && s.authenticated) {
     s.expiresAt = Date.now() + SESSION_TTL_MS;
-    try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s)); } catch {}
+    try {
+      const storage = s.remember ? localStorage : sessionStorage;
+      storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s));
+    } catch {}
   }
 }
 
 function getStoredAuthInternal(): AuthSession | null {
   try {
+    // 1) sessionStorage primeiro (sessão atual)
     let raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
-    if (!raw) {
+    let fromRemembered = false;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.authenticated) return parsed;
+    }
+    // 2) sessão lembrada (localStorage) apenas se preferência estiver ativa
+    if (getRememberPreference()) {
       raw = localStorage.getItem(AUTH_STORAGE_KEY);
       if (raw) {
-        sessionStorage.setItem(AUTH_STORAGE_KEY, raw);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.authenticated) {
+          parsed.remember = true;
+          // mantém em localStorage e espelha em sessionStorage para uso rápido
+          try { sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed)); } catch {}
+          return parsed;
+        }
       }
+    } else {
+      // sem preferência de lembrar, limpa resquícios antigos
+      try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
     }
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.authenticated) return parsed;
   } catch (e) {}
   return null;
 }
 
 /**
- * Lê a sessão salva priorizando sessionStorage (com migração de localStorage)
+ * Lê a sessão salva (sessionStorage ou sessão lembrada)
  */
 export function getStoredAuth(): AuthSession | null {
   const s = getStoredAuthInternal();
@@ -67,12 +104,23 @@ export function getStoredAuth(): AuthSession | null {
 }
 
 /**
- * Salva a sessão no sessionStorage
+ * Salva a sessão (sessionStorage por padrão; localStorage se "lembrar sessão")
  */
-export function saveAuthSession(session: AuthSession): void {
+export function saveAuthSession(session: AuthSession, remember = false): void {
   try {
     if (!session.expiresAt) session.expiresAt = Date.now() + SESSION_TTL_MS;
-    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+    session.remember = remember;
+    setRememberPreference(remember);
+    const payload = JSON.stringify(session);
+    // limpa ambos e grava no destino correto
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    if (remember) {
+      localStorage.setItem(AUTH_STORAGE_KEY, payload);
+      sessionStorage.setItem(AUTH_STORAGE_KEY, payload);
+    } else {
+      sessionStorage.setItem(AUTH_STORAGE_KEY, payload);
+    }
   } catch (e) {
     console.error('Erro ao salvar autenticação', e);
   }
@@ -85,6 +133,7 @@ export function clearAuthSession(): void {
   try {
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(AUTH_STORAGE_KEY);
+    // não remove REMEMBER_KEY para manter a preferência do usuário no formulário
   } catch (e) {
     console.error('Erro ao limpar autenticação', e);
   }
@@ -131,6 +180,7 @@ export async function verifyCredentialsWithServer(
     username?: string;
     password?: string;
     apiKey?: string;
+    remember?: boolean;
   }
 ): Promise<{ success: boolean; user?: string; role?: 'admin' | 'user'; error?: string }> {
   const headers: Record<string, string> = {
@@ -188,7 +238,7 @@ export async function verifyCredentialsWithServer(
       expiresAt: Date.now() + SESSION_TTL_MS
     };
 
-    saveAuthSession(session);
+    saveAuthSession(session, Boolean(options.remember));
 
     return {
       success: true,
