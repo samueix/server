@@ -568,7 +568,7 @@ export const OpencodeTab: React.FC = () => {
                 </h3>
               </div>
               <ul className="text-xs font-mono space-y-1 text-[#4A4A68]">
-                <li>• Host: <strong className="text-[#1A1A2E]">samuelserver</strong> (Ubuntu 24.04 LTS)</li>
+                <li>• Host: <strong className="text-[#1A1A2E]">samuelserver</strong> (Ubuntu Server)</li>
                 <li>• CPU: Intel Core i5-9500T (6 cores)</li>
                 <li>• RAM: 19 GB (SSD ~190 GB livre)</li>
                 <li>• Tailscale: <strong className="text-[#12B76A]">100.97.208.102</strong> (Ativo)</li>

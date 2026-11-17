@@ -203,7 +203,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 <span className="text-xs text-[#4A4A68]">Autentique-se com usuário e senha para gerenciar</span>
               </div>
               <div className="flex items-center gap-1.5 text-xs font-mono font-bold px-2.5 py-1 rounded-full bg-[#FFC857] border-2 border-[#1A1A2E]">
-                <span>Ubuntu 24.04</span>
+                <span>{telemetry ? 'Servidor Linux' : 'Ubuntu Server'}</span>
               </div>
             </div>
 
@@ -290,7 +290,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           </div>
 
           <div className="pt-4 mt-4 border-t-2 border-[#1A1A2E]/10 flex items-center justify-between text-[11px] font-mono text-[#4A4A68]">
-            <span>samuelserver • Ubuntu 24.04 LTS</span>
+            <span>samuelserver • Ubuntu Server</span>
             <div className="flex items-center gap-1.5 font-bold text-[#12B76A]">
               <span className="w-2 h-2 rounded-full bg-[#12B76A]" />
               <span>Seguro</span>

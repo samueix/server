@@ -21,8 +21,8 @@ try {
 } catch {}
 
 export function getOsInfo() {
-  let distro = 'Ubuntu Linux 24.04 LTS';
-  let version = '24.04';
+  let distro = os.type() === 'Linux' ? 'Linux' : os.type();
+  let version = '';
 
   try {
     if (fs.existsSync('/etc/os-release')) {
@@ -37,6 +37,10 @@ export function getOsInfo() {
       }
     }
   } catch {}
+
+  if (!version) {
+    version = os.release();
+  }
 
   return {
     hostname: os.hostname() || 'ubuntu-server',

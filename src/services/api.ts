@@ -292,8 +292,8 @@ export function parseTemperatureResponse(data: any): ApiTemperatureResponse {
 function parseSystemSnapshot(data: any): ApiServerResponse {
   const sysObj = data.system || data.sistema || {};
   const hostname = sysObj.hostname || data.hostname || data.servidor || 'samuelserver';
-  const nome = sysObj.os || sysObj.nome || 'Ubuntu Linux';
-  const versao = sysObj.os_version || sysObj.versao || '24.04 LTS';
+  const nome = sysObj.os || sysObj.nome || 'Linux';
+  const versao = sysObj.os_version || sysObj.versao || 'Não disponível';
   const arquitetura = sysObj.arch || sysObj.arquitetura || 'x86_64';
   const kernel = sysObj.kernel || data.kernel || sysObj.kernel_version || undefined;
 

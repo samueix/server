@@ -37,11 +37,19 @@ export const SystemTab: React.FC<SystemTabProps> = ({
   const arch = server?.sistema?.arquitetura || (isConnected ? 'x86_64' : 'Não disponível');
   const kernel = server?.sistema?.kernel || (isConnected ? '—' : 'Não disponível');
 
-  const cpuPhysical = server?.cpu?.nucleos_fisicos || (isConnected ? 2 : 0);
-  const cpuLogical = server?.cpu?.nucleos_logicos || (isConnected ? 4 : 0);
+  const cpuPhysical = server?.cpu?.nucleos_fisicos || 0;
+  const cpuLogical = server?.cpu?.nucleos_logicos || 0;
   const cpuFreq = server?.cpu?.frequencia_mhz;
   const ramTotal = server?.memoria?.total_gb || 0;
   const diskTotal = server?.disco?.total_gb || 0;
+  const swapTotalGb = server?.memoria?.swap_total_gb ?? (server as any)?.memoria?.swap?.total_gb ?? 0;
+  const swapUsedGb = server?.memoria?.swap_usada_gb ?? (server as any)?.memoria?.swap?.used_gb ?? 0;
+  const swapPercent = swapTotalGb > 0 ? Math.round((swapUsedGb / swapTotalGb) * 1000) / 10 : 0;
+  const swapStatusLabel = !isConnected
+    ? 'Não disponível'
+    : swapTotalGb > 0
+      ? `${swapTotalGb.toFixed(2)} GB total • ${swapUsedGb.toFixed(2)} GB em uso (${swapPercent.toFixed(1)}%) • Ativo`
+      : '0.00 GB total • 0.00 GB em uso • Desativado';
 
   const uptimeDays = server?.uptime?.dias || 0;
   const uptimeHours = server?.uptime?.horas || 0;
@@ -172,9 +180,9 @@ export const SystemTab: React.FC<SystemTabProps> = ({
               <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${ramTotal.toFixed(2)} GB DDR` : 'Não disponível'}</span>
             </div>
 
-            <div className="flex justify-between py-2.5">
-              <span className="text-[#4A4A68] font-sans font-bold">Swap total</span>
-              <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? '2.00 GB' : 'Não disponível'}</span>
+            <div className="flex justify-between py-2.5 gap-3">
+              <span className="text-[#4A4A68] font-sans font-bold">Swap</span>
+              <span className="text-[#1A1A2E] font-bold tabular-nums text-right">{swapStatusLabel}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
@@ -208,22 +216,22 @@ export const SystemTab: React.FC<SystemTabProps> = ({
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Fabricante do hardware</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Ubuntu PC / Server Hardware' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Modelo da placa-mãe</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Standard Desktop/Server Baseboard' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Segurança de boot</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Secure Boot Padrão' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Inicialização systemd</span>
-              <span className="text-[#12B76A] font-bold">{isConnected ? 'systemd 255.4 (default.target)' : 'Não disponível'}</span>
+              <span className="text-[#12B76A] font-bold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
             </div>
           </div>
         </div>

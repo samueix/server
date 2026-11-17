@@ -387,8 +387,8 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
             <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">Swap</span>
             <span className="text-[#1A1A2E] font-bold tabular-nums">
               {isConnected 
-                ? (swapTotal > 0 ? `${swapTotal.toFixed(2)} GB (${swapUsed.toFixed(2)} GB usado)` : '0.00 GB (desativado)') 
-                : 'N/D'}
+                ? (swapTotal > 0 ? `${swapUsed.toFixed(2)} / ${swapTotal.toFixed(2)} GB (${swapTotal > 0 ? ((swapUsed / swapTotal) * 100).toFixed(1) : '0.0'}%) • Ativo` : '0.00 / 0.00 GB • Desativado') 
+                : 'Não disponível'}
             </span>
           </div>
         </div>

@@ -661,7 +661,7 @@ export const LogsTab: React.FC = () => {
               {isStreaming ? `Tempo real (${streamInterval / 1000}s)` : 'Pausado'}
             </span>
             <span>•</span>
-            <span className="text-[#1A1A2E]">Ubuntu Server 24.04 LTS</span>
+            <span className="text-[#1A1A2E]">{logsData?.hostname ? `${logsData.hostname}` : 'Servidor Linux'}</span>
           </div>
         </div>
       </div>
