@@ -522,6 +522,30 @@ export interface PingResponse {
   notice: string;
 }
 
+export interface TraceHop {
+  count: number;
+  host: string;
+  loss: number;
+  sent: number;
+  last: number;
+  avg: number;
+  best: number;
+  wrst: number;
+  stdev: number;
+}
+
+export interface TraceResponse {
+  success: boolean;
+  host: string;
+  timestamp?: string;
+  hops: TraceHop[];
+  cycles?: number;
+  source?: string;
+  warning?: string;
+  error?: string;
+  fallbackError?: string;
+}
+
 export interface SystemLogEntry {
   id: string;
   timestamp: string;

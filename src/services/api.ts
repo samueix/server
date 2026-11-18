@@ -8,6 +8,7 @@ import {
   ProcessItem, 
   ServiceItem,
   PingResponse,
+  TraceResponse,
   PingTarget
 } from '../types';
 import { API, SERVER_IPV4, SERVER_IPV6 } from '../config';
@@ -895,6 +896,14 @@ export async function lookupMacVendor(mac: string, signal?: AbortSignal): Promis
  */
 export async function fetchPingTelemetry(signal?: AbortSignal): Promise<PingResponse> {
   return await apiFetch<PingResponse>('/api/ping', signal);
+}
+
+/**
+ * Executa traceroute/mtr em tempo real para um host (dados reais por salto)
+ */
+export async function fetchTrace(host: string, cycles = 3, signal?: AbortSignal): Promise<TraceResponse> {
+  const h = encodeURIComponent(host.trim());
+  return await apiFetch<TraceResponse>(`/api/trace?host=${h}&cycles=${cycles}`, signal);
 }
 
 export interface WifiNeighbor {

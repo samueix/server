@@ -17,6 +17,9 @@ import path from 'path';
 import crypto from 'crypto';
 import net from 'net';
 import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 import { 
   fetchAdGuardStatus, 
   fetchAdGuardStats, 
@@ -880,6 +883,66 @@ export function createApp() {
         overall_status: 'DESCONECTADO',
         targets: []
       });
+    }
+  });
+
+  // Traceroute/MTR em tempo real (path trace com latência por salto) - dados reais via mtr
+  app.get('/api/trace', async (req, res) => {
+    applyCors(res);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    if (req.method === 'OPTIONS') return res.status(204).end();
+
+    const rawHost = String(req.query.host || '').trim();
+    const host = rawHost.slice(0, 253);
+    // validação estrita para evitar injeção (execFile já usa argv, mas reforça)
+    if (!host || !/^[a-zA-Z0-9._:-]+$/.test(host)) {
+      return res.status(400).json({ success: false, error: 'Host inválido', host: rawHost, hops: [] });
+    }
+
+    try {
+      const cycles = Math.max(1, Math.min(5, parseInt(String(req.query.cycles || '3'), 10) || 3));
+      const args = ['-r', '-c', String(cycles), '-n', '-j', host];
+      const { stdout } = await execFileAsync('mtr', args, { timeout: 30000, maxBuffer: 1024 * 1024 });
+      let parsed: any = null;
+      try { parsed = JSON.parse(stdout); } catch { parsed = null; }
+      const hubs = Array.isArray(parsed?.report?.hubs) ? parsed.report.hubs : [];
+      const hops = hubs.map((h: any) => ({
+        count: Number(h.count) || 0,
+        host: String(h.host ?? '???'),
+        loss: Number(h['Loss%'] ?? h.Loss ?? 0),
+        sent: Number(h.Snt ?? 0),
+        last: Number(h.Last ?? 0),
+        avg: Number(h.Avg ?? 0),
+        best: Number(h.Best ?? 0),
+        wrst: Number(h.Wrst ?? 0),
+        stdev: Number(h.StDev ?? 0),
+      }));
+      return res.json({
+        success: true,
+        host,
+        timestamp: new Date().toISOString(),
+        hops,
+        cycles,
+        source: 'mtr'
+      });
+    } catch (err: any) {
+      // fallback: tenta tracepath se mtr falhar
+      try {
+        const { stdout } = await execFileAsync('tracepath', ['-n', host], { timeout: 20000, maxBuffer: 1024 * 1024 });
+        const lines = String(stdout).split('\n').map(l => l.trim()).filter(Boolean);
+        const hops: any[] = [];
+        for (const line of lines) {
+          const m = line.match(/^(\d+)[:?]?\s+(\S+)(?:\s+([0-9.]+)ms)?/);
+          if (!m) continue;
+          const hopHost = m[2] === 'no' && line.includes('no reply') ? '???' : m[2];
+          const ms = m[3] ? parseFloat(m[3]) : 0;
+          const isNo = hopHost === '???' || line.includes('no reply');
+          hops.push({ count: parseInt(m[1], 10), host: hopHost, loss: isNo ? 100 : 0, sent: 1, last: ms, avg: ms, best: ms, wrst: ms, stdev: 0 });
+        }
+        return res.json({ success: true, host, timestamp: new Date().toISOString(), hops, cycles: 1, source: 'tracepath', warning: err?.message || 'mtr indisponível, usando tracepath' });
+      } catch (err2: any) {
+        return res.status(500).json({ success: false, host, timestamp: new Date().toISOString(), hops: [], error: err?.message || 'Falha ao executar trace', fallbackError: err2?.message });
+      }
     }
   });
 
