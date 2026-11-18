@@ -1,22 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Radio,
   RefreshCw,
   CheckCircle2,
   AlertTriangle,
-  ShieldCheck,
   Server,
   Activity,
   Route,
   MapPin,
   Target,
-  ArrowDown,
-  Clock,
   Wifi,
   Crosshair
 } from 'lucide-react';
 import { fetchPingTelemetry, fetchTrace } from '../../services/api';
-import { PingResponse, PingTarget, TraceResponse, TraceHop } from '../../types';
+import { PingResponse, TraceHop } from '../../types';
+
+type TraceStatus = 'idle' | 'running' | 'done' | 'error';
 
 export const PingTab: React.FC = () => {
   const [data, setData] = useState<PingResponse | null>(null);
@@ -27,18 +25,25 @@ export const PingTab: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [selectedHost, setSelectedHost] = useState<string>('1.1.1.1');
-  const [trace, setTrace] = useState<TraceResponse | null>(null);
+  const [hops, setHops] = useState<TraceHop[]>([]);
+  const [traceStatus, setTraceStatus] = useState<TraceStatus>('idle');
   const [traceLoading, setTraceLoading] = useState<boolean>(false);
   const [traceError, setTraceError] = useState<string | null>(null);
   const [traceUpdated, setTraceUpdated] = useState<string>('--:--:--');
+  const [traceReached, setTraceReached] = useState<boolean | null>(null);
+  const [traceSource, setTraceSource] = useState<string>('stream');
   const [autoTrace, setAutoTrace] = useState<boolean>(true);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const traceAbortRef = useRef<AbortController | null>(null);
+  const traceLoopRef = useRef<any>(null);
   const isBusyRef = useRef<boolean>(false);
-  const isTraceBusyRef = useRef<boolean>(false);
-  const traceTimerRef = useRef<any>(null);
-  const hasTraceRef = useRef<boolean>(false);
+  const traceRunIdRef = useRef<number>(0);
+  const selectedHostRef = useRef<string>(selectedHost);
+  const autoTraceRef = useRef<boolean>(autoTrace);
+
+  useEffect(() => { selectedHostRef.current = selectedHost; }, [selectedHost]);
+  useEffect(() => { autoTraceRef.current = autoTrace; }, [autoTrace]);
 
   const loadPing = async (isManual = false) => {
     if (isBusyRef.current) return;
@@ -74,27 +79,145 @@ export const PingTab: React.FC = () => {
     }
   };
 
-  const runTrace = useCallback(async (host: string, showLoading = false) => {
-    if (!host || isTraceBusyRef.current) return;
-    isTraceBusyRef.current = true;
-    if (showLoading || !hasTraceRef.current) setTraceLoading(true);
-    if (traceAbortRef.current) traceAbortRef.current.abort();
-    traceAbortRef.current = new AbortController();
+  const scheduleNextTrace = useCallback((delayMs: number) => {
+    if (traceLoopRef.current) clearTimeout(traceLoopRef.current);
+    traceLoopRef.current = setTimeout(() => {
+      if (autoTraceRef.current && !document.hidden) {
+        startTrace(selectedHostRef.current);
+      } else {
+        scheduleNextTrace(3000);
+      }
+    }, delayMs);
+  }, []);
+
+  const fallbackTrace = useCallback(async (host: string, runId: number) => {
     try {
-      const res = await fetchTrace(host, 3, traceAbortRef.current.signal);
-      setTrace(res);
-      hasTraceRef.current = true;
+      if (traceAbortRef.current) traceAbortRef.current.abort();
+      traceAbortRef.current = new AbortController();
+      const res = await fetchTrace(host, 2, traceAbortRef.current.signal);
+      if (traceRunIdRef.current !== runId) return;
+      setHops(res.hops || []);
+      setTraceSource(res.source || 'mtr');
+      setTraceReached(null);
       setTraceError(res.success ? (res.warning || null) : (res.error || 'Falha no rastreamento'));
+      setTraceStatus(res.success ? 'done' : 'error');
       setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        setTraceError(err.message || 'Falha ao executar traceroute');
-      }
+      if (traceRunIdRef.current !== runId || err?.name === 'AbortError') return;
+      setTraceError(err.message || 'Falha ao executar traceroute');
+      setTraceStatus('error');
     } finally {
-      setTraceLoading(false);
-      isTraceBusyRef.current = false;
+      if (traceRunIdRef.current === runId) {
+        setTraceLoading(false);
+        scheduleNextTrace(6000);
+      }
     }
-  }, []);
+  }, [scheduleNextTrace]);
+
+  const startTrace = useCallback(async (host: string) => {
+    if (!host) return;
+    const runId = ++traceRunIdRef.current;
+
+    if (traceLoopRef.current) { clearTimeout(traceLoopRef.current); traceLoopRef.current = null; }
+    if (traceAbortRef.current) traceAbortRef.current.abort();
+    traceAbortRef.current = new AbortController();
+
+    setHops([]);
+    setTraceError(null);
+    setTraceReached(null);
+    setTraceSource('stream');
+    setTraceStatus('running');
+    setTraceLoading(true);
+    setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
+
+    let gotAnyHop = false;
+    let finished = false;
+
+    const finish = (status: TraceStatus) => {
+      if (traceRunIdRef.current !== runId || finished) return;
+      finished = true;
+      setTraceStatus(status);
+      setTraceLoading(false);
+      setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
+      scheduleNextTrace(6000);
+    };
+
+    try {
+      const resp = await fetch(`/api/trace/stream?host=${encodeURIComponent(host)}&maxHops=30`, {
+        signal: traceAbortRef.current.signal,
+        headers: { 'Accept': 'text/event-stream' },
+        cache: 'no-store'
+      });
+
+      if (!resp.ok || !resp.body) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const handleEvent = (rawEvent: string) => {
+        const lines = rawEvent.split('\n');
+        let eventName = 'message';
+        const dataLines: string[] = [];
+        for (const line of lines) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        const dataStr = dataLines.join('\n');
+        if (!dataStr) return;
+        let payload: any = null;
+        try { payload = JSON.parse(dataStr); } catch { payload = null; }
+        if (!payload) return;
+
+        if (eventName === 'hop') {
+          gotAnyHop = true;
+          const hop = payload as TraceHop;
+          setHops(prev => {
+            const next = prev.filter(h => h.count !== hop.count);
+            next.push(hop);
+            next.sort((a, b) => a.count - b.count);
+            return next;
+          });
+          setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
+          if ((hop as any).reached) setTraceReached(true);
+        } else if (eventName === 'done') {
+          if (typeof payload.reached === 'boolean') setTraceReached(payload.reached);
+          setTraceSource('ping (ICMP, stream)');
+          finish('done');
+        } else if (eventName === 'trace-error') {
+          setTraceError(payload.error || 'Falha no rastreamento');
+          finish('error');
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (traceRunIdRef.current !== runId) { try { reader.cancel(); } catch {} return; }
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const rawEvent = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          if (rawEvent.trim()) handleEvent(rawEvent);
+        }
+      }
+      // flush restante
+      if (buffer.trim() && traceRunIdRef.current === runId) handleEvent(buffer);
+
+      if (traceRunIdRef.current === runId && !finished) {
+        // stream terminou sem 'done' explícito
+        if (gotAnyHop) finish('done'); else throw new Error('Stream encerrado sem dados');
+      }
+    } catch (err: any) {
+      if (traceRunIdRef.current !== runId) return;
+      if (err?.name === 'AbortError') return;
+      // fallback para mtr/tracepath se stream falhar
+      await fallbackTrace(host, runId);
+    }
+  }, [fallbackTrace, scheduleNextTrace]);
 
   useEffect(() => {
     loadPing(false);
@@ -110,39 +233,32 @@ export const PingTab: React.FC = () => {
     };
   }, []);
 
-  // trace loop: roda ao mudar host e periodicamente
+  // trace loop: progressivo, roda ao mudar host e após concluir
   useEffect(() => {
-    let cancelled = false;
-    if (traceTimerRef.current) clearTimeout(traceTimerRef.current);
-    if (traceAbortRef.current) traceAbortRef.current.abort();
-    isTraceBusyRef.current = false;
-    hasTraceRef.current = false;
-    setTrace(null);
-    setTraceError(null);
-    setTraceLoading(true);
-    runTrace(selectedHost, true);
-
-    const loop = async () => {
-      if (cancelled) return;
-      if (!autoTrace || document.hidden) {
-        traceTimerRef.current = setTimeout(loop, 5000);
-        return;
+    traceRunIdRef.current++;
+    startTrace(selectedHost);
+    const onVis = () => {
+      if (!document.hidden && autoTraceRef.current && traceStatus !== 'running') {
+        // se estava parado por aba oculta, retoma
+        if (!traceLoopRef.current) scheduleNextTrace(1000);
       }
-      await runTrace(selectedHost, false);
-      if (!cancelled) traceTimerRef.current = setTimeout(loop, 6000);
     };
-    traceTimerRef.current = setTimeout(loop, 6000);
-
-    const onVis = () => { if (!cancelled && !document.hidden) runTrace(selectedHost, false); };
     document.addEventListener('visibilitychange', onVis);
-
     return () => {
-      cancelled = true;
-      if (traceTimerRef.current) clearTimeout(traceTimerRef.current);
+      traceRunIdRef.current++;
+      if (traceLoopRef.current) clearTimeout(traceLoopRef.current);
       document.removeEventListener('visibilitychange', onVis);
       if (traceAbortRef.current) traceAbortRef.current.abort();
     };
-  }, [selectedHost, autoTrace, runTrace]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHost]);
+
+  // reagir a toggle de autoTrace
+  useEffect(() => {
+    if (autoTrace && traceStatus !== 'running' && !traceLoopRef.current) {
+      scheduleNextTrace(1500);
+    }
+  }, [autoTrace, traceStatus, scheduleNextTrace]);
 
   const pingStats = React.useMemo(() => {
     if (history.length === 0) return { min: 0, max: 0, avg: 0, packetLoss: 0, samples: 0 };
@@ -177,7 +293,7 @@ export const PingTab: React.FC = () => {
   };
 
   const targets = data?.targets || [];
-  const hops = trace?.hops || [];
+  const isTracing = traceStatus === 'running';
 
   return (
     <div className="space-y-4 font-sans text-[#1A1A2E]">
@@ -190,13 +306,13 @@ export const PingTab: React.FC = () => {
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h2 className="text-base sm:text-lg font-bold font-title text-[#1A1A2E]">Ping e rastreamento de rota</h2>
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#D1FADF] border-2 border-[#1A1A2E] text-[#12B76A] shadow-[1.5px_1.5px_0px_#1A1A2E]">
-                <span className="w-2 h-2 rounded-full border border-[#1A1A2E] bg-[#12B76A]" />
-                ICMP/TCP real (mtr)
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E] ${isTracing ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#12B76A]'}`}>
+                <span className={`w-2 h-2 rounded-full border border-[#1A1A2E] ${isTracing ? 'bg-[#F79009] animate-pulse' : 'bg-[#12B76A]'}`} />
+                {isTracing ? 'RASTREANDO (ao vivo)' : 'ICMP/TCP real'}
               </span>
             </div>
             <p className="text-xs text-[#4A4A68] mt-0.5 font-medium">
-              Latência por salto (traceroute) e ping em tempo real — caminho real dos pacotes até o destino
+              Traceroute progressivo: cada salto aparece assim que é descoberto, com latência real
             </p>
           </div>
         </div>
@@ -207,11 +323,11 @@ export const PingTab: React.FC = () => {
             <span className="text-xs text-[#1A1A2E] font-mono font-bold tabular-nums">{lastCheck}</span>
           </div>
           <button
-            onClick={() => { loadPing(true); runTrace(selectedHost, true); }}
-            disabled={refreshing || traceLoading}
+            onClick={() => { loadPing(true); startTrace(selectedHost); }}
+            disabled={refreshing}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#FF5A36] hover:bg-[#E04522] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-md text-xs font-bold transition disabled:opacity-50 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${(refreshing || traceLoading) ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${(refreshing || isTracing) ? 'animate-spin' : ''}`} />
             <span>Atualizar</span>
           </button>
         </div>
@@ -255,8 +371,8 @@ export const PingTab: React.FC = () => {
               <MapPin className="w-4 h-4 text-[#00A6FB]" />
             </div>
             <div>
-              <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Rota dos pacotes (traceroute)</h3>
-              <span className="text-[10px] text-[#4A4A68] font-mono">Dados reais por salto • origem: samuelserver</span>
+              <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Rota dos pacotes (traceroute ao vivo)</h3>
+              <span className="text-[10px] text-[#4A4A68] font-mono">Cada salto aparece em tempo real • origem: samuelserver</span>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -283,7 +399,9 @@ export const PingTab: React.FC = () => {
             >
               Auto: {autoTrace ? 'ON' : 'OFF'}
             </button>
-            <span className="text-[10px] font-mono text-[#4A4A68] bg-[#FFF7E8] px-2 py-1 rounded border border-[#1A1A2E]">Trace: {traceUpdated}</span>
+            <span className={`text-[10px] font-mono px-2 py-1 rounded border border-[#1A1A2E] ${isTracing ? 'bg-[#FEF0C7] text-[#92400E]' : 'bg-[#FFF7E8] text-[#4A4A68]'}`}>
+              {isTracing ? `Rastreando... ${hops.length} salto(s)` : `Atualizado: ${traceUpdated}`}
+            </span>
           </div>
         </div>
 
@@ -298,8 +416,8 @@ export const PingTab: React.FC = () => {
           {traceLoading && hops.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-[#4A4A68] font-mono text-xs gap-2">
               <RefreshCw className="w-6 h-6 animate-spin text-[#FF5A36]" />
-              <span>Rastreando rota até {selectedHost}...</span>
-              <span className="text-[10px]">Executando mtr (dados reais por salto)</span>
+              <span>Iniciando rastreamento até {selectedHost}...</span>
+              <span className="text-[10px]">Os saltos aparecerão conforme forem descobertos</span>
             </div>
           ) : hops.length === 0 ? (
             <div className="py-8 text-center text-xs font-mono text-[#4A4A68]">Nenhum salto retornado. Tente atualizar o rastreamento.</div>
@@ -317,33 +435,36 @@ export const PingTab: React.FC = () => {
                 </div>
                 <div className="flex-1 pb-4">
                   <div className="text-xs font-bold text-[#1A1A2E]">Origem • samuelserver</div>
-                  <div className="text-[11px] font-mono text-[#4A4A68]">Este servidor (início do trace)</div>
+                  <div className="text-[11px] font-mono text-[#4A4A68]">Este servidor → destino {selectedHost}</div>
                 </div>
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#D1FADF] border border-[#1A1A2E] text-[#027A48]">ENVIANDO</span>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border border-[#1A1A2E] ${isTracing ? 'bg-[#FEF0C7] text-[#92400E]' : 'bg-[#D1FADF] text-[#027A48]'}`}>
+                  {isTracing ? 'EM ROTA' : traceReached ? 'ALCANÇADO' : 'CONCLUÍDO'}
+                </span>
               </div>
 
               {/* saltos */}
               {hops.map((hop, idx) => {
                 const tone = hopTone(hop);
                 const isLast = idx === hops.length - 1;
-                const isDest = hop.host === selectedHost || isLast;
+                const isDest = hop.host === selectedHost || (traceReached === true && isLast && hop.host !== '???');
                 const isTimeout = hop.host === '???' || hop.loss >= 100;
+                const showPulse = isLast && isTracing;
                 return (
                   <div key={`${hop.count}-${idx}`} className="flex items-stretch gap-3">
                     <div className="flex flex-col items-center w-10 shrink-0">
-                      <div className={`w-9 h-9 rounded-full border-2 ${tone.ring} shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center z-10 relative`}>
+                      <div className={`w-9 h-9 rounded-full border-2 ${tone.ring} shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center z-10 relative transition-all`}>
                         {isDest ? <Target className="w-4 h-4 text-[#1A1A2E]" /> : <span className="text-[11px] font-mono font-black text-[#1A1A2E]">{hop.count}</span>}
-                        {!isTimeout && (
-                          <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[#12B76A] border border-[#1A1A2E] animate-ping" style={{ animationDuration: `${1.5 + idx * 0.15}s` }} />
+                        {(!isTimeout || showPulse) && (
+                          <span className={`absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-[#1A1A2E] ${showPulse ? 'bg-[#00A6FB]' : 'bg-[#12B76A]'} animate-ping`} style={{ animationDuration: `${1.5 + idx * 0.1}s` }} />
                         )}
                       </div>
-                      {!isLast && (
+                      {(!isLast || isTracing) && (
                         <div className="w-1 flex-1 min-h-[28px] bg-[#1A1A2E]/20 relative overflow-hidden">
-                          <div className="absolute left-0 right-0 h-3 rounded-sm" style={{ backgroundColor: tone.line, animation: `trace-packet 1.6s linear infinite`, animationDelay: `${idx * 0.2}s`, opacity: 0.9 }} />
+                          <div className="absolute left-0 right-0 h-3 rounded-sm" style={{ backgroundColor: tone.line, animation: `trace-packet 1.4s linear infinite`, animationDelay: `${idx * 0.15}s`, opacity: 0.9 }} />
                         </div>
                       )}
                     </div>
-                    <div className={`flex-1 ${!isLast ? 'pb-3' : ''}`}>
+                    <div className={`flex-1 ${(!isLast || isTracing) ? 'pb-3' : ''}`}>
                       <div className={`p-2.5 rounded-lg border-2 border-[#1A1A2E] bg-white shadow-[2px_2px_0px_#1A1A2E] ${isDest ? 'ring-2 ring-[#FF5A36] ring-offset-1' : ''}`}>
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
                           <div className="min-w-0">
@@ -351,21 +472,22 @@ export const PingTab: React.FC = () => {
                               <span className="text-xs font-bold text-[#1A1A2E]">Salto {hop.count}</span>
                               <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-[#1A1A2E] ${tone.ring} ${tone.text}`}>{isTimeout ? 'TIMEOUT' : tone.label}</span>
                               {isDest && <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-[#1A1A2E] bg-[#FF5A36] text-white">DESTINO</span>}
+                              {showPulse && <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-[#1A1A2E] bg-[#00A6FB] text-white">NOVO</span>}
                             </div>
-                            <div className="text-[11px] font-mono font-semibold text-[#4A4A68] break-all mt-0.5">{isTimeout ? '* * * (sem resposta)' : hop.host}</div>
+                            <div className="text-[11px] font-mono font-semibold text-[#4A4A68] break-all mt-0.5">{isTimeout ? '* * * (sem resposta neste salto)' : hop.host}</div>
                           </div>
                           <div className="flex items-center gap-3 text-[11px] font-mono shrink-0">
                             <div className="text-right">
-                              <div className="text-[#4A4A68] text-[10px]">média</div>
-                              <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${hop.avg.toFixed(1)} ms`}</div>
+                              <div className="text-[#4A4A68] text-[10px]">latência</div>
+                              <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${(hop.avg || hop.last || 0).toFixed(1)} ms`}</div>
                             </div>
                             <div className="text-right">
                               <div className="text-[#4A4A68] text-[10px]">último</div>
-                              <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${hop.last.toFixed(1)} ms`}</div>
+                              <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${(hop.last || hop.avg || 0).toFixed(1)} ms`}</div>
                             </div>
                             <div className="text-right">
                               <div className="text-[#4A4A68] text-[10px]">perda</div>
-                              <div className={`font-bold tabular-nums ${hop.loss > 0 ? 'text-[#F04438]' : 'text-[#12B76A]'}`}>{hop.loss.toFixed(0)}%</div>
+                              <div className={`font-bold tabular-nums ${hop.loss > 0 ? 'text-[#F04438]' : 'text-[#12B76A]'}`}>{Math.round(hop.loss)}%</div>
                             </div>
                           </div>
                         </div>
@@ -374,13 +496,24 @@ export const PingTab: React.FC = () => {
                   </div>
                 );
               })}
+
+              {isTracing && (
+                <div className="flex items-center gap-3 mt-1">
+                  <div className="flex flex-col items-center w-10 shrink-0">
+                    <div className="w-9 h-9 rounded-full border-2 border-dashed border-[#00A6FB] bg-[#E0F2FE] flex items-center justify-center">
+                      <RefreshCw className="w-4 h-4 text-[#00A6FB] animate-spin" />
+                    </div>
+                  </div>
+                  <div className="text-[11px] font-mono text-[#026AA2] font-semibold">Aguardando próximo salto...</div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         <div className="flex items-center justify-between text-[10px] font-mono text-[#4A4A68] flex-wrap gap-2">
-          <span className="flex items-center gap-1.5"><Wifi className="w-3.5 h-3.5 text-[#12B76A]" /> Pacotes ICMP (mtr) com latência real por salto</span>
-          <span>Fonte: <strong className="text-[#1A1A2E]">{trace?.source || 'mtr'}</strong> • {trace?.cycles || 3} ciclos{traceLoading ? ' • atualizando...' : ''}</span>
+          <span className="flex items-center gap-1.5"><Wifi className="w-3.5 h-3.5 text-[#12B76A]" /> Sondagem ICMP progressiva (TTL incremental, em tempo real)</span>
+          <span>Fonte: <strong className="text-[#1A1A2E]">{traceSource}</strong>{isTracing ? ' • em andamento...' : traceReached === true ? ' • destino alcançado' : ''}</span>
         </div>
       </div>
 
@@ -393,7 +526,7 @@ export const PingTab: React.FC = () => {
             </div>
             <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Detalhes por salto (RTT real)</h3>
           </div>
-          <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FFF7E8] px-2.5 py-0.5 rounded-full border border-[#1A1A2E] tabular-nums">{hops.length} saltos</span>
+          <span className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FFF7E8] px-2.5 py-0.5 rounded-full border border-[#1A1A2E] tabular-nums">{hops.length} salto(s){isTracing ? '...' : ''}</span>
         </div>
         <div className="overflow-x-auto border-2 border-[#1A1A2E] rounded-lg">
           <table className="w-full text-left text-xs text-[#1A1A2E]">
@@ -418,12 +551,12 @@ export const PingTab: React.FC = () => {
                   <tr key={i} className="hover:bg-[#FFF7E8]/50 transition">
                     <td className="py-2.5 px-3 font-bold">{h.count}</td>
                     <td className="py-2.5 px-3 font-semibold break-all">{isTimeout ? '* * *' : h.host}</td>
-                    <td className={`py-2.5 px-3 text-right font-bold ${h.loss > 0 ? 'text-[#F04438]' : 'text-[#12B76A]'}`}>{h.loss.toFixed(0)}%</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums">{isTimeout ? '--' : h.last.toFixed(1)}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums font-bold">{isTimeout ? '--' : h.avg.toFixed(1)}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-[#12B76A]">{isTimeout ? '--' : h.best.toFixed(1)}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-[#F79009]">{isTimeout ? '--' : h.wrst.toFixed(1)}</td>
-                    <td className="py-2.5 px-3 text-right tabular-nums text-[#4A4A68]">{isTimeout ? '--' : h.stdev.toFixed(1)}</td>
+                    <td className={`py-2.5 px-3 text-right font-bold ${h.loss > 0 ? 'text-[#F04438]' : 'text-[#12B76A]'}`}>{Math.round(h.loss)}%</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums">{isTimeout ? '--' : (h.last || h.avg || 0).toFixed(1)}</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums font-bold">{isTimeout ? '--' : (h.avg || h.last || 0).toFixed(1)}</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums text-[#12B76A]">{isTimeout ? '--' : (h.best || h.avg || h.last || 0).toFixed(1)}</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums text-[#F79009]">{isTimeout ? '--' : (h.wrst || h.avg || h.last || 0).toFixed(1)}</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums text-[#4A4A68]">{isTimeout ? '--' : (h.stdev || 0).toFixed(1)}</td>
                   </tr>
                 );
               })}

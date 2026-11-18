@@ -532,6 +532,8 @@ export interface TraceHop {
   best: number;
   wrst: number;
   stdev: number;
+  timeout?: boolean;
+  reached?: boolean;
 }
 
 export interface TraceResponse {

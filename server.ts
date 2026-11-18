@@ -886,6 +886,76 @@ export function createApp() {
     }
   });
 
+  // Traceroute progressivo (stream SSE): envia cada salto assim que descoberto
+  app.get('/api/trace/stream', async (req, res) => {
+    applyCors(res);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (req.method === 'OPTIONS') return res.status(204).end();
+
+    const rawHost = String(req.query.host || '').trim();
+    const host = rawHost.slice(0, 253);
+    if (!host || !/^[a-zA-Z0-9._:-]+$/.test(host)) {
+      res.write(`event: trace-error\ndata: ${JSON.stringify({ error: 'Host inválido' })}\n\n`);
+      return res.end();
+    }
+    const maxHops = Math.max(1, Math.min(30, parseInt(String(req.query.maxHops || '30'), 10) || 30));
+
+    let closed = false;
+    req.on('close', () => { closed = true; });
+
+    const send = (event: string, data: any) => {
+      if (closed) return;
+      try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {}
+    };
+
+    try {
+      for (let ttl = 1; ttl <= maxHops && !closed; ttl++) {
+        const t0 = Date.now();
+        let stdout = '';
+        let stderr = '';
+        try {
+          const r = await execFileAsync('ping', ['-c', '1', '-W', '1', '-n', '-t', String(ttl), host], { timeout: 2200 });
+          stdout = r.stdout || '';
+          stderr = r.stderr || '';
+        } catch (e: any) {
+          stdout = e?.stdout || '';
+          stderr = e?.stderr || '';
+        }
+        const out = `${stdout}\n${stderr}`;
+        const elapsed = Date.now() - t0;
+
+        const replyM = out.match(/\d+\s+bytes\s+from\s+([^:\s]+).*time[=<]([0-9.]+)\s*ms/i);
+        const exM = out.match(/From\s+([^\s]+)[\s\S]*?(Time to live exceeded|Time exceeded)/i);
+        const unreachM = !exM ? out.match(/From\s+([^\s]+)[\s\S]*?(Destination|Unreachable)/i) : null;
+
+        if (replyM) {
+          const ip = replyM[1];
+          const ms = parseFloat(replyM[2]);
+          send('hop', { count: ttl, host: ip, loss: 0, sent: 1, last: ms, avg: ms, best: ms, wrst: ms, stdev: 0, reached: true });
+          send('done', { hops: ttl, reached: true });
+          break;
+        } else if (exM || unreachM) {
+          const ip = (exM || unreachM)![1].replace(/:$/, '');
+          const ms = Math.max(1, Math.round(elapsed));
+          send('hop', { count: ttl, host: ip, loss: 0, sent: 1, last: ms, avg: ms, best: ms, wrst: ms, stdev: 0 });
+          if (ip === host) { send('done', { hops: ttl, reached: true }); break; }
+        } else {
+          send('hop', { count: ttl, host: '???', loss: 100, sent: 1, last: 0, avg: 0, best: 0, wrst: 0, stdev: 0, timeout: true });
+        }
+
+        if (ttl === maxHops) send('done', { hops: ttl, reached: false });
+      }
+    } catch (e: any) {
+      send('trace-error', { error: e?.message || 'Falha no rastreamento' });
+    } finally {
+      if (!closed) { try { res.end(); } catch {} }
+    }
+  });
+
   // Traceroute/MTR em tempo real (path trace com latência por salto) - dados reais via mtr
   app.get('/api/trace', async (req, res) => {
     applyCors(res);
