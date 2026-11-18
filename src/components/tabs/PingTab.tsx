@@ -38,6 +38,7 @@ export const PingTab: React.FC = () => {
   const isBusyRef = useRef<boolean>(false);
   const isTraceBusyRef = useRef<boolean>(false);
   const traceTimerRef = useRef<any>(null);
+  const hasTraceRef = useRef<boolean>(false);
 
   const loadPing = async (isManual = false) => {
     if (isBusyRef.current) return;
@@ -73,16 +74,16 @@ export const PingTab: React.FC = () => {
     }
   };
 
-  const runTrace = useCallback(async (host: string, manual = false) => {
+  const runTrace = useCallback(async (host: string, showLoading = false) => {
     if (!host || isTraceBusyRef.current) return;
     isTraceBusyRef.current = true;
-    if (manual) setTraceLoading(true);
-    if (!trace) setTraceLoading(true);
+    if (showLoading || !hasTraceRef.current) setTraceLoading(true);
     if (traceAbortRef.current) traceAbortRef.current.abort();
     traceAbortRef.current = new AbortController();
     try {
       const res = await fetchTrace(host, 3, traceAbortRef.current.signal);
       setTrace(res);
+      hasTraceRef.current = true;
       setTraceError(res.success ? (res.warning || null) : (res.error || 'Falha no rastreamento'));
       setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
     } catch (err: any) {
@@ -93,7 +94,7 @@ export const PingTab: React.FC = () => {
       setTraceLoading(false);
       isTraceBusyRef.current = false;
     }
-  }, [trace]);
+  }, []);
 
   useEffect(() => {
     loadPing(false);
@@ -111,36 +112,37 @@ export const PingTab: React.FC = () => {
 
   // trace loop: roda ao mudar host e periodicamente
   useEffect(() => {
+    let cancelled = false;
     if (traceTimerRef.current) clearTimeout(traceTimerRef.current);
     if (traceAbortRef.current) traceAbortRef.current.abort();
     isTraceBusyRef.current = false;
+    hasTraceRef.current = false;
     setTrace(null);
     setTraceError(null);
+    setTraceLoading(true);
     runTrace(selectedHost, true);
 
-    const loop = () => {
+    const loop = async () => {
+      if (cancelled) return;
       if (!autoTrace || document.hidden) {
         traceTimerRef.current = setTimeout(loop, 5000);
         return;
       }
-      // aguarda término do trace atual e agenda próximo
-      const waitAndRun = async () => {
-        await runTrace(selectedHost, false);
-        traceTimerRef.current = setTimeout(loop, 6000);
-      };
-      waitAndRun();
+      await runTrace(selectedHost, false);
+      if (!cancelled) traceTimerRef.current = setTimeout(loop, 6000);
     };
     traceTimerRef.current = setTimeout(loop, 6000);
 
-    const onVis = () => { if (!document.hidden) runTrace(selectedHost, false); };
+    const onVis = () => { if (!cancelled && !document.hidden) runTrace(selectedHost, false); };
     document.addEventListener('visibilitychange', onVis);
 
     return () => {
+      cancelled = true;
       if (traceTimerRef.current) clearTimeout(traceTimerRef.current);
       document.removeEventListener('visibilitychange', onVis);
       if (traceAbortRef.current) traceAbortRef.current.abort();
     };
-  }, [selectedHost, autoTrace]);
+  }, [selectedHost, autoTrace, runTrace]);
 
   const pingStats = React.useMemo(() => {
     if (history.length === 0) return { min: 0, max: 0, avg: 0, packetLoss: 0, samples: 0 };
