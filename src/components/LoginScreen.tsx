@@ -162,6 +162,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
         className="absolute inset-0 pointer-events-none opacity-20 -z-0"
         style={{ backgroundImage: 'radial-gradient(#1A1A2E 1.2px, transparent 1.2px)', backgroundSize: '24px 24px' }}
       />
+      <div className="absolute -top-16 -right-16 w-64 h-64 rounded-full bg-[#FFC857] border-4 border-[#1A1A2E] -z-0 opacity-50 pointer-events-none shadow-[4px_4px_0px_#1A1A2E] login-float" />
+      <div className="absolute -bottom-20 -left-20 w-80 h-80 rounded-3xl bg-[#00A6FB] border-4 border-[#1A1A2E] rotate-12 -z-0 opacity-20 pointer-events-none shadow-[4px_4px_0px_#1A1A2E] login-float-slow" />
+      <div className="absolute top-1/4 -left-10 w-24 h-24 rounded-xl bg-[#FF5A36] border-2 border-[#1A1A2E] -rotate-12 -z-0 opacity-20 pointer-events-none" />
 
       <div className="w-full max-w-5xl grid grid-cols-1 md:grid-cols-12 gap-5 md:gap-6 relative z-10 items-stretch login-enter">
         {/* Painel Esquerdo */}
