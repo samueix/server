@@ -1,8 +1,15 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { spawn } from 'child_process';
+import os from 'os';
+import dns from 'dns';
+import { spawn, execFile } from 'child_process';
+import { promisify } from 'util';
 import type { DomainAnalysis } from './db.js';
+import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
+import { getAllMonitoredServices } from './servicesMonitor.js';
+
+const execFileAsync = promisify(execFile);
 
 const OPENCODE_BIN = process.env.OPENCODE_BIN || '/home/samuel/.opencode/bin/opencode';
 const OPENCODE_HOME = process.env.OPENCODE_HOME || '/home/samuel';
@@ -18,6 +25,7 @@ export interface OpencodeMessage {
   reasoning?: string;
   tokensUsed?: number;
   timestamp: string;
+  imageDataUrl?: string;
 }
 
 export interface OpencodeSession {
@@ -209,6 +217,150 @@ export async function listOpencodeModels(): Promise<string[]> {
   } catch (err) {
     console.warn('[Opencode] Falha ao listar modelos via CLI, usando fallback:', err);
     return [OPENCODE_MODEL];
+  }
+}
+
+
+function safeExec(cmd: string, args: string[], timeoutMs = 3000, max = 12000): string {
+  try {
+    // execFileSync-like via child_process sync? easier use require? no, already have execFileAsync in other places but need sync helper.
+  } catch { return ''; }
+  return '';
+}
+
+// lightweight sync exec (avoid async context build complexity)
+function sh(cmd: string, timeoutMs = 2500, max = 14000): string {
+  try {
+    const { execSync } = require('child_process');
+    const out = execSync(cmd, { encoding: 'utf-8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 });
+    const s = String(out || '').trim();
+    return s.length > max ? s.slice(0, max) + '\n...[truncado]' : s;
+  } catch (e: any) {
+    const s = String(e?.stdout || e?.message || '').trim();
+    return s.length > max ? s.slice(0, max) : s;
+  }
+}
+
+function fmtBytes(b: number) {
+  if (!Number.isFinite(b)) return String(b);
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0; let n = b;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i === 0 ? 0 : 1)} ${u[i]}`;
+}
+
+async function buildServerContextBlock(): Promise<string> {
+  try {
+    const snapshot: any = getFullSystemSnapshot();
+    const cpu = snapshot.cpu || {};
+    const mem = snapshot.memory?.ram || snapshot.memory || snapshot.memoria || {};
+    const disk = snapshot.disk?.root || snapshot.disk || snapshot.disco || {};
+    const uptime = snapshot.uptime || {};
+    const net = snapshot.network || snapshot.rede || {};
+    const temp = snapshot.temperature || snapshot.temperatura || {};
+    const services = (typeof getAllMonitoredServices === 'function' ? getAllMonitoredServices() : []) as any[];
+    const procInfo = getProcessesList('cpu', 0); // all
+    const processes = Array.isArray(procInfo?.processes) ? procInfo.processes : [];
+    const byCpu = [...processes].sort((a: any, b: any) => (b.cpu_percent||0) - (a.cpu_percent||0)).slice(0, 25);
+    const byMem = [...processes].sort((a: any, b: any) => (b.memory_percent||b.mem_percent||0) - (a.memory_percent||a.mem_percent||0)).slice(0, 25);
+
+    // docker
+    let dockerPs = sh("docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>&1 | head -n 30", 3500, 8000);
+    let dockerImages = sh("docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' 2>&1 | head -n 20", 3500, 6000);
+
+    // network/listeners/dns
+    const ipA = sh("ip -br a 2>&1 | head -n 40", 2500, 6000);
+    const routes = sh("ip route 2>&1 | head -n 40", 2500, 4000);
+    const listening = sh("ss -tulpn 2>&1 | head -n 60", 3500, 9000);
+    const resolv = sh("cat /etc/resolv.conf 2>&1 | head -n 40", 1500, 2000);
+    const mounts = sh("df -hT 2>&1 | head -n 40", 2500, 6000);
+    const uptimeCmd = sh("uptime -p 2>&1; echo ---; who -b 2>&1", 2000, 1200);
+
+    // failed services quick view
+    const failed = sh("systemctl --failed --no-pager --plain 2>&1 | head -n 30", 3000, 4000);
+
+    const cpuPct = cpu.usage_percent ?? cpu.uso_percentual ?? cpu.percent ?? 'N/D';
+    const load = cpu.load_average || cpu.load || {};
+    const memTotal = mem.total_gb ?? mem.total ?? 'N/D';
+    const memUsed = mem.used_gb ?? mem.usada ?? 'N/D';
+    const memAvail = mem.available_gb ?? mem.disponivel ?? 'N/D';
+    const memPct = mem.usage_percent ?? mem.uso_percentual ?? mem.percent ?? 'N/D';
+    const diskTotal = disk.total_gb ?? disk.total ?? 'N/D';
+    const diskUsed = disk.used_gb ?? disk.usado ?? 'N/D';
+    const diskFree = disk.free_gb ?? disk.livre ?? 'N/D';
+    const diskPct = disk.usage_percent ?? disk.uso_percentual ?? disk.percent ?? 'N/D';
+
+    const osInfo = snapshot.system || snapshot.sistema || {};
+    const hostname = os.hostname();
+
+    const svcLines = services.slice(0, 60).map((s: any) => {
+      const st = s.status || s.estado || (s.active ? 'ONLINE' : 'OFFLINE');
+      const name = s.name || s.nome || s.service || 'svc';
+      const desc = s.descricao || s.description || '';
+      const port = s.porta || s.port || '';
+      return `- ${name}: ${st}${port ? ` (porta ${port})` : ''}${desc ? ` — ${desc}` : ''}`;
+    }).join('\n');
+
+    const procLine = (p: any) => {
+      const cmd = String(p.comando || p.command || p.cmd || p.name || '').replace(/\s+/g, ' ').slice(0, 140);
+      return `- PID ${p.pid} | ${p.user || p.usuario || '?'} | CPU ${(p.cpu_percent ?? p.cpu ?? 0)}% | MEM ${(p.memory_percent ?? p.mem ?? 0)}% | ${p.status || ''} | ${p.tempo_execucao || p.time || ''} | ${cmd}`;
+    };
+    const topCpu = byCpu.map(procLine).join('\n') || '- (indisponível)';
+    const topMem = byMem.map(procLine).join('\n') || '- (indisponível)';
+
+    const procCompact = (p: any) => {
+      const cmd = String(p.comando || p.command || p.cmd || p.name || '').replace(/\s+/g, ' ').slice(0, 90);
+      return `${p.pid}\t${p.user || p.usuario || '?'}\t${(p.cpu_percent ?? p.cpu ?? 0)}\t${(p.memory_percent ?? p.mem ?? 0)}\t${p.status || ''}\t${cmd}`;
+    };
+    let allProcsText = processes.map(procCompact).join('\n');
+    if (allProcsText.length > 12000) {
+      allProcsText = allProcsText.slice(0, 12000) + `\n...[lista truncada, total ${processes.length} processos]`;
+    }
+
+    const parts = [
+      '[CONTEXTO REAL DO SERVIDOR - coletado agora]',
+      `Host: ${hostname}`,
+      `SO: ${osInfo.os || osInfo.distro || os.type()} ${osInfo.os_version || osInfo.version || ''} | Kernel: ${osInfo.kernel || os.release()} | Arch: ${osInfo.arch || os.arch()}`,
+      `Uptime: ${uptime.uptime_human || uptimeCmd.split('\n')[0] || 'N/D'}`,
+      `CPU: ${cpuPct}% | Load: ${JSON.stringify(load)} | Cores: ${cpu.cores_logical || cpu.nucleos_logicos || os.cpus()?.length || 'N/D'}`,
+      `Memória: usado ${memUsed}/${memTotal} GB (${memPct}%), disponível ${memAvail} GB`,
+      `Disco (/): usado ${diskUsed}/${diskTotal} GB (${diskPct}%), livre ${diskFree} GB`,
+      `Rede (primária): ${JSON.stringify({ primary: net.primary_interface || net.primaryInterface, ip: net.primary_ip || net.primaryIp, ipv6: net.primary_ipv6 || net.primaryIpv6, down_bps: net.download_bytes_sec, up_bps: net.upload_bytes_sec })}`,
+      `Temperatura: ${JSON.stringify(temp?.temperatura_c ?? temp?.cpu_temp ?? temp?.sensores ?? temp)}`,
+      `Processos: total ${procInfo.count ?? processes.length} (running ${procInfo.running ?? '?'}, sleeping ${procInfo.sleeping ?? '?'})`,
+      '\n[Top processos por CPU]',
+      topCpu,
+      '\n[Top processos por Memória]',
+      topMem,
+      `\n[Todos os processos (PID\tUSER\tCPU%\tMEM%\tSTAT\tCMD) - total ${processes.length}]`,
+      allProcsText || '- (indisponível)',
+      '\n[Serviços monitorados]',
+      svcLines || '- (nenhum)',
+      '\n[Serviços com falha (systemctl --failed)]',
+      failed || '(nenhum ou indisponível)',
+      '\n[Interfaces de rede (ip -br a)]',
+      ipA || '(indisponível)',
+      '\n[Rotas (ip route)]',
+      routes || '(indisponível)',
+      '\n[Portas em escuta (ss -tulpn)]',
+      listening || '(indisponível)',
+      '\n[DNS (/etc/resolv.conf)]',
+      resolv || '(indisponível)',
+      '\n[Montagens/Discos (df -hT)]',
+      mounts || '(indisponível)',
+      '\n[Docker containers]',
+      dockerPs || '(docker indisponível ou sem containers)',
+      '\n[Docker images]',
+      dockerImages || '(indisponível)',
+      '\n[Recursos visuais]',
+      'Captura de tela: você pode enviar uma imagem no chat ao usuário incluindo o marcador [SCREENSHOT] na resposta (o sistema anexará automaticamente um screenshot JPEG do Navegador Remoto do painel, se houver sessão ativa em /api/browser/screenshot). Também funciona quando o usuário pedir foto/print/captura/tela. Não há DISPLAY gráfico local.',
+      '[/CONTEXTO REAL DO SERVIDOR]'
+    ];
+    const block = parts.join('\n');
+    // hard cap to keep prompt reasonable
+    return block.length > 36000 ? block.slice(0, 36000) + '\n...[contexto truncado]' : block;
+  } catch (e: any) {
+    return `[CONTEXTO REAL DO SERVIDOR]\nFalha ao coletar contexto: ${e?.message || e}\n[/CONTEXTO REAL DO SERVIDOR]`;
   }
 }
 
@@ -494,7 +646,16 @@ export async function askOpencodeAgent(
   msgs.push(userMsg);
   messagesStore.set(session.id, msgs);
 
-  const result = await runOpencode(userPrompt, {
+  const contextBlock = await buildServerContextBlock();
+  const promptWithContext = `${contextBlock}
+
+[PERGUNTA DO USUÁRIO]
+${userPrompt}
+[/PERGUNTA DO USUÁRIO]
+
+Responda com base no contexto real acima quando a pergunta for sobre este servidor/sistema/processos/rede/serviços. Seja direto e cite dados concretos (PIDs, %, nomes, portas) quando relevante.`;
+
+  const result = await runOpencode(promptWithContext, {
     sessionId: session.opencodeSessionId,
     model: effectiveModel
   });

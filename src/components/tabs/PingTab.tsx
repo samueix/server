@@ -9,12 +9,18 @@ import {
   MapPin,
   Target,
   Wifi,
-  Crosshair
+  Crosshair,
+  Play,
+  Globe
 } from 'lucide-react';
 import { fetchPingTelemetry, fetchTrace } from '../../services/api';
 import { PingResponse, TraceHop } from '../../types';
 
 type TraceStatus = 'idle' | 'running' | 'done' | 'error';
+
+function isValidHostInput(v: string) {
+  return /^[a-zA-Z0-9._:-]{1,253}$/.test(v.trim());
+}
 
 export const PingTab: React.FC = () => {
   const [data, setData] = useState<PingResponse | null>(null);
@@ -25,25 +31,19 @@ export const PingTab: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [selectedHost, setSelectedHost] = useState<string>('1.1.1.1');
+  const [customHost, setCustomHost] = useState<string>('');
   const [hops, setHops] = useState<TraceHop[]>([]);
   const [traceStatus, setTraceStatus] = useState<TraceStatus>('idle');
-  const [traceLoading, setTraceLoading] = useState<boolean>(false);
   const [traceError, setTraceError] = useState<string | null>(null);
   const [traceUpdated, setTraceUpdated] = useState<string>('--:--:--');
   const [traceReached, setTraceReached] = useState<boolean | null>(null);
   const [traceSource, setTraceSource] = useState<string>('stream');
-  const [autoTrace, setAutoTrace] = useState<boolean>(true);
+  const [traceTarget, setTraceTarget] = useState<string>('');
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const traceAbortRef = useRef<AbortController | null>(null);
-  const traceLoopRef = useRef<any>(null);
   const isBusyRef = useRef<boolean>(false);
   const traceRunIdRef = useRef<number>(0);
-  const selectedHostRef = useRef<string>(selectedHost);
-  const autoTraceRef = useRef<boolean>(autoTrace);
-
-  useEffect(() => { selectedHostRef.current = selectedHost; }, [selectedHost]);
-  useEffect(() => { autoTraceRef.current = autoTrace; }, [autoTrace]);
 
   const loadPing = async (isManual = false) => {
     if (isBusyRef.current) return;
@@ -79,22 +79,11 @@ export const PingTab: React.FC = () => {
     }
   };
 
-  const scheduleNextTrace = useCallback((delayMs: number) => {
-    if (traceLoopRef.current) clearTimeout(traceLoopRef.current);
-    traceLoopRef.current = setTimeout(() => {
-      if (autoTraceRef.current && !document.hidden) {
-        startTrace(selectedHostRef.current);
-      } else {
-        scheduleNextTrace(3000);
-      }
-    }, delayMs);
-  }, []);
-
   const fallbackTrace = useCallback(async (host: string, runId: number) => {
     try {
       if (traceAbortRef.current) traceAbortRef.current.abort();
       traceAbortRef.current = new AbortController();
-      const res = await fetchTrace(host, 2, traceAbortRef.current.signal);
+      const res = await fetchTrace(host, 3, traceAbortRef.current.signal);
       if (traceRunIdRef.current !== runId) return;
       setHops(res.hops || []);
       setTraceSource(res.source || 'mtr');
@@ -106,28 +95,32 @@ export const PingTab: React.FC = () => {
       if (traceRunIdRef.current !== runId || err?.name === 'AbortError') return;
       setTraceError(err.message || 'Falha ao executar traceroute');
       setTraceStatus('error');
-    } finally {
-      if (traceRunIdRef.current === runId) {
-        setTraceLoading(false);
-        scheduleNextTrace(6000);
-      }
     }
-  }, [scheduleNextTrace]);
+  }, []);
 
   const startTrace = useCallback(async (host: string) => {
-    if (!host) return;
-    const runId = ++traceRunIdRef.current;
+    const target = (host || '').trim();
+    if (!target) {
+      setTraceError('Informe um host ou IP para rastrear.');
+      setTraceStatus('error');
+      return;
+    }
+    if (!isValidHostInput(target)) {
+      setTraceError('Host/IP inválido. Use apenas letras, números, ponto, hífen, underscore ou dois-pontos.');
+      setTraceStatus('error');
+      return;
+    }
 
-    if (traceLoopRef.current) { clearTimeout(traceLoopRef.current); traceLoopRef.current = null; }
+    const runId = ++traceRunIdRef.current;
     if (traceAbortRef.current) traceAbortRef.current.abort();
     traceAbortRef.current = new AbortController();
 
+    setTraceTarget(target);
     setHops([]);
     setTraceError(null);
     setTraceReached(null);
-    setTraceSource('stream');
+    setTraceSource('stream (ICMP progressivo, 3 probes/salto)');
     setTraceStatus('running');
-    setTraceLoading(true);
     setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
 
     let gotAnyHop = false;
@@ -137,13 +130,11 @@ export const PingTab: React.FC = () => {
       if (traceRunIdRef.current !== runId || finished) return;
       finished = true;
       setTraceStatus(status);
-      setTraceLoading(false);
       setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
-      scheduleNextTrace(6000);
     };
 
     try {
-      const resp = await fetch(`/api/trace/stream?host=${encodeURIComponent(host)}&maxHops=30`, {
+      const resp = await fetch(`/api/trace/stream?host=${encodeURIComponent(target)}&maxHops=30&probes=3`, {
         signal: traceAbortRef.current.signal,
         headers: { 'Accept': 'text/event-stream' },
         cache: 'no-store'
@@ -184,7 +175,6 @@ export const PingTab: React.FC = () => {
           if ((hop as any).reached) setTraceReached(true);
         } else if (eventName === 'done') {
           if (typeof payload.reached === 'boolean') setTraceReached(payload.reached);
-          setTraceSource('ping (ICMP, stream)');
           finish('done');
         } else if (eventName === 'trace-error') {
           setTraceError(payload.error || 'Falha no rastreamento');
@@ -204,61 +194,41 @@ export const PingTab: React.FC = () => {
           if (rawEvent.trim()) handleEvent(rawEvent);
         }
       }
-      // flush restante
       if (buffer.trim() && traceRunIdRef.current === runId) handleEvent(buffer);
 
       if (traceRunIdRef.current === runId && !finished) {
-        // stream terminou sem 'done' explícito
         if (gotAnyHop) finish('done'); else throw new Error('Stream encerrado sem dados');
       }
     } catch (err: any) {
       if (traceRunIdRef.current !== runId) return;
       if (err?.name === 'AbortError') return;
-      // fallback para mtr/tracepath se stream falhar
-      await fallbackTrace(host, runId);
+      await fallbackTrace(target, runId);
     }
-  }, [fallbackTrace, scheduleNextTrace]);
+  }, [fallbackTrace]);
 
   useEffect(() => {
     loadPing(false);
     const interval = setInterval(() => {
       if (!document.hidden) loadPing(false);
-    }, 4000);
+    }, 5000);
     const handleVisibility = () => { if (!document.hidden) loadPing(false); };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
       if (abortControllerRef.current) abortControllerRef.current.abort();
+      if (traceAbortRef.current) traceAbortRef.current.abort();
+      traceRunIdRef.current++;
     };
   }, []);
 
-  // trace loop: progressivo, roda ao mudar host e após concluir
-  useEffect(() => {
-    traceRunIdRef.current++;
-    startTrace(selectedHost);
-    const onVis = () => {
-      if (!document.hidden && autoTraceRef.current && traceStatus !== 'running') {
-        // se estava parado por aba oculta, retoma
-        if (!traceLoopRef.current) scheduleNextTrace(1000);
-      }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => {
-      traceRunIdRef.current++;
-      if (traceLoopRef.current) clearTimeout(traceLoopRef.current);
-      document.removeEventListener('visibilitychange', onVis);
-      if (traceAbortRef.current) traceAbortRef.current.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedHost]);
+  const effectiveHost = (customHost.trim() || selectedHost || '').trim();
 
-  // reagir a toggle de autoTrace
-  useEffect(() => {
-    if (autoTrace && traceStatus !== 'running' && !traceLoopRef.current) {
-      scheduleNextTrace(1500);
-    }
-  }, [autoTrace, traceStatus, scheduleNextTrace]);
+  const handleRunTrace = () => {
+    const host = (customHost.trim() || selectedHost || '').trim();
+    if (!host) return;
+    startTrace(host);
+  };
 
   const pingStats = React.useMemo(() => {
     if (history.length === 0) return { min: 0, max: 0, avg: 0, packetLoss: 0, samples: 0 };
@@ -312,7 +282,7 @@ export const PingTab: React.FC = () => {
               </span>
             </div>
             <p className="text-xs text-[#4A4A68] mt-0.5 font-medium">
-              Traceroute progressivo: cada salto aparece assim que é descoberto, com latência real
+              Traceroute sob demanda: execute pelo botão. Cada salto aparece em tempo real com RTT, perda e DNS reverso.
             </p>
           </div>
         </div>
@@ -323,12 +293,12 @@ export const PingTab: React.FC = () => {
             <span className="text-xs text-[#1A1A2E] font-mono font-bold tabular-nums">{lastCheck}</span>
           </div>
           <button
-            onClick={() => { loadPing(true); startTrace(selectedHost); }}
+            onClick={() => loadPing(true)}
             disabled={refreshing}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#FF5A36] hover:bg-[#E04522] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-md text-xs font-bold transition disabled:opacity-50 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-[#FFF7E8] text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-md text-xs font-bold transition disabled:opacity-50 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${(refreshing || isTracing) ? 'animate-spin' : ''}`} />
-            <span>Atualizar</span>
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>Atualizar ping</span>
           </button>
         </div>
       </div>
@@ -338,6 +308,74 @@ export const PingTab: React.FC = () => {
           <AlertTriangle className="w-4 h-4" /> {errorMsg}
         </div>
       )}
+
+      {/* Controle do traceroute (manual) */}
+      <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 sm:p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-md bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-center">
+            <Play className="w-4 h-4 text-[#FF5A36]" />
+          </div>
+          <div>
+            <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Executar traceroute (manual)</h3>
+            <span className="text-[10px] text-[#4A4A68] font-mono">Escolha um alvo ou digite um IP/host e clique em Rastrear</span>
+          </div>
+        </div>
+        <div className="flex flex-col lg:flex-row gap-2 lg:items-end">
+          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-mono font-bold text-[#4A4A68] uppercase tracking-wider">Alvo sugerido</label>
+              <select
+                value={selectedHost}
+                onChange={(e) => setSelectedHost(e.target.value)}
+                className="text-xs font-mono font-semibold bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg px-2.5 py-2 shadow-[2px_2px_0px_#1A1A2E] focus:outline-none focus:border-[#FF5A36]"
+                aria-label="Destino do traceroute"
+              >
+                {targets.length > 0 ? targets.map(t => (
+                  <option key={t.id} value={t.host}>{t.name} ({t.host})</option>
+                )) : (
+                  <>
+                    <option value="1.1.1.1">Cloudflare DNS (1.1.1.1)</option>
+                    <option value="8.8.8.8">Google DNS (8.8.8.8)</option>
+                    <option value="9.9.9.9">Quad9 DNS (9.9.9.9)</option>
+                    <option value="200.160.2.3">NIC.br (200.160.2.3)</option>
+                    <option value="192.168.100.1">Gateway Local (192.168.100.1)</option>
+                  </>
+                )}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] font-mono font-bold text-[#4A4A68] uppercase tracking-wider">IP/Host personalizado</label>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Globe className="w-3.5 h-3.5 text-[#4A4A68] absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={customHost}
+                    onChange={(e) => setCustomHost(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleRunTrace(); }}
+                    placeholder="ex: 8.8.8.8, 1.1.1.1 ou google.com"
+                    className="w-full pl-8 pr-2.5 py-2 text-xs font-mono font-semibold bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg shadow-[2px_2px_0px_#1A1A2E] focus:outline-none focus:border-[#FF5A36] placeholder-[#717188]"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRunTrace}
+              disabled={isTracing || !effectiveHost}
+              className="flex items-center justify-center gap-1.5 px-4 py-2 bg-[#FF5A36] hover:bg-[#E04522] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-md text-xs font-bold transition disabled:opacity-50 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none min-w-[140px]"
+            >
+              {isTracing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Route className="w-4 h-4" />}
+              <span>{isTracing ? 'Rastreando...' : 'Rastrear rota'}</span>
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center justify-between text-[10px] font-mono text-[#4A4A68] flex-wrap gap-2 pt-1 border-t border-[#1A1A2E]/10">
+          <span>Alvo atual: <strong className="text-[#1A1A2E]">{traceTarget || effectiveHost || '—'}</strong> {customHost.trim() ? '(personalizado)' : '(sugerido)'}</span>
+          <span>3 probes por salto • DNS reverso • até 30 saltos • stream em tempo real</span>
+        </div>
+      </div>
 
       {/* Estatísticas rápidas */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -371,36 +409,13 @@ export const PingTab: React.FC = () => {
               <MapPin className="w-4 h-4 text-[#00A6FB]" />
             </div>
             <div>
-              <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Rota dos pacotes (traceroute ao vivo)</h3>
-              <span className="text-[10px] text-[#4A4A68] font-mono">Cada salto aparece em tempo real • origem: samuelserver</span>
+              <h3 className="text-xs font-bold font-title text-[#1A1A2E]">Rota dos pacotes (traceroute)</h3>
+              <span className="text-[10px] text-[#4A4A68] font-mono">Saltos aparecem em tempo real quando você executa • origem: samuelserver</span>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={selectedHost}
-              onChange={(e) => setSelectedHost(e.target.value)}
-              className="text-xs font-mono font-semibold bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg px-2.5 py-1.5 shadow-[2px_2px_0px_#1A1A2E] focus:outline-none focus:border-[#FF5A36]"
-              aria-label="Destino do traceroute"
-            >
-              {targets.length > 0 ? targets.map(t => (
-                <option key={t.id} value={t.host}>{t.name} ({t.host})</option>
-              )) : (
-                <>
-                  <option value="1.1.1.1">Cloudflare DNS (1.1.1.1)</option>
-                  <option value="8.8.8.8">Google DNS (8.8.8.8)</option>
-                  <option value="9.9.9.9">Quad9 DNS (9.9.9.9)</option>
-                  <option value="192.168.100.1">Gateway Local (192.168.100.1)</option>
-                </>
-              )}
-            </select>
-            <button
-              onClick={() => setAutoTrace(a => !a)}
-              className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ${autoTrace ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-[#F2F4F7] text-[#4A4A68]'}`}
-            >
-              Auto: {autoTrace ? 'ON' : 'OFF'}
-            </button>
             <span className={`text-[10px] font-mono px-2 py-1 rounded border border-[#1A1A2E] ${isTracing ? 'bg-[#FEF0C7] text-[#92400E]' : 'bg-[#FFF7E8] text-[#4A4A68]'}`}>
-              {isTracing ? `Rastreando... ${hops.length} salto(s)` : `Atualizado: ${traceUpdated}`}
+              {isTracing ? `Rastreando... ${hops.length} salto(s)` : traceStatus === 'idle' ? 'Aguardando execução' : `Atualizado: ${traceUpdated}`}
             </span>
           </div>
         </div>
@@ -413,14 +428,20 @@ export const PingTab: React.FC = () => {
 
         {/* Mapa visual da rota */}
         <div className="relative rounded-xl border-2 border-[#1A1A2E] bg-[#FFF7E8]/50 p-4 sm:p-5 overflow-x-auto">
-          {traceLoading && hops.length === 0 ? (
+          {traceStatus === 'idle' && hops.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-[#4A4A68] font-mono text-xs gap-2 text-center">
+              <Route className="w-8 h-8 text-[#FF5A36]/60" />
+              <span className="font-bold text-[#1A1A2E]">Nenhum traceroute executado</span>
+              <span>Digite ou selecione um destino e clique em <strong>Rastrear rota</strong> para ver os saltos em tempo real.</span>
+            </div>
+          ) : isTracing && hops.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-[#4A4A68] font-mono text-xs gap-2">
               <RefreshCw className="w-6 h-6 animate-spin text-[#FF5A36]" />
-              <span>Iniciando rastreamento até {selectedHost}...</span>
+              <span>Iniciando rastreamento até {traceTarget || effectiveHost}...</span>
               <span className="text-[10px]">Os saltos aparecerão conforme forem descobertos</span>
             </div>
           ) : hops.length === 0 ? (
-            <div className="py-8 text-center text-xs font-mono text-[#4A4A68]">Nenhum salto retornado. Tente atualizar o rastreamento.</div>
+            <div className="py-8 text-center text-xs font-mono text-[#4A4A68]">Nenhum salto retornado. Tente rastrear novamente.</div>
           ) : (
             <div className="min-w-[320px]">
               {/* origem */}
@@ -435,10 +456,10 @@ export const PingTab: React.FC = () => {
                 </div>
                 <div className="flex-1 pb-4">
                   <div className="text-xs font-bold text-[#1A1A2E]">Origem • samuelserver</div>
-                  <div className="text-[11px] font-mono text-[#4A4A68]">Este servidor → destino {selectedHost}</div>
+                  <div className="text-[11px] font-mono text-[#4A4A68]">Este servidor → destino {traceTarget || effectiveHost}</div>
                 </div>
                 <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border border-[#1A1A2E] ${isTracing ? 'bg-[#FEF0C7] text-[#92400E]' : 'bg-[#D1FADF] text-[#027A48]'}`}>
-                  {isTracing ? 'EM ROTA' : traceReached ? 'ALCANÇADO' : 'CONCLUÍDO'}
+                  {isTracing ? 'EM ROTA' : traceReached ? 'ALCANÇADO' : traceStatus === 'error' ? 'ERRO' : 'CONCLUÍDO'}
                 </span>
               </div>
 
@@ -446,7 +467,7 @@ export const PingTab: React.FC = () => {
               {hops.map((hop, idx) => {
                 const tone = hopTone(hop);
                 const isLast = idx === hops.length - 1;
-                const isDest = hop.host === selectedHost || (traceReached === true && isLast && hop.host !== '???');
+                const isDest = hop.host === (traceTarget || effectiveHost) || (traceReached === true && isLast && hop.host !== '???');
                 const isTimeout = hop.host === '???' || hop.loss >= 100;
                 const showPulse = isLast && isTracing;
                 return (
@@ -474,20 +495,25 @@ export const PingTab: React.FC = () => {
                               {isDest && <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-[#1A1A2E] bg-[#FF5A36] text-white">DESTINO</span>}
                               {showPulse && <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border border-[#1A1A2E] bg-[#00A6FB] text-white">NOVO</span>}
                             </div>
-                            <div className="text-[11px] font-mono font-semibold text-[#4A4A68] break-all mt-0.5">{isTimeout ? '* * * (sem resposta neste salto)' : hop.host}</div>
+                            <div className="text-[11px] font-mono font-semibold text-[#1A1A2E] break-all mt-0.5">{isTimeout ? '* * * (sem resposta neste salto)' : hop.host}</div>
+                            {!isTimeout && hop.rdns && <div className="text-[10px] font-mono text-[#4A4A68] break-all">{hop.rdns}</div>}
                           </div>
-                          <div className="flex items-center gap-3 text-[11px] font-mono shrink-0">
+                          <div className="flex items-center gap-3 text-[11px] font-mono shrink-0 flex-wrap justify-end">
                             <div className="text-right">
-                              <div className="text-[#4A4A68] text-[10px]">latência</div>
+                              <div className="text-[#4A4A68] text-[10px]">média</div>
                               <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${(hop.avg || hop.last || 0).toFixed(1)} ms`}</div>
                             </div>
                             <div className="text-right">
-                              <div className="text-[#4A4A68] text-[10px]">último</div>
-                              <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${(hop.last || hop.avg || 0).toFixed(1)} ms`}</div>
+                              <div className="text-[#4A4A68] text-[10px]">melhor/pior</div>
+                              <div className="font-bold text-[#1A1A2E] tabular-nums">{isTimeout ? '--' : `${(hop.best || 0).toFixed(1)}/${(hop.wrst || 0).toFixed(1)}`}</div>
                             </div>
                             <div className="text-right">
                               <div className="text-[#4A4A68] text-[10px]">perda</div>
                               <div className={`font-bold tabular-nums ${hop.loss > 0 ? 'text-[#F04438]' : 'text-[#12B76A]'}`}>{Math.round(hop.loss)}%</div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[#4A4A68] text-[10px]">probes</div>
+                              <div className="font-bold text-[#1A1A2E] tabular-nums">{hop.sent ?? (isTimeout ? 0 : 1)}</div>
                             </div>
                           </div>
                         </div>
@@ -512,8 +538,8 @@ export const PingTab: React.FC = () => {
         </div>
 
         <div className="flex items-center justify-between text-[10px] font-mono text-[#4A4A68] flex-wrap gap-2">
-          <span className="flex items-center gap-1.5"><Wifi className="w-3.5 h-3.5 text-[#12B76A]" /> Sondagem ICMP progressiva (TTL incremental, em tempo real)</span>
-          <span>Fonte: <strong className="text-[#1A1A2E]">{traceSource}</strong>{isTracing ? ' • em andamento...' : traceReached === true ? ' • destino alcançado' : ''}</span>
+          <span className="flex items-center gap-1.5"><Wifi className="w-3.5 h-3.5 text-[#12B76A]" /> Sondagem ICMP progressiva (TTL incremental), múltiplos probes e DNS reverso</span>
+          <span>Fonte: <strong className="text-[#1A1A2E]">{traceSource || 'stream'}</strong>{isTracing ? ' • em andamento...' : traceReached === true ? ' • destino alcançado' : ''}</span>
         </div>
       </div>
 
@@ -534,6 +560,8 @@ export const PingTab: React.FC = () => {
               <tr>
                 <th className="py-2.5 px-3">#</th>
                 <th className="py-2.5 px-3">Host / IP</th>
+                <th className="py-2.5 px-3">DNS reverso</th>
+                <th className="py-2.5 px-3 text-right">Probes</th>
                 <th className="py-2.5 px-3 text-right">Perda</th>
                 <th className="py-2.5 px-3 text-right">Último</th>
                 <th className="py-2.5 px-3 text-right">Média</th>
@@ -544,13 +572,15 @@ export const PingTab: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-[#1A1A2E]/20 font-mono bg-white">
               {hops.length === 0 ? (
-                <tr><td colSpan={8} className="py-8 text-center text-[#4A4A68] font-sans font-semibold">{traceLoading ? 'Rastreando...' : 'Sem dados de rota.'}</td></tr>
+                <tr><td colSpan={10} className="py-8 text-center text-[#4A4A68] font-sans font-semibold">{isTracing ? 'Rastreando...' : traceStatus === 'idle' ? 'Execute o traceroute para ver os dados.' : 'Sem dados de rota.'}</td></tr>
               ) : hops.map((h, i) => {
                 const isTimeout = h.host === '???' || h.loss >= 100;
                 return (
                   <tr key={i} className="hover:bg-[#FFF7E8]/50 transition">
                     <td className="py-2.5 px-3 font-bold">{h.count}</td>
                     <td className="py-2.5 px-3 font-semibold break-all">{isTimeout ? '* * *' : h.host}</td>
+                    <td className="py-2.5 px-3 text-[#4A4A68] break-all text-[11px]">{isTimeout ? '—' : (h.rdns || '—')}</td>
+                    <td className="py-2.5 px-3 text-right tabular-nums">{h.sent ?? (isTimeout ? 0 : 1)}</td>
                     <td className={`py-2.5 px-3 text-right font-bold ${h.loss > 0 ? 'text-[#F04438]' : 'text-[#12B76A]'}`}>{Math.round(h.loss)}%</td>
                     <td className="py-2.5 px-3 text-right tabular-nums">{isTimeout ? '--' : (h.last || h.avg || 0).toFixed(1)}</td>
                     <td className="py-2.5 px-3 text-right tabular-nums font-bold">{isTimeout ? '--' : (h.avg || h.last || 0).toFixed(1)}</td>

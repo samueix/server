@@ -659,20 +659,21 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
   let other = 0;
 
   try {
-    // Tenta ler processos com 'ps' se disponível
-    const output = execSync('ps -eo pid,user,%cpu,%mem,stat,time,comm --sort=-%cpu', { encoding: 'utf-8', timeout: 1500 });
+    // Tenta ler processos com 'ps' (inclui args/comando completo)
+    const output = execSync('ps -eo pid,user,%cpu,%mem,stat,etime,comm,args --sort=-%cpu', { encoding: 'utf-8', timeout: 2500, maxBuffer: 8 * 1024 * 1024 });
     const lines = output.trim().split('\n').slice(1);
 
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 7) {
         const pid = parseInt(parts[0], 10);
-        const user = parts[1];
+        const user = parts[1] || '';
         const cpuPercent = parseFloat(parts[2]) || 0;
         const memPercent = parseFloat(parts[3]) || 0;
-        const statusRaw = parts[4];
-        const timeStr = parts[5];
-        const comm = parts.slice(6).join(' ');
+        const statusRaw = parts[4] || '';
+        const timeStr = parts[5] || '';
+        const comm = parts[6] || '';
+        const argsStr = parts.slice(7).join(' ') || comm;
 
         const status = statusRaw.startsWith('R') ? 'running' : 'sleeping';
         if (status === 'running') running++;
@@ -694,7 +695,7 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
           prioridade: 0,
           threads: 1,
           tempo_execucao: timeStr,
-          comando: comm,
+          comando: argsStr,
           inicio: '00:00:00'
         });
       }
@@ -751,13 +752,14 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
     processes.sort((a, b) => b.cpu_percent - a.cpu_percent);
   }
 
+  const sliced = limit > 0 ? processes.slice(0, limit) : processes;
   return {
     count: processes.length,
     running,
     sleeping,
     other,
     sort_by: sortBy,
-    processes: processes.slice(0, limit)
+    processes: sliced
   };
 }
 

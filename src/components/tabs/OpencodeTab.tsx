@@ -33,6 +33,7 @@ interface OpencodeMessage {
   completionTokens?: number;
   model?: string;
   timestamp: string;
+  imageDataUrl?: string;
 }
 
 interface OpencodeSession {
@@ -284,10 +285,10 @@ export const OpencodeTab: React.FC = () => {
 
 
   const QUICK_PROMPTS = [
-    { label: 'Diagnóstico de RAM e CPU', prompt: 'Analise o status de hardware e processos em segundo plano no Ubuntu Server samuelserver e sugira otimizações.' },
-    { label: 'Auditoria do AdGuard DNS', prompt: 'Explique como auditar as requisições bloqueadas pelo AdGuard Home e listar os maiores emissores de telemetria.' },
-    { label: 'Verificar Portas e Firewall', prompt: 'Como verificar com segurança todas as portas abertas no Ubuntu com ss e conferir o status do UFW?' },
-    { label: 'Tailscale & Loopback', prompt: 'Explique como a rota pelo IP do Tailscale 100.97.208.102 e o loopback 127.0.0.1 protegem meus microsserviços.' }
+    { label: 'Todos os processos (top CPU/RAM)', prompt: 'Liste todos os processos em execução agora, destacando os que mais consomem CPU e memória (com PID, usuário, % e comando).' },
+    { label: 'Diagnóstico completo do servidor', prompt: 'Faça um diagnóstico completo deste servidor (CPU, RAM, disco, rede, serviços, portas, docker e processos) com base no estado real atual.' },
+    { label: 'Captura de tela do navegador', prompt: 'Me envie uma captura de tela (foto/print) do navegador remoto do painel agora. Inclua o marcador [SCREENSHOT] na resposta.' },
+    { label: 'Verificar portas e firewall', prompt: 'Quais portas estão em escuta e qual o status do firewall/serviços de rede neste servidor?' }
   ];
 
   return (
@@ -437,6 +438,18 @@ export const OpencodeTab: React.FC = () => {
                       <div className="text-xs font-mono whitespace-pre-wrap leading-relaxed select-text">
                         {msg.content}
                       </div>
+
+                      {msg.imageDataUrl && (
+                        <div className="mt-2">
+                          <img
+                            src={msg.imageDataUrl}
+                            alt="Captura enviada pelo agente"
+                            className="max-w-full rounded-lg border-2 border-[#1A1A2E] bg-white"
+                            loading="lazy"
+                          />
+                          <div className="text-[10px] font-mono text-[#717188] mt-1">Captura (navegador remoto do painel)</div>
+                        </div>
+                      )}
 
                       {/* Timestamp */}
                       <span className={`text-[10px] font-mono block text-right mt-1 ${

@@ -16,6 +16,7 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import net from 'net';
+import dns from 'dns';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 
@@ -886,7 +887,7 @@ export function createApp() {
     }
   });
 
-  // Traceroute progressivo (stream SSE): envia cada salto assim que descoberto
+  // Traceroute progressivo (stream SSE): envia cada salto assim que descoberto (multi-probe + rDNS)
   app.get('/api/trace/stream', async (req, res) => {
     applyCors(res);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -903,6 +904,7 @@ export function createApp() {
       return res.end();
     }
     const maxHops = Math.max(1, Math.min(30, parseInt(String(req.query.maxHops || '30'), 10) || 30));
+    const probes = Math.max(1, Math.min(5, parseInt(String(req.query.probes || '3'), 10) || 3));
 
     let closed = false;
     req.on('close', () => { closed = true; });
@@ -912,41 +914,91 @@ export function createApp() {
       try { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } catch {}
     };
 
+    const rdnsCache = new Map<string, string | null>();
+    const resolveRdns = async (ip: string): Promise<string | null> => {
+      if (!ip || ip === '???') return null;
+      if (rdnsCache.has(ip)) return rdnsCache.get(ip) || null;
+      try {
+        const names = await Promise.race([
+          dns.promises.reverse(ip),
+          new Promise<string[]>((_, rej) => setTimeout(() => rej(new Error('timeout')), 900))
+        ]) as string[];
+        const name = (names && names[0]) ? String(names[0]) : null;
+        rdnsCache.set(ip, name);
+        return name;
+      } catch {
+        rdnsCache.set(ip, null);
+        return null;
+      }
+    };
+
     try {
       for (let ttl = 1; ttl <= maxHops && !closed; ttl++) {
-        const t0 = Date.now();
-        let stdout = '';
-        let stderr = '';
-        try {
-          const r = await execFileAsync('ping', ['-c', '1', '-W', '1', '-n', '-t', String(ttl), host], { timeout: 2200 });
-          stdout = r.stdout || '';
-          stderr = r.stderr || '';
-        } catch (e: any) {
-          stdout = e?.stdout || '';
-          stderr = e?.stderr || '';
+        const samples: number[] = [];
+        let hopIp: string | null = null;
+        let reached = false;
+        let sent = 0;
+
+        for (let p = 0; p < probes && !closed; p++) {
+          sent++;
+          const t0 = Date.now();
+          let stdout = '';
+          let stderr = '';
+          try {
+            const r = await execFileAsync('ping', ['-c', '1', '-W', '1', '-n', '-t', String(ttl), host], { timeout: 2200 });
+            stdout = r.stdout || '';
+            stderr = r.stderr || '';
+          } catch (e: any) {
+            stdout = e?.stdout || '';
+            stderr = e?.stderr || '';
+          }
+          const out = `${stdout}\n${stderr}`;
+
+          const replyM = out.match(/\d+\s+bytes\s+from\s+([^:\s]+).*time[=<]([0-9.]+)\s*ms/i);
+          const exM = out.match(/From\s+([^\s]+)[\s\S]*?(Time to live exceeded|Time exceeded)/i);
+          const unreachM = !exM ? out.match(/From\s+([^\s]+)[\s\S]*?(Destination|Unreachable)/i) : null;
+
+          if (replyM) {
+            hopIp = replyM[1];
+            samples.push(parseFloat(replyM[2]));
+            reached = true;
+          } else if (exM || unreachM) {
+            const ip = (exM || unreachM)![1].replace(/:$/, '');
+            hopIp = ip;
+            samples.push(Math.max(1, Date.now() - t0));
+          } else {
+            // timeout: no sample
+          }
         }
-        const out = `${stdout}\n${stderr}`;
-        const elapsed = Date.now() - t0;
 
-        const replyM = out.match(/\d+\s+bytes\s+from\s+([^:\s]+).*time[=<]([0-9.]+)\s*ms/i);
-        const exM = out.match(/From\s+([^\s]+)[\s\S]*?(Time to live exceeded|Time exceeded)/i);
-        const unreachM = !exM ? out.match(/From\s+([^\s]+)[\s\S]*?(Destination|Unreachable)/i) : null;
+        const valid = samples.filter(v => Number.isFinite(v));
+        const lossCount = Math.max(0, sent - valid.length);
+        const lossPct = sent > 0 ? Math.round((lossCount / sent) * 100) : 100;
+        const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
+        const best = valid.length ? Math.min(...valid) : 0;
+        const wrst = valid.length ? Math.max(...valid) : 0;
+        const last = valid.length ? valid[valid.length - 1] : 0;
+        const stdev = valid.length > 1 ? Math.sqrt(valid.reduce((acc, v) => acc + Math.pow(v - avg, 2), 0) / valid.length) : 0;
+        const ip = hopIp || '???';
+        const rdns = ip !== '???' ? await resolveRdns(ip) : null;
 
-        if (replyM) {
-          const ip = replyM[1];
-          const ms = parseFloat(replyM[2]);
-          send('hop', { count: ttl, host: ip, loss: 0, sent: 1, last: ms, avg: ms, best: ms, wrst: ms, stdev: 0, reached: true });
-          send('done', { hops: ttl, reached: true });
-          break;
-        } else if (exM || unreachM) {
-          const ip = (exM || unreachM)![1].replace(/:$/, '');
-          const ms = Math.max(1, Math.round(elapsed));
-          send('hop', { count: ttl, host: ip, loss: 0, sent: 1, last: ms, avg: ms, best: ms, wrst: ms, stdev: 0 });
-          if (ip === host) { send('done', { hops: ttl, reached: true }); break; }
-        } else {
-          send('hop', { count: ttl, host: '???', loss: 100, sent: 1, last: 0, avg: 0, best: 0, wrst: 0, stdev: 0, timeout: true });
-        }
+        const hopData: any = {
+          count: ttl,
+          host: ip,
+          rdns: rdns || undefined,
+          loss: lossPct,
+          sent,
+          last: Math.round(last * 100) / 100,
+          avg: Math.round(avg * 100) / 100,
+          best: Math.round(best * 100) / 100,
+          wrst: Math.round(wrst * 100) / 100,
+          stdev: Math.round(stdev * 100) / 100,
+        };
+        if (ip === '???' || lossPct >= 100) hopData.timeout = true;
+        if (reached) hopData.reached = true;
+        send('hop', hopData);
 
+        if (reached) { send('done', { hops: ttl, reached: true }); break; }
         if (ttl === maxHops) send('done', { hops: ttl, reached: false });
       }
     } catch (e: any) {
@@ -1236,6 +1288,32 @@ export function createApp() {
         return res.status(400).json({ error: 'Prompt é obrigatório.' });
       }
       const result = await askOpencodeAgent(sessionId || '', prompt, model);
+
+      // Anexa screenshot do navegador remoto quando solicitado (foto/print/tela) ou quando o agente incluir [SCREENSHOT]
+      try {
+        const wants = /(\bfoto\b|\bprint\b|screenshot|captura|printscreen|\btela\b|\bimagem\b|\bscreen\b)/i.test(prompt);
+        const marked = /\[(SCREENSHOT|CAPTURA)\]/i.test(result?.reply?.content || '');
+        if (wants || marked) {
+          try {
+            const buf = await takeScreenshot();
+            if (buf && buf.length > 0) {
+              result.reply.imageDataUrl = `data:image/jpeg;base64,${buf.toString('base64')}`;
+              // remove marcador do texto visível
+              if (result.reply.content) {
+                result.reply.content = result.reply.content.replace(/\s*\[(SCREENSHOT|CAPTURA)\]\s*/gi, '\n').trim();
+              }
+            } else if (wants && result.reply && !/\[SCREENSHOT\]/i.test(result.reply.content || '')) {
+              // sem imagem disponível: mantém resposta do agente
+            }
+          } catch (e: any) {
+            if (wants && result.reply) {
+              const reason = e?.message || 'sessão do navegador remoto inativa';
+              result.reply.content = (result.reply.content || '') + `\n\n[Captura indisponível: ${reason}. Inicie o Navegador Remoto no painel para permitir screenshots.]`;
+            }
+          }
+        }
+      } catch {}
+
       return res.json(result);
     } catch (err: any) {
       return res.status(500).json({ error: err.message });

@@ -525,6 +525,7 @@ export interface PingResponse {
 export interface TraceHop {
   count: number;
   host: string;
+  rdns?: string;
   loss: number;
   sent: number;
   last: number;
