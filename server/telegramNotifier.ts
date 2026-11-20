@@ -159,3 +159,33 @@ export async function notifyTelegramIpBlock(ip: string, action: 'block' | 'unblo
     await sendTelegramMessage(text);
   } catch {}
 }
+
+
+export async function sendTelegramPhoto(photo: Buffer | Uint8Array, caption?: string, opts?: { chatId?: string }): Promise<TelegramResult> {
+  const c = getTelegramConfig();
+  if (!c.enabled) return { ok: false, skipped: true, error: 'Telegram desabilitado.' };
+  if (!c.botToken) return { ok: false, skipped: true, error: 'Bot token não configurado.' };
+  const chatId = (opts?.chatId || c.chatId || '').trim();
+  if (!chatId) return { ok: false, skipped: true, error: 'Chat ID não configurado.' };
+
+  try {
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    const bytes = photo instanceof Buffer ? new Uint8Array(photo) : photo;
+    form.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'screenshot.jpg');
+    if (caption) form.append('caption', caption.slice(0, 1024));
+
+    const res = await fetch(apiUrl(c.botToken, 'sendPhoto'), {
+      method: 'POST',
+      body: form,
+      signal: AbortSignal.timeout(30000),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (!res.ok || data?.ok === false) {
+      return { ok: false, error: data?.description || `HTTP ${res.status}`, data };
+    }
+    return { ok: true, data: data?.result ?? data };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Falha ao enviar foto no Telegram.' };
+  }
+}

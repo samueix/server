@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { getServerConfig, saveServerConfig } from './credentialsManager.js';
-import { sendTelegramMessage, testTelegramConnection, getTelegramConfig } from './telegramNotifier.js';
+import { sendTelegramMessage, sendTelegramPhoto, testTelegramConnection, getTelegramConfig } from './telegramNotifier.js';
+import { takeScreenshot, getBrowserState } from './browserSession.js';
 import { askOpencodeAgent } from './opencode.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
 import { getAllMonitoredServices } from './servicesMonitor.js';
@@ -324,11 +325,41 @@ async function buildDockerText(): Promise<string> {
   }
 }
 
+function wantsScreenshot(text: string): boolean {
+  return /\b(foto|print|screenshot|captura|printscreen|tela|imagem|screen)\b/i.test(text || '');
+}
+
+function stripScreenshotMarker(text: string): string {
+  return String(text || '').replace(/\[SCREENSHOT(?:\s*\|\s*CAPTURA)?\]/gi, '').replace(/\[CAPTURA\]/gi, '').trim();
+}
+
+async function trySendBrowserScreenshot(chatId: string, caption?: string): Promise<{ ok: boolean; message?: string }> {
+  try {
+    const state = getBrowserState();
+    if (!state || (state.status !== 'running' && state.status !== 'paused') || !state.url) {
+      return { ok: false, message: 'Navegador remoto não está ativo. Inicie uma sessão no painel (Navegador) e abra uma página para eu enviar a captura.' };
+    }
+    const buf = await takeScreenshot();
+    if (!buf || !buf.length) return { ok: false, message: 'Não foi possível capturar a tela (imagem vazia).' };
+    const cap = (caption || `Captura: ${state.title || state.url || 'navegador remoto'}`).slice(0, 1024);
+    const sent = await sendTelegramPhoto(buf, cap, { chatId });
+    if (!sent.ok) return { ok: false, message: sent.error || 'Falha ao enviar foto no Telegram.' };
+    return { ok: true };
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    if (/indisponível|não está|não ha|no page|browser|navegador/i.test(msg)) {
+      return { ok: false, message: `Não consegui capturar a tela: ${msg}` };
+    }
+    return { ok: false, message: `Não consegui capturar a tela: ${msg}` };
+  }
+}
+
 async function handleAiMessage(chatId: string, text: string): Promise<void> {
   const cfg = getServerConfig() as any;
   const t = cfg.telegram || {};
   const model = String(t.aiModel || process.env.TELEGRAM_AI_MODEL || 'google/gemini-3.5-flash').trim();
   const st = getState(chatId);
+  const screenshotRequested = wantsScreenshot(text);
   try {
     await sendTelegramMessage('⏳ Consultando IA...', { chatId });
     let res = await askOpencodeAgent(st.opencodeSessionId || '', text, model);
@@ -345,8 +376,26 @@ async function handleAiMessage(chatId: string, text: string): Promise<void> {
       } catch {}
     }
     if (res?.session?.id) st.opencodeSessionId = res.session.id;
+
+    const wantsByReply = /\[SCREENSHOT(?:\s*\|\s*CAPTURA)?\]/i.test(reply) || /\[CAPTURA\]/i.test(reply);
+    reply = stripScreenshotMarker(reply);
+
+    if (screenshotRequested || wantsByReply) {
+      const captionBase = reply && reply.length <= 900 ? reply : (reply ? reply.slice(0, 900) + '…' : undefined);
+      const shot = await trySendBrowserScreenshot(chatId, captionBase);
+      if (shot.ok) {
+        if (reply.length > 900) {
+          await sendTelegramMessage(reply.slice(0, 3500) + (reply.length > 3500 ? '\n...[resposta truncada]' : ''), { chatId });
+        }
+        return;
+      } else {
+        const extra = shot.message ? `\n\n📷 ${shot.message}` : '';
+        reply = (reply || 'Aqui está o que posso informar.') + extra;
+      }
+    }
+
     if (reply.length > 3500) reply = reply.slice(0, 3500) + '\n...[resposta truncada]';
-    await sendTelegramMessage(reply, { chatId });
+    await sendTelegramMessage(reply || 'Sem resposta.', { chatId });
   } catch (e: any) {
     await sendTelegramMessage(`Erro ao falar com IA: ${e?.message || e}`, { chatId });
   }
@@ -374,11 +423,14 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
   }
 
   // menu mode
-  if (lower === '1' || lower === '/ia' || lower === 'ia' || lower.startsWith('/ia ')) {
+  if (lower === '1' || lower === '/ia' || lower === 'ia' || lower.startsWith('/ia ') || /^1[\s,.:;!?]+/i.test(text)) {
     st.mode = 'ai';
-    await sendTelegramMessage('💬 Modo IA (Google) ativado. Envie sua pergunta.\nUse /menu ou /sair para voltar ao menu.', { chatId });
-    const rest = text.replace(/^\/ia\s*/i,'').trim();
-    if (rest) await handleAiMessage(chatId, rest);
+    const rest = text.replace(/^\/ia\s*/i,'').replace(/^1[\s,.:;!?]+/i,'').trim();
+    if (!rest) {
+      await sendTelegramMessage('💬 Modo IA (Google) ativado. Envie sua pergunta.\nUse /menu ou /sair para voltar ao menu.', { chatId });
+    } else {
+      await handleAiMessage(chatId, rest);
+    }
     return;
   }
   if (lower === '2' || lower === '/status' || lower === 'status') { await sendTelegramMessage(await buildStatusText(), { chatId }); return; }
