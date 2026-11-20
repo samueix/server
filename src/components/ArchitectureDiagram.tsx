@@ -954,6 +954,7 @@ export const ArchitectureDiagram: React.FC = () => {
   const [selectedNodeId, setSelectedNodeId] = useState<string>('ts_server');
   const [zoomLevel, setZoomLevel] = useState<'fit' | 'medium' | 'large'>('fit');
   const [copiedMermaid, setCopiedMermaid] = useState(false);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
 
   const selectedNode = useMemo(
     () => NODES.find((n) => n.id === selectedNodeId) ?? NODES[0],
@@ -975,9 +976,10 @@ export const ArchitectureDiagram: React.FC = () => {
   const isNodeHighlighted = (node: ArchNode) =>
     activeLayer === 'all' || node.layer === activeLayer || node.id === selectedNodeId;
 
+  const focusNodeId = hoveredNodeId || selectedNodeId;
   const isEdgeHighlighted = (edge: ArchEdge) => {
     if (activeLayer === 'all') {
-      return edge.from === selectedNodeId || edge.to === selectedNodeId;
+      return edge.from === focusNodeId || edge.to === focusNodeId;
     }
     const fromNode = nodeById.get(edge.from);
     const toNode = nodeById.get(edge.to);
@@ -996,7 +998,7 @@ export const ArchitectureDiagram: React.FC = () => {
 
   const svgWidthClass =
     zoomLevel === 'fit'
-      ? 'w-full min-w-[980px]'
+      ? 'w-full min-w-[820px] lg:min-w-0 max-w-full'
       : zoomLevel === 'medium'
       ? 'w-[1320px]'
       : 'w-[1640px]';
@@ -1092,7 +1094,7 @@ export const ArchitectureDiagram: React.FC = () => {
       </div>
 
       {/* Canvas SVG Interativo */}
-      <div className="rounded-xl border-2 border-[#1A1A2E] bg-white shadow-[3px_3px_0px_#1A1A2E] overflow-x-auto p-2">
+      <div className="rounded-xl border-2 border-[#1A1A2E] bg-white shadow-[3px_3px_0px_#1A1A2E] overflow-auto p-2 max-h-[75vh] relative">
         <svg
           viewBox="0 0 1320 916"
           className={`${svgWidthClass} h-auto block select-none`}
@@ -1312,12 +1314,16 @@ export const ArchitectureDiagram: React.FC = () => {
               const highlighted = isEdgeHighlighted(edge);
               const isSelectedEdge =
                 edge.from === selectedNodeId || edge.to === selectedNodeId;
-              const strokeColor = isSelectedEdge ? '#FF5A36' : '#1A1A2E';
+              const isFocusEdge =
+                edge.from === focusNodeId || edge.to === focusNodeId;
+              const strokeColor = isSelectedEdge ? '#FF5A36' : isFocusEdge ? '#F79009' : '#1A1A2E';
               const opacity =
                 activeLayer === 'all'
                   ? isSelectedEdge
                     ? 1
-                    : 0.72
+                    : isFocusEdge
+                    ? 0.92
+                    : 0.45
                   : highlighted
                   ? 0.95
                   : 0.2;
@@ -1328,10 +1334,10 @@ export const ArchitectureDiagram: React.FC = () => {
                     d={edge.path}
                     fill="none"
                     stroke={strokeColor}
-                    strokeWidth={isSelectedEdge ? 2.4 : 1.75}
+                    strokeWidth={isSelectedEdge ? 2.4 : isFocusEdge ? 2.1 : 1.6}
                     strokeDasharray={edge.dashed ? '5 4' : undefined}
                     strokeLinejoin="round"
-                    markerEnd={isSelectedEdge ? 'url(#arrow-accent)' : 'url(#arrow-dark)'}
+                    markerEnd={isSelectedEdge || isFocusEdge ? 'url(#arrow-accent)' : 'url(#arrow-dark)'}
                   />
                   {edge.label && edge.labelX !== undefined && edge.labelY !== undefined && (
                     <g>
@@ -1341,15 +1347,15 @@ export const ArchitectureDiagram: React.FC = () => {
                         width={edge.label.length * 6.4 + 16}
                         height={17}
                         rx="4"
-                        fill={isSelectedEdge ? '#FFF8E7' : '#FFFFFF'}
-                        stroke={isSelectedEdge ? '#FF5A36' : '#1A1A2E'}
+                        fill={isSelectedEdge ? '#FFF8E7' : isFocusEdge ? '#FFF8E7' : '#FFFFFF'}
+                        stroke={isSelectedEdge ? '#FF5A36' : isFocusEdge ? '#F79009' : '#1A1A2E'}
                         strokeWidth="1.2"
                       />
                       <text
                         x={edge.labelX}
                         y={edge.labelY + 3}
                         textAnchor="middle"
-                        fill={isSelectedEdge ? '#B42318' : '#1A1A2E'}
+                        fill={isSelectedEdge ? '#B42318' : isFocusEdge ? '#9A3412' : '#1A1A2E'}
                         fontSize="9.5"
                         fontWeight="700"
                         fontFamily="JetBrains Mono, monospace"
@@ -1375,21 +1381,25 @@ export const ArchitectureDiagram: React.FC = () => {
                 const cx = node.x + node.w / 2;
                 const cy = node.y + node.h / 2;
                 const r = node.w / 2;
+                const isHovered = hoveredNodeId === node.id;
                 return (
                   <g
                     key={node.id}
                     opacity={opacity}
                     className="cursor-pointer"
                     onClick={() => setSelectedNodeId(node.id)}
+                    onMouseEnter={() => setHoveredNodeId(node.id)}
+                    onMouseLeave={() => setHoveredNodeId(null)}
                   >
+                    <title>{`${node.label} — ${node.file}\n${node.summary}`}</title>
                     <circle cx={cx + 3} cy={cy + 3} r={r} fill="#1A1A2E" />
                     <circle
                       cx={cx}
                       cy={cy}
                       r={r}
-                      fill={isSelected ? '#FFC857' : '#FFFFFF'}
-                      stroke={isSelected ? '#FF5A36' : '#1A1A2E'}
-                      strokeWidth={isSelected ? 3 : 2.2}
+                      fill={isSelected ? '#FFC857' : isHovered ? '#FFF3D6' : '#FFFFFF'}
+                      stroke={isSelected ? '#FF5A36' : isHovered ? '#F79009' : '#1A1A2E'}
+                      strokeWidth={isSelected ? 3 : isHovered ? 2.6 : 2.2}
                     />
                     <text
                       x={cx}
@@ -1417,13 +1427,17 @@ export const ArchitectureDiagram: React.FC = () => {
                 );
               }
 
+              const isHovered = hoveredNodeId === node.id;
               return (
                 <g
                   key={node.id}
                   opacity={opacity}
                   className="cursor-pointer"
                   onClick={() => setSelectedNodeId(node.id)}
+                  onMouseEnter={() => setHoveredNodeId(node.id)}
+                  onMouseLeave={() => setHoveredNodeId(null)}
                 >
+                  <title>{`${node.label} — ${node.file}\n${node.summary}`}</title>
                   {/* Sombra dura Neo-Brutalista */}
                   <rect
                     x={node.x + 3}
@@ -1440,9 +1454,9 @@ export const ArchitectureDiagram: React.FC = () => {
                     width={node.w}
                     height={node.h}
                     rx={node.kind === 'db' ? 14 : 8}
-                    fill={isSelected ? '#FFFFFF' : meta.fill}
-                    stroke={isSelected ? '#FF5A36' : '#1A1A2E'}
-                    strokeWidth={isSelected ? 3 : 2}
+                    fill={isSelected ? '#FFFFFF' : isHovered ? '#FFFFFF' : meta.fill}
+                    stroke={isSelected ? '#FF5A36' : isHovered ? '#F79009' : '#1A1A2E'}
+                    strokeWidth={isSelected ? 3 : isHovered ? 2.6 : 2}
                   />
                   {/* Faixa lateral colorida */}
                   <rect
@@ -1493,6 +1507,7 @@ export const ArchitectureDiagram: React.FC = () => {
           </g>
         </svg>
       </div>
+      <p className="text-[11px] font-mono text-[#4A4A68] -mt-1">Dica: clique nos blocos para inspecionar; use zoom e role para navegar em telas menores.</p>
 
       {/* Painel Inspetor do Bloco Selecionado */}
       <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] space-y-3">
