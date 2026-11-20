@@ -51,6 +51,36 @@ function getState(chatId: string): ChatState {
   return chatStates.get(chatId)!;
 }
 
+function pickAccessInfo(net: any, hostname?: string) {
+  const ifaces = Array.isArray(net?.interfaces) ? net.interfaces : [];
+  let lan4 = net?.primary_ip || net?.primaryIp;
+  let ts4: string | undefined;
+  let global6: string | undefined;
+  let ts6: string | undefined;
+  const other6: string[] = [];
+
+  for (const i of ifaces) {
+    const v4 = i.ipv4 || (i.ip && !String(i.ip).includes(':') && i.ip !== '--' ? i.ip : undefined);
+    const v6 = i.ipv6 || undefined;
+    if (i.nome === 'tailscale0' || (v4 && String(v4).startsWith('100.'))) {
+      if (v4) ts4 = v4;
+      if (v6) ts6 = v6;
+    }
+    if (i.nome === 'wlo1' || (v4 && String(v4).startsWith('192.168.'))) {
+      if (v4) lan4 = v4;
+      if (v6 && /^[23]/.test(v6)) global6 = v6;
+      else if (v6 && !String(v6).startsWith('fe80:') && !String(v6).startsWith('fd')) other6.push(v6);
+    }
+    if (!global6 && v6 && /^[23]/.test(v6)) global6 = v6;
+  }
+  if (!global6 && net?.primary_ipv6 && /^[23]/.test(net.primary_ipv6)) global6 = net.primary_ipv6;
+  if (!ts6 && net?.primary_ipv6 && String(net.primary_ipv6).startsWith('fd')) ts6 = net.primary_ipv6;
+
+  const host = hostname || 'samuelserver';
+  const user = process.env.SUDO_USER || process.env.USER || 'samuel';
+  return { lan4, ts4, global6, ts6, host, user };
+}
+
 function mainMenuText(): string {
   return [
     '🤖 *Server Panel Bot*',
@@ -64,6 +94,7 @@ function mainMenuText(): string {
     '6. /rede - Rede e interfaces',
     '7. /disco - Disco e memória',
     '8. /docker - Containers Docker',
+    '9. /acesso - Links (IPv4/IPv6), painel e SSH',
     '0. /ajuda - Mostrar este menu',
     '',
     'Dica: durante o chat com a IA, envie /menu ou /sair para voltar.'
@@ -87,18 +118,28 @@ async function buildStatusText(): Promise<string> {
     const cpuPct = cpu.usage_percent ?? cpu.uso_percentual ?? cpu.percent;
     const memPct = mem.usage_percent ?? mem.uso_percentual ?? mem.percent;
     const diskPct = disk.usage_percent ?? disk.uso_percentual ?? disk.percent;
-    return [
+    const host = s.system?.hostname || s.sistema?.hostname || 'samuelserver';
+    const acc = pickAccessInfo(net, host);
+    const lines = [
       '📊 *Status Geral*',
-      `Host: ${s.system?.hostname || s.sistema?.hostname || 'samuelserver'}`,
+      `Host: ${host}`,
       `Uptime: ${uptime.uptime_human || uptime.uptime || 'N/D'}`,
       `CPU: ${fmtNum(cpuPct)}% | Load: ${JSON.stringify(cpu.load_average || cpu.load || {})}`,
       `RAM: ${fmtNum(memPct)}% (usada ${fmtNum(mem.used_gb ?? mem.usada_gb)} / ${fmtNum(mem.total_gb ?? mem.total_gb)} GB)`,
       `Disco (/): ${fmtNum(diskPct)}% (usado ${fmtNum(disk.used_gb ?? disk.usado_gb)} / ${fmtNum(disk.total_gb ?? disk.total_gb)} GB)`,
       `Temp: ${JSON.stringify(temp?.temperatura_c ?? temp?.cpu_temp ?? temp?.sensores ?? 'N/D')}`,
-      `Rede: ${net.primary_interface || net.primaryInterface || 'N/D'} IP ${net.primary_ip || net.primaryIp || 'N/D'} ↓${net.download_bytes_sec ?? 0} B/s ↑${net.upload_bytes_sec ?? 0} B/s`,
-      '',
-      'Envie /menu para voltar.'
-    ].join('\n');
+      `Rede: ${net.primary_interface || net.primaryInterface || 'N/D'}`,
+      `IPv4: ${acc.lan4 || net.primary_ip || net.primaryIp || 'N/D'}`,
+    ];
+    if (acc.global6) lines.push(`IPv6: ${acc.global6}`);
+    if (acc.ts4) lines.push(`Tailscale: ${acc.ts4}${acc.ts6 ? ` (${acc.ts6})` : ''}`);
+    lines.push(`Tráfego: ↓${net.download_bytes_sec ?? 0} B/s ↑${net.upload_bytes_sec ?? 0} B/s`);
+    lines.push('', '🔗 *Acesso rápido ao painel:*');
+    if (acc.lan4) lines.push(`LAN: http://${acc.lan4}/`);
+    if (acc.ts4) lines.push(`Tailscale: http://${acc.ts4}/`);
+    if (acc.global6) lines.push(`IPv6: http://[${acc.global6}]/`);
+    lines.push('', 'Envie /acesso para links e dicas de SSH, ou /menu para voltar.');
+    return lines.join('\n');
   } catch (e: any) {
     return `Erro ao obter status: ${e?.message || e}`;
   }
@@ -173,18 +214,30 @@ async function buildNetworkText(): Promise<string> {
     const s: any = getFullSystemSnapshot();
     const net = s.network || s.rede || {};
     const ifaces = net.interfaces || net.ifaces || [];
-    const lines = ['🌐 *Rede*'];
+    const host = s.system?.hostname || s.sistema?.hostname || 'samuelserver';
+    const acc = pickAccessInfo(net, host);
+    const lines = ['🌐 *Rede & Interfaces*'];
     if (Array.isArray(ifaces) && ifaces.length) {
       for (const i of ifaces.slice(0, 12)) {
-        lines.push(`• ${i.name || i.nome}: ${i.state || i.status || ''} ${i.ipv4 || i.ip || ''} ${i.ipv6 ? '(v6)' : ''}`.trim());
+        const parts = [`• ${i.name || i.nome}: ${i.state || i.status || ''}`.trim()];
+        if (i.ipv4) parts.push(`IPv4 ${i.ipv4}`);
+        if (i.ipv6) parts.push(`IPv6 ${i.ipv6}`);
+        if (!i.ipv4 && !i.ipv6 && i.ip && i.ip !== '--') parts.push(String(i.ip));
+        lines.push(parts.join(' | '));
       }
     } else {
       lines.push(`Interface: ${net.primary_interface || net.primaryInterface || 'N/D'}`);
-      lines.push(`IPv4: ${net.primary_ip || net.primaryIp || 'N/D'}`);
-      lines.push(`IPv6: ${net.primary_ipv6 || net.primaryIpv6 || 'N/D'}`);
+      lines.push(`IPv4: ${acc.lan4 || net.primary_ip || net.primaryIp || 'N/D'}`);
+      if (acc.global6) lines.push(`IPv6 (global): ${acc.global6}`);
+      if (acc.ts4) lines.push(`Tailscale: ${acc.ts4}${acc.ts6 ? ` (${acc.ts6})` : ''}`);
     }
     lines.push(`RX: ${net.total_received_formatted || net.bytes_recv || 'N/D'} | TX: ${net.total_sent_formatted || net.bytes_sent || 'N/D'}`);
-    lines.push('', 'Envie /menu para voltar.');
+    lines.push('', '🔗 *Links diretos (navegador):*');
+    if (acc.lan4) lines.push(`LAN: http://${acc.lan4}/`);
+    if (acc.ts4) lines.push(`Tailscale: http://${acc.ts4}/`);
+    if (acc.global6) lines.push(`IPv6: http://[${acc.global6}]/`);
+    if (!acc.global6) lines.push('IPv6 global: não detectado na interface principal (verifique /acesso).');
+    lines.push('', 'Envie /acesso para dicas de SSH ou /menu para voltar.');
     return lines.join('\n');
   } catch (e: any) {
     return `Erro ao obter rede: ${e?.message || e}`;
@@ -206,6 +259,44 @@ async function buildDiskText(): Promise<string> {
     ].join('\n');
   } catch (e: any) {
     return `Erro ao obter disco/memória: ${e?.message || e}`;
+  }
+}
+
+
+async function buildAccessText(): Promise<string> {
+  try {
+    const s: any = getFullSystemSnapshot();
+    const net = s.network || s.rede || {};
+    const host = s.system?.hostname || s.sistema?.hostname || 'samuelserver';
+    const acc = pickAccessInfo(net, host);
+    const lines = [
+      '🔗 *Acesso ao Painel & SSH*',
+      '',
+      '*Painel no navegador (links diretos):*',
+    ];
+    if (acc.lan4) lines.push(`• LAN (Wi-Fi/Rede local): http://${acc.lan4}/`);
+    if (acc.ts4) lines.push(`• Tailscale (VPN): http://${acc.ts4}/`);
+    if (acc.global6) lines.push(`• IPv6 (global): http://[${acc.global6}]/`);
+    lines.push(`• Hostname (se resolver na rede): http://${acc.host}/`);
+
+    lines.push('', '*Acesso SSH (terminal):*');
+    if (acc.lan4) lines.push(`• LAN: ssh ${acc.user}@${acc.lan4}`);
+    if (acc.ts4) lines.push(`• Tailscale: ssh ${acc.user}@${acc.ts4}`);
+    if (acc.global6) lines.push(`• IPv6: ssh ${acc.user}@${acc.global6}`);
+    lines.push(`• Hostname: ssh ${acc.user}@${acc.host}`);
+    lines.push('• Porta padrão: 22 (se alterada, use: ssh -p PORTA usuário@host)');
+
+    lines.push('', '*Dicas rápidas:*');
+    lines.push('• Na mesma rede local use o link/IP LAN; fora de casa prefira Tailscale (100.x).');
+    lines.push('• IPv6 global funciona se seu provedor/roteador e o cliente tiverem IPv6 roteável; em links use colchetes: http://[IPv6]/');
+    lines.push('• Primeira conexão SSH: aceite a fingerprint quando solicitado.');
+    lines.push('• Se usar chave: ssh -i ~/.ssh/sua_chave ' + acc.user + '@' + (acc.lan4 || acc.host));
+    lines.push('• Copiar arquivo (ex.): scp arquivo.txt ' + acc.user + '@' + (acc.lan4 || acc.host) + ':~/');
+
+    lines.push('', 'Envie /menu para voltar.');
+    return lines.join('\n');
+  } catch (e: any) {
+    return `Erro ao montar informações de acesso: ${e?.message || e}`;
   }
 }
 
@@ -274,7 +365,7 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
   }
 
   if (st.mode === 'ai') {
-    if (['/status','/servicos','/seguranca','/processos','/rede','/disco','/docker'].includes(lower)) {
+    if (['/status','/servicos','/seguranca','/processos','/rede','/disco','/docker','/acesso'].includes(lower)) {
       st.mode = 'menu';
       // fallthrough to menu handling below by recursion
       return handleCommand(chatId, text);
@@ -297,6 +388,7 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
   if (lower === '6' || lower === '/rede' || lower === 'rede') { await sendTelegramMessage(await buildNetworkText(), { chatId }); return; }
   if (lower === '7' || lower === '/disco' || lower === 'disco') { await sendTelegramMessage(await buildDiskText(), { chatId }); return; }
   if (lower === '8' || lower === '/docker' || lower === 'docker') { await sendTelegramMessage(await buildDockerText(), { chatId }); return; }
+  if (lower === '9' || lower === '/acesso' || lower === 'acesso' || lower === '/links' || lower === 'links' || lower === '/ssh' || lower === 'ssh') { await sendTelegramMessage(await buildAccessText(), { chatId }); return; }
 
   // default: if in menu and unknown, hint; or treat as AI request? better hint
   await sendTelegramMessage('Não entendi. ' + mainMenuText(), { chatId });
