@@ -37,6 +37,8 @@ export const N8nTab: React.FC = () => {
   const [urlInput, setUrlInput] = useState<string>('http://192.168.100.23:5678');
   const [savingConfig, setSavingConfig] = useState<boolean>(false);
   const [configMessage, setConfigMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [containerAction, setContainerAction] = useState<'starting' | 'stopping' | null>(null);
+  const [containerMsg, setContainerMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const isFetchingRef = useRef<boolean>(false);
@@ -143,6 +145,29 @@ export const N8nTab: React.FC = () => {
     }
   };
 
+  const handleN8nContainer = async (action: 'start' | 'stop') => {
+    setContainerAction(action === 'start' ? 'starting' : 'stopping');
+    setContainerMsg(null);
+    try {
+      const res = await fetch(`/api/n8n/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', ...getAuthHeaders() },
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json.success === false) {
+        throw new Error(json.error || json.message || `Falha ao ${action === 'start' ? 'iniciar' : 'parar'} n8n`);
+      }
+      setContainerMsg({ type: 'success', text: json.message || (action === 'start' ? 'n8n iniciado.' : 'n8n parado para economizar RAM.') });
+      if (json.status) setData(json.status);
+      // aguarda subir/subir healthz antes de recarregar
+      setTimeout(() => loadData(), action === 'start' ? 2500 : 800);
+    } catch (err: any) {
+      setContainerMsg({ type: 'error', text: err.message || 'Erro ao controlar container n8n.' });
+    } finally {
+      setContainerAction(null);
+    }
+  };
+
   const isOnline = Boolean(data?.online || data?.status === 'ok');
   const isApiConnected = Boolean(data?.apiConnected);
   const n8nUrl = data?.url || 'http://192.168.100.23:5678';
@@ -201,6 +226,18 @@ export const N8nTab: React.FC = () => {
           >
             <Key className="w-3.5 h-3.5 text-[#FF5A36]" />
             <span>Configurar API Key</span>
+          </button>
+
+          <button
+            onClick={() => handleN8nContainer(isOnline ? 'stop' : 'start')}
+            disabled={containerAction !== null}
+            className={`flex items-center gap-1.5 px-3 py-2 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold transition active:translate-x-[1px] active:translate-y-[1px] active:shadow-none disabled:opacity-50 ${
+              isOnline ? 'bg-[#FEF0C7] hover:bg-[#FEE4C7] text-[#B54708]' : 'bg-[#D1FADF] hover:bg-[#bbf7d0] text-[#027A48]'
+            }`}
+            title={isOnline ? 'Parar n8n para economizar RAM' : 'Iniciar container n8n'}
+          >
+            {containerAction ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+            <span>{containerAction === 'starting' ? 'Iniciando...' : containerAction === 'stopping' ? 'Parando...' : (isOnline ? 'Parar n8n (RAM)' : 'Ligar n8n')}</span>
           </button>
 
           <a
@@ -313,6 +350,17 @@ export const N8nTab: React.FC = () => {
         </div>
       </div>
 
+      {/* Feedback de controle do container n8n */}
+      {containerMsg && (
+        <div className={`p-3 rounded-xl text-xs font-mono font-bold flex items-center gap-2 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] ${
+          containerMsg.type === 'success' ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-[#FEE4E2] text-[#B42318]'
+        }`}>
+          {containerMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+          <span className="flex-1">{containerMsg.text}</span>
+          <button onClick={() => setContainerMsg(null)} className="underline shrink-0">Fechar</button>
+        </div>
+      )}
+
       {/* Painel nativo do n8n embutido na mesma aba */}
       {showN8nPanel && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
@@ -337,14 +385,10 @@ export const N8nTab: React.FC = () => {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-[#1A1A2E] leading-relaxed font-sans">
             <div className="p-4 rounded-lg bg-white border-2 border-[#1A1A2E] space-y-2 shadow-sm">
-              <span className="font-bold text-[#1A1A2E] block">1. Se o n8n estiver Offline:</span>
+              <span className="font-bold text-[#1A1A2E] block">1. n8n desligado (economia de RAM):</span>
               <p className="text-[#4A4A68] text-xs">
-                Inicie o serviço do n8n no seu Ubuntu Server se ele ainda não estiver rodando:
+                O container n8n está parado para economizar memória. Use o botão <strong>"Ligar n8n"</strong> no topo desta aba para iniciá-lo quando precisar (ou via terminal: <code className="font-mono">docker start n8n</code>). O reinício automático foi desativado.
               </p>
-              <div className="p-2.5 rounded-md bg-[#FFF7E8] border border-[#1A1A2E] font-mono text-xs text-[#1A1A2E] font-bold space-y-1">
-                <div>pm2 start n8n</div>
-                <div className="text-[#717188]"># ou via docker: docker start n8n</div>
-              </div>
             </div>
 
             <div className="p-4 rounded-lg bg-white border-2 border-[#1A1A2E] space-y-2 shadow-sm">

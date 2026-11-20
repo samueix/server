@@ -1134,6 +1134,37 @@ export function createApp() {
     }
   });
 
+  // Controle do container n8n (Docker) - iniciar/parar para economizar RAM
+  app.post('/api/n8n/start', requireAdminAuth, async (req, res) => {
+    applyCors(res);
+    const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    try {
+      await execFileAsync('docker', ['start', 'n8n'], { timeout: 30000 });
+      const status = await fetchN8nFallback();
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'n8n_start', target: 'n8n', details: 'Container n8n iniciado', status: 'success' });
+      return res.json({ success: true, message: 'Container n8n iniciado.', status });
+    } catch (err: any) {
+      const msg = String(err?.stderr || err?.message || 'Falha ao iniciar n8n').slice(0, 300);
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'n8n_start', target: 'n8n', details: msg, status: 'failure' });
+      return res.status(500).json({ success: false, error: msg });
+    }
+  });
+
+  app.post('/api/n8n/stop', requireAdminAuth, async (req, res) => {
+    applyCors(res);
+    const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    try {
+      await execFileAsync('docker', ['update', '--restart=no', 'n8n'], { timeout: 15000 }).catch(() => ({}));
+      await execFileAsync('docker', ['stop', 'n8n'], { timeout: 30000 });
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'n8n_stop', target: 'n8n', details: 'Container n8n parado para economizar RAM', status: 'success' });
+      return res.json({ success: true, message: 'Container n8n parado (restart desativado para economizar RAM).' });
+    } catch (err: any) {
+      const msg = String(err?.stderr || err?.message || 'Falha ao parar n8n').slice(0, 300);
+      logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'n8n_stop', target: 'n8n', details: msg, status: 'failure' });
+      return res.status(500).json({ success: false, error: msg });
+    }
+  });
+
   // Rotas do Explorador de Arquivos (Protegidas exclusivamente para administradores)
   app.get('/api/files/list', requireAdminAuth, async (req, res) => {
     try {
