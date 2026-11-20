@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Activity, BookOpen, Bot, Check, Copy, Cpu, Folder, GitBranch, Globe, Key, Layers,
   Lock, Monitor, Network, Radio, RotateCcw, ScrollText, Server, Shield, ShieldAlert,
-  ShieldCheck, Terminal
+  ShieldCheck, Terminal, Wrench
 } from 'lucide-react';
 
 type DocTab = {
@@ -281,21 +281,22 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'commands',
-    name: '15. Terminal & Shell',
-    icon: Terminal,
-    summary: 'Execução controlada de comandos no host via allowlist do backend.',
-    purpose: 'Permitir operações administrativas rápidas sem expor shell irrestrita.',
+    name: '15. Ferramentas Web',
+    icon: Wrench,
+    summary: 'Utilitários rápidos executados 100% no navegador (sem shell do servidor).',
+    purpose: 'Oferecer ferramentas simples para tarefas do dia a dia sem depender da execução de comandos no host.',
     whatYouCanDo: [
-      'Executar comandos/predefinições permitidos pela política do servidor.',
-      'Visualizar saída/erros retornados pela execução.'
+      'Formatar, minificar e validar JSON.',
+      'Codificar/decodificar Base64 (UTF-8) e URLs, converter timestamps, gerar UUID v4 e hash SHA-256.',
+      'Contar e transformar textos (maiúsculas/minúsculas, trim) com cópia rápida.'
     ],
     indicators: [
-      { label: 'Allowlist/Política', desc: 'Apenas comandos autorizados pelo backend podem ser executados.' },
-      { label: 'Código de saída', desc: 'Resultado da execução (sucesso/falha) e stdout/stderr.' }
+      { label: 'Execução local', desc: 'Processamento no navegador (Web APIs/Web Crypto); nada é enviado ao host.' },
+      { label: 'Disponibilidade', desc: 'Não depende do backend/terminal; hash requer contexto seguro (HTTPS/localhost) para Web Crypto.' }
     ],
-    apis: 'POST /api/terminal/exec (admin).',
-    permissions: 'Exclusivo para administrador.',
-    troubleshooting: 'Comando negado = fora da allowlist; falhas podem ser permissão, binário ausente ou timeout.'
+    apis: 'Nenhuma (processamento local no cliente).',
+    permissions: 'Disponível para usuários autenticados (acesso via painel).',
+    troubleshooting: 'Se "Copiar" ou SHA-256 falhar, verifique permissões do navegador/clipboard e se a página está em contexto seguro.'
   },
   {
     id: 'system',

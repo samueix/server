@@ -6,6 +6,7 @@ import {
   ShieldCheck, 
   Network, 
   Terminal, 
+  Wrench,
   Server, 
   Shield, 
   BookOpen, 
@@ -60,7 +61,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'network', label: 'Rede & MAC', icon: Network, adminOnly: true },
   { id: 'logs', label: 'Logs do Sistema', icon: ScrollText, adminOnly: true },
   { id: 'n8n', label: 'n8n Workflows', icon: GitBranch, adminOnly: true },
-  { id: 'commands', label: 'Terminal & Shell', icon: Terminal, adminOnly: true },
+  { id: 'commands', label: 'Ferramentas Web', icon: Wrench, adminOnly: true },
   { id: 'system', label: 'Sistema', icon: Server, adminOnly: true },
   { id: 'documentation', label: 'Documentação', icon: BookOpen, adminOnly: true }
 ];

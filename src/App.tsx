@@ -863,7 +863,7 @@ export default function App() {
 
             {activeTab === 'commands' && (
               <Suspense fallback={<TabLoadingFallback />}>
-                <TabErrorBoundary tabName="Comandos">
+                <TabErrorBoundary tabName="Ferramentas Web">
                   <CommandsTab />
                 </TabErrorBoundary>
               </Suspense>
