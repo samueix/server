@@ -44,7 +44,8 @@ describe('Auditoria e Testes de Segurança de Aplicação (AppSec)', () => {
       { method: 'GET', path: '/api/files/list?path=/' },
       { method: 'GET', path: '/api/files/read?path=/tmp/test.txt' },
       { method: 'POST', path: '/api/files/create', body: JSON.stringify({ dirPath: '/tmp', name: 'safe.txt', content: 'test' }) },
-      { method: 'POST', path: '/api/files/save', body: JSON.stringify({ path: '/tmp/safe.txt', content: 'update' }) }
+      { method: 'POST', path: '/api/files/save', body: JSON.stringify({ path: '/tmp/safe.txt', content: 'update' }) },
+      { method: 'POST', path: '/api/terminal/exec', body: JSON.stringify({ command: 'uptime' }) }
     ];
 
     for (const ep of protectedEndpoints) {
@@ -70,7 +71,8 @@ describe('Auditoria e Testes de Segurança de Aplicação (AppSec)', () => {
       { method: 'GET', path: '/api/credentials' },
       { method: 'POST', path: '/api/credentials', body: JSON.stringify({}) },
       { method: 'GET', path: '/api/files/list?path=/' },
-      { method: 'GET', path: '/api/files/read?path=/tmp/test.txt' }
+      { method: 'GET', path: '/api/files/read?path=/tmp/test.txt' },
+      { method: 'POST', path: '/api/terminal/exec', body: JSON.stringify({ command: 'uptime' }) }
     ];
 
     for (const ep of adminOnlyEndpoints) {
@@ -107,6 +109,22 @@ describe('Auditoria e Testes de Segurança de Aplicação (AppSec)', () => {
       assert.ok(data.ubuntu, 'Deveria retornar a seção ubuntu');
     });
 
+    test('Administrador executa comando no terminal com HTTP 200', async () => {
+      const res = await fetch(`${baseUrl}/api/terminal/exec`, {
+        method: 'POST',
+        headers: {
+          'Authorization': adminAuthHeader,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({ command: 'echo terminal-ok' })
+      });
+
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.success, true);
+      assert.match(String(data.stdout || ''), /terminal-ok/);
+    });
   });
 
   describe('5. File Explorer Security & Path Traversal Protection', () => {

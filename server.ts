@@ -56,6 +56,7 @@ import {
   OPENCODE_MODEL
 } from './server/opencode.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
+import { runShellCommand } from './server/terminalRunner.js';
 import { 
   getSecurityAttackStatus, 
   recordPanelFailedLogin, 
@@ -1565,6 +1566,22 @@ export function createApp() {
     }
   });
 
+  // ===== Terminal & Shell (admin, execução completa) =====
+  app.post('/api/terminal/exec', requireAdminAuth, async (req, res) => {
+    try {
+      const command = typeof req.body?.command === 'string' ? req.body.command : '';
+      const cwd = typeof req.body?.cwd === 'string' ? req.body.cwd : undefined;
+      if (!command.trim()) {
+        return res.status(400).json({ success: false, error: 'Comando vazio.' });
+      }
+      const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      const result = await runShellCommand(command, cwd, clientIp);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message || 'Falha ao executar comando.' });
+    }
+  });
+
   // Cache do host FastAPI que respondeu com sucesso para eliminar latência de probing
   let cachedWorkingBackendBase: string | null = null;
 
@@ -1647,7 +1664,8 @@ export function createApp() {
       '/api/n8n',
       '/api/files',
       '/api/credentials',
-      '/api/security'
+      '/api/security',
+      '/api/terminal'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Activity, BookOpen, Bot, Check, Copy, Cpu, Folder, GitBranch, Globe, Key, Layers,
   Lock, Monitor, Network, Radio, RotateCcw, ScrollText, Server, Shield, ShieldAlert,
-  ShieldCheck, Terminal, Wrench
+  ShieldCheck, Terminal
 } from 'lucide-react';
 import { ArchitectureDiagram } from '../ArchitectureDiagram';
 
@@ -282,22 +282,22 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'commands',
-    name: '15. Ferramentas Web',
-    icon: Wrench,
-    summary: 'Utilitários rápidos executados 100% no navegador (sem shell do servidor).',
-    purpose: 'Oferecer ferramentas simples para tarefas do dia a dia sem depender da execução de comandos no host.',
+    name: '15. Terminal & Shell',
+    icon: Terminal,
+    summary: 'Terminal bash interativo no navegador para execução de comandos no servidor.',
+    purpose: 'Permitir operações administrativas diretamente pelo painel com acesso completo ao shell do host.',
     whatYouCanDo: [
-      'Formatar, minificar e validar JSON.',
-      'Codificar/decodificar Base64 (UTF-8) e URLs, converter timestamps, gerar UUID v4 e hash SHA-256.',
-      'Contar e transformar textos (maiúsculas/minúsculas, trim) com cópia rápida.'
+      'Executar comandos bash livres (scripts, pipelines, manutenção, deploy, diagnóstico).',
+      'Visualizar stdout/stderr, código de saída e tempo de execução.',
+      'Usar presets e anatomia de comandos como auxílio.'
     ],
     indicators: [
-      { label: 'Execução local', desc: 'Processamento no navegador (Web APIs/Web Crypto); nada é enviado ao host.' },
-      { label: 'Disponibilidade', desc: 'Não depende do backend/terminal; hash requer contexto seguro (HTTPS/localhost) para Web Crypto.' }
+      { label: 'CWD persistente', desc: 'O diretório de trabalho é rastreado entre execuções (suporte a cd).' },
+      { label: 'Código de saída', desc: 'Resultado da execução (sucesso/falha) e saída retornada.' }
     ],
-    apis: 'Nenhuma (processamento local no cliente).',
-    permissions: 'Disponível para usuários autenticados (acesso via painel).',
-    troubleshooting: 'Se "Copiar" ou SHA-256 falhar, verifique permissões do navegador/clipboard e se a página está em contexto seguro.'
+    apis: 'POST /api/terminal/exec (admin).',
+    permissions: 'Exclusivo para administrador.',
+    troubleshooting: 'Falhas podem ser permissão, binário ausente, timeout ou erro do comando; verifique stderr e logs do serviço.'
   },
   {
     id: 'system',

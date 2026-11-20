@@ -1,281 +1,745 @@
-import React, { useMemo, useState } from 'react';
-import {
-  Braces,
-  Binary,
-  Link2,
-  Clock3,
-  Fingerprint,
-  Hash,
-  Type,
-  Copy,
-  Check,
-  Trash2,
-  Wand2,
-  Info
+import React, { useState, useRef, useEffect } from 'react';
+import { 
+  Terminal as TerminalIcon, 
+  Play, 
+  Copy, 
+  Check, 
+  Trash2, 
+  Server, 
+  Shield, 
+  Network, 
+  HardDrive, 
+  Cpu, 
+  CheckCircle2, 
+  AlertCircle,
+  Sparkles,
+  GitPullRequest,
+  BookOpen,
+  ArrowRight,
+  AlertTriangle,
+  RefreshCw,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
+import { executeTerminalCommand, TerminalExecResponse } from '../../services/terminalService';
+import { CommandAnatomyModal } from '../CommandAnatomyModal';
 
-function utf8ToBase64(str: string): string {
-  const bytes = new TextEncoder().encode(str);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+export const GIT_UPDATE_COMMAND = `cd /opt/server-panel && git fetch origin main && git checkout main && git pull origin main && chmod +x deploy-update.sh && ./deploy-update.sh`;
+
+interface PracticalCommand {
+  command: string;
+  desc: string;
 }
 
-function base64ToUtf8(b64: string): string {
-  const binary = atob(b64.trim());
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+interface CommandCategory {
+  id: string;
+  name: string;
+  icon: React.ElementType;
+  commands: PracticalCommand[];
 }
 
-function generateUuid(): string {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return (crypto as Crypto & { randomUUID: () => string }).randomUUID();
+const COMMAND_CATEGORIES: CommandCategory[] = [
+  {
+    id: 'sistema',
+    name: 'Sistema & Carga',
+    icon: Server,
+    commands: [
+      { command: 'uptime', desc: 'Exibe tempo de atividade e carga média (load average).' },
+      { command: 'free -h', desc: 'Exibe uso atual da memória RAM e swap em formato legível.' },
+      { command: 'hostnamectl', desc: 'Exibe informações do sistema, hostname e kernel.' },
+      { command: 'uname -a', desc: 'Detalhes completos da versão do kernel Linux.' }
+    ]
+  },
+  {
+    id: 'armazenamento',
+    name: 'Armazenamento & Disco',
+    icon: HardDrive,
+    commands: [
+      { command: 'df -h', desc: 'Exibe uso de espaço em disco de todas as partições montadas.' },
+      { command: 'lsblk', desc: 'Lista em árvore todos os dispositivos de bloco e partições.' },
+      { command: 'df -Th', desc: 'Mostra o sistema de arquivos (ext4, vfat) e espaço livre.' }
+    ]
+  },
+  {
+    id: 'servicos',
+    name: 'Serviços & Daemons',
+    icon: Shield,
+    commands: [
+      { command: 'sudo systemctl status AdGuardHome --no-pager', desc: 'Status operacional do AdGuard Home.' },
+      { command: 'sudo systemctl status nginx --no-pager', desc: 'Status do servidor web e proxy reverso Nginx.' },
+      { command: 'sudo systemctl status ssh --no-pager', desc: 'Status do serviço OpenSSH Server.' }
+    ]
+  },
+  {
+    id: 'rede',
+    name: 'Rede & Portas',
+    icon: Network,
+    commands: [
+      { command: 'ip addr', desc: 'Exibe todos os endereços IPv4 das interfaces locais.' },
+      { command: 'ip -6 addr', desc: 'Exibe os endereços IPv6 globais e de rotação da rede.' },
+      { command: 'ss -lntp', desc: 'Lista todas as portas TCP em modo de escuta (listening).' }
+    ]
+  },
+  {
+    id: 'processos',
+    name: 'Processos & Logs',
+    icon: Cpu,
+    commands: [
+      { command: 'ps aux --sort=-%cpu | head -n 12', desc: 'Top 10 processos que mais consomem CPU no momento.' },
+      { command: 'ps aux --sort=-%mem | head -n 12', desc: 'Top 10 processos que mais consomem memória RAM.' },
+      { command: 'sudo journalctl -n 25 --no-pager', desc: 'Últimas 25 linhas de log do sistema operacional.' }
+    ]
   }
-  const bytes = new Uint8Array(16);
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    crypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
-  }
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+];
+
+interface CommandHistoryEntry {
+  id: string;
+  command: string;
+  result: TerminalExecResponse;
+  timestamp: string;
 }
-
-async function sha256(text: string): Promise<string> {
-  if (!crypto?.subtle) throw new Error('Web Crypto indisponível neste contexto (use HTTPS ou localhost).');
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-const Card: React.FC<{ title: string; icon: React.ReactNode; subtitle?: string; children: React.ReactNode }> = ({ title, icon, subtitle, children }) => (
-  <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 sm:p-5 space-y-3">
-    <div className="flex items-center gap-2.5 pb-2.5 border-b-2 border-[#1A1A2E]">
-      <div className="w-8 h-8 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex items-center justify-center text-[#FF5A36] shrink-0">{icon}</div>
-      <div className="min-w-0">
-        <h3 className="text-sm font-black text-[#1A1A2E] font-title">{title}</h3>
-        {subtitle && <p className="text-[11px] text-[#717188] font-mono font-medium">{subtitle}</p>}
-      </div>
-    </div>
-    {children}
-  </div>
-);
-
-const Btn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'ghost' | 'danger' }> = ({ variant = 'ghost', className = '', ...props }) => {
-  const base = 'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-[#FF5A36]';
-  const styles = variant === 'primary'
-    ? 'bg-[#FF5A36] hover:bg-[#E04522] text-white'
-    : variant === 'danger'
-      ? 'bg-[#FEE4E2] hover:bg-[#FDD] text-[#B42318]'
-      : 'bg-[#FFF7E8] hover:bg-[#FFEECB] text-[#1A1A2E]';
-  return <button className={`${base} ${styles} ${className}`} {...props} />;
-};
 
 export const CommandsTab: React.FC = () => {
-  const [copied, setCopied] = useState<string | null>(null);
-  const markCopied = (id: string) => { setCopied(id); setTimeout(() => setCopied(prev => prev === id ? null : prev), 1500); };
-  const copy = async (text: string, id: string) => { try { await navigator.clipboard.writeText(text); markCopied(id); } catch {} };
+  const [commandInput, setCommandInput] = useState<string>('uptime');
+  const [currentCwd, setCurrentCwd] = useState<string>('/home/samuel');
+  const [isExecuting, setIsExecuting] = useState<boolean>(false);
+  const [history, setHistory] = useState<CommandHistoryEntry[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // JSON
-  const [jsonIn, setJsonIn] = useState('');
-  const [jsonOut, setJsonOut] = useState('');
-  const [jsonErr, setJsonErr] = useState<string | null>(null);
-  const jsonFormat = () => { try { setJsonOut(JSON.stringify(JSON.parse(jsonIn), null, 2)); setJsonErr(null); } catch (e: any) { setJsonErr(e?.message || 'JSON inválido'); setJsonOut(''); } };
-  const jsonMinify = () => { try { setJsonOut(JSON.stringify(JSON.parse(jsonIn))); setJsonErr(null); } catch (e: any) { setJsonErr(e?.message || 'JSON inválido'); setJsonOut(''); } };
-  const jsonValidate = () => { try { JSON.parse(jsonIn); setJsonErr(null); setJsonOut('✓ JSON válido'); } catch (e: any) { setJsonErr(e?.message || 'JSON inválido'); setJsonOut(''); } };
+  // Estado visual de tela cheia expandida
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
 
-  // Base64
-  const [b64Plain, setB64Plain] = useState('');
-  const [b64Encoded, setB64Encoded] = useState('');
-  const [b64Err, setB64Err] = useState<string | null>(null);
-  const b64Encode = () => { try { setB64Encoded(utf8ToBase64(b64Plain)); setB64Err(null); } catch (e: any) { setB64Err(e?.message || 'Falha ao codificar'); } };
-  const b64Decode = () => { try { setB64Plain(base64ToUtf8(b64Encoded)); setB64Err(null); } catch (e: any) { setB64Err(e?.message || 'Base64 inválido'); } };
+  // Estados de confirmação dupla (Etapa 1 e Etapa 2)
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null);
+  const [confirmStage, setConfirmStage] = useState<1 | 2 | null>(null);
 
-  // URL
-  const [urlIn, setUrlIn] = useState('');
-  const [urlOut, setUrlOut] = useState('');
-  const urlEncodeComp = () => { try { setUrlOut(encodeURIComponent(urlIn)); } catch { setUrlOut(''); } };
-  const urlDecodeComp = () => { try { setUrlOut(decodeURIComponent(urlIn)); } catch { setUrlOut('(valor inválido para decodificar)'); } };
-  const urlEncodeFull = () => { try { setUrlOut(encodeURI(urlIn)); } catch { setUrlOut(''); } };
-  const urlDecodeFull = () => { try { setUrlOut(decodeURI(urlIn)); } catch { setUrlOut('(valor inválido para decodificar)'); } };
+  // Estado do modal de anatomia e ensino do código
+  const [anatomyCommand, setAnatomyCommand] = useState<string | null>(null);
 
-  // Timestamp
-  const [tsInput, setTsInput] = useState('');
-  const parseTs = (raw: string): Date | null => {
-    const v = raw.trim();
-    if (!v) return null;
-    if (/^\d+$/.test(v)) {
-      const n = Number(v);
-      if (!Number.isFinite(n)) return null;
-      return new Date(v.length <= 10 ? n * 1000 : n);
+  const terminalEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-ajuste de altura da área de digitação de comandos
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      const scrollH = textareaRef.current.scrollHeight;
+      const newHeight = Math.min(Math.max(scrollH, 42), 160);
+      textareaRef.current.style.height = `${newHeight}px`;
     }
-    const d = new Date(v);
-    return isNaN(d.getTime()) ? null : d;
+  }, [commandInput]);
+
+  // Tecla ESC para fechar tela cheia
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullScreen) {
+        setIsFullScreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [isFullScreen]);
+
+  // Inicia o processo de confirmação dupla antes de executar
+  const requestExecution = (cmdToRun?: string) => {
+    const raw = (cmdToRun || commandInput).trim();
+    // Limpa contra-barras seguidas de espaços/quebras que causam erro "\ git: command not found" no bash
+    const targetCommand = raw
+      .replace(/\\\s*[\r\n]+\s*/g, ' ')
+      .trim();
+
+    if (!targetCommand || isExecuting) return;
+
+    setPendingCommand(targetCommand);
+    setConfirmStage(1); // Abre Etapa 1
   };
-  const tsDate = useMemo(() => parseTs(tsInput), [tsInput]);
-  const tsNow = () => setTsInput(String(Date.now()));
 
-  // UUID
-  const [uuids, setUuids] = useState<string[]>(() => [generateUuid()]);
-  const addUuid = () => setUuids(u => [generateUuid(), ...u].slice(0, 20));
+  // Avança para a Etapa 2 de confirmação
+  const handleProceedToStage2 = () => {
+    setConfirmStage(2);
+  };
 
-  // Hash
-  const [hashIn, setHashIn] = useState('');
-  const [hashOut, setHashOut] = useState('');
-  const [hashErr, setHashErr] = useState<string | null>(null);
-  const [hashing, setHashing] = useState(false);
-  const doHash = async () => { setHashing(true); setHashErr(null); try { setHashOut(await sha256(hashIn)); } catch (e: any) { setHashErr(e?.message || 'Falha ao gerar hash'); setHashOut(''); } finally { setHashing(false); } };
+  // Cancela a execução
+  const handleCancelExecution = () => {
+    setPendingCommand(null);
+    setConfirmStage(null);
+  };
 
-  // Texto
-  const [textIn, setTextIn] = useState('');
-  const textStats = useMemo(() => {
-    const chars = textIn.length;
-    const lines = textIn.length ? textIn.split(/\r\n|\r|\n/).length : 0;
-    const words = textIn.trim() ? textIn.trim().split(/\s+/).length : 0;
-    const bytes = new TextEncoder().encode(textIn).length;
-    return { chars, words, lines, bytes };
-  }, [textIn]);
+  // Executa definitivamente após passar pelas duas confirmações
+  const handleConfirmedExecution = async () => {
+    if (!pendingCommand || isExecuting) return;
+    const targetCommand = pendingCommand;
+    setConfirmStage(null);
+    setPendingCommand(null);
 
-  const CopyBtn: React.FC<{ text: string; id: string }> = ({ text, id }) => (
-    <Btn onClick={() => copy(text, id)} disabled={!text} title="Copiar">
-      {copied === id ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
-      <span>{copied === id ? 'Copiado' : 'Copiar'}</span>
-    </Btn>
-  );
+    setIsExecuting(true);
+    try {
+      const result = await executeTerminalCommand(targetCommand, currentCwd);
+      const newEntry: CommandHistoryEntry = {
+        id: `${Date.now()}-${Math.random()}`,
+        command: targetCommand,
+        result,
+        timestamp: new Date().toLocaleTimeString('pt-BR')
+      };
+
+      if (result.cwd) {
+        setCurrentCwd(result.cwd);
+      }
+
+      // Limita em 1000 entradas para não sobrecarregar memória do navegador
+      setHistory(prev => [...prev, newEntry].slice(-1000));
+      if (targetCommand === commandInput.trim()) {
+        setCommandInput('');
+      }
+    } catch (err: any) {
+      const failEntry: CommandHistoryEntry = {
+        id: `${Date.now()}-${Math.random()}`,
+        command: targetCommand,
+        result: {
+          success: false,
+          command: targetCommand,
+          stdout: '',
+          stderr: err.message || 'Erro de comunicação ao executar comando.',
+          exitCode: 1,
+          cwd: currentCwd,
+          executionTimeMs: 0
+        },
+        timestamp: new Date().toLocaleTimeString('pt-BR')
+      };
+      setHistory(prev => [...prev, failEntry].slice(-1000));
+    } finally {
+      setIsExecuting(false);
+      setTimeout(() => {
+        terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const isMultiLine = commandInput.includes('\n');
+    if (e.key === 'Enter') {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        requestExecution();
+      } else if (!isMultiLine && !e.shiftKey) {
+        e.preventDefault();
+        requestExecution();
+      }
+      // Se for multi-linha e apenas Enter (sem Ctrl/Cmd), permite quebra de linha normal
+    }
+  };
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const clearTerminal = () => {
+    setHistory([]);
+  };
 
   return (
     <div className="space-y-5 font-sans text-[#1A1A2E]">
+      {/* Top Banner Header */}
       <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-11 h-11 rounded-xl bg-[#FFF7E8] text-[#1A1A2E] border-2 border-[#1A1A2E] flex items-center justify-center shadow-[2px_2px_0px_#1A1A2E] shrink-0">
-            <Wand2 className="w-6 h-6 text-[#FF5A36]" />
+            <TerminalIcon className="w-6 h-6 text-[#FF5A36]" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-black text-[#1A1A2E] font-title">Ferramentas Web</h2>
+              <h2 className="text-base sm:text-lg font-black text-[#1A1A2E] font-title">Terminal & Shell com Proteção Dupla</h2>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-[#ECFDF3] border border-[#12B76A] text-[#12B76A]">
                 <span className="w-2 h-2 rounded-full bg-[#12B76A]" />
-                100% no navegador
+                Bash Seguro Ativo
               </span>
             </div>
             <p className="text-xs text-[#4A4A68] font-medium mt-0.5">
-              Utilitários rápidos para tarefas simples, executados localmente no navegador — sem depender do shell do servidor.
+              Execute comandos do Ubuntu Server com dupla confirmação e clique nos códigos para dissecar a anatomia de cada letra, barra e parâmetro.
             </p>
           </div>
         </div>
-        <div className="flex items-start gap-2 text-[11px] text-[#4A4A68] bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-lg p-2.5 max-w-md">
-          <Info className="w-4 h-4 text-[#FF5A36] shrink-0 mt-0.5" />
-          <span>Nada é enviado ao host: JSON, Base64, hashes, UUID e conversões rodam no seu navegador.</span>
+
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          <button
+            onClick={() => setAnatomyCommand(commandInput || 'uptime')}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+            title="Aprender como o comando digitado funciona"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-[#FF5A36]" />
+            <span>Anatomia do Código</span>
+          </button>
+
+          <button
+            onClick={clearTerminal}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FFF7E8] hover:bg-[#FEE4E2] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#F04438] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#F04438]"
+            title="Limpar saídas do terminal"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-[#F04438]" />
+            <span>Limpar Console</span>
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Card title="JSON" icon={<Braces className="w-4 h-4" />} subtitle="Formatar, minificar e validar">
-          <textarea value={jsonIn} onChange={e => setJsonIn(e.target.value)} placeholder='Cole um JSON aqui...' className="w-full min-h-[140px] p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-          <div className="flex flex-wrap gap-2">
-            <Btn variant="primary" onClick={jsonFormat}><Wand2 className="w-3.5 h-3.5" />Formatar</Btn>
-            <Btn onClick={jsonMinify}>Minificar</Btn>
-            <Btn onClick={jsonValidate}>Validar</Btn>
-            <Btn variant="danger" onClick={() => { setJsonIn(''); setJsonOut(''); setJsonErr(null); }}><Trash2 className="w-3.5 h-3.5" />Limpar</Btn>
-            <CopyBtn text={jsonOut || jsonIn} id="json" />
-          </div>
-          {jsonErr && <div className="text-xs font-mono font-bold text-[#B42318] bg-[#FEE4E2] border border-[#F04438] rounded p-2">Erro: {jsonErr}</div>}
-          {jsonOut && <pre className="w-full p-3 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono whitespace-pre-wrap break-all max-h-56 overflow-auto">{jsonOut}</pre>}
-        </Card>
-
-        <Card title="Base64 (UTF-8)" icon={<Binary className="w-4 h-4" />} subtitle="Codificar e decodificar texto">
-          <div className="space-y-2">
-            <label className="text-[11px] font-mono font-bold text-[#4A4A68]">Texto</label>
-            <textarea value={b64Plain} onChange={e => setB64Plain(e.target.value)} placeholder="Texto simples..." className="w-full min-h-[90px] p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-            <div className="flex flex-wrap gap-2">
-              <Btn variant="primary" onClick={b64Encode}>Codificar →</Btn>
-              <Btn onClick={b64Decode}>← Decodificar</Btn>
-              <CopyBtn text={b64Plain} id="b64p" />
+      {/* CARD: ATUALIZAÇÃO DIRETA DO GIT NO SHELL */}
+      <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-4 sm:p-5 space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-[#FFC857] text-[#1A1A2E] flex items-center justify-center border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
+              <GitPullRequest className="w-4 h-4 text-[#1A1A2E]" />
             </div>
-            <label className="text-[11px] font-mono font-bold text-[#4A4A68]">Base64</label>
-            <textarea value={b64Encoded} onChange={e => setB64Encoded(e.target.value)} placeholder="Base64..." className="w-full min-h-[90px] p-3 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-            <div className="flex flex-wrap gap-2"><CopyBtn text={b64Encoded} id="b64e" /></div>
-            {b64Err && <div className="text-xs font-mono font-bold text-[#B42318] bg-[#FEE4E2] border border-[#F04438] rounded p-2">Erro: {b64Err}</div>}
+            <div>
+              <h3 className="text-sm font-black text-[#1A1A2E] font-title">
+                Atualizar Painel Direto do Git no Servidor
+              </h3>
+              <span className="text-[11px] font-mono text-[#717188] font-bold">
+                Script unificado de deploy, build e reload do Nginx
+              </span>
+            </div>
           </div>
-        </Card>
 
-        <Card title="URL Encode / Decode" icon={<Link2 className="w-4 h-4" />} subtitle="Componente ou URL completa">
-          <textarea value={urlIn} onChange={e => setUrlIn(e.target.value)} placeholder="Texto ou URL..." className="w-full min-h-[100px] p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-          <div className="flex flex-wrap gap-2">
-            <Btn variant="primary" onClick={urlEncodeComp}>Encode (componente)</Btn>
-            <Btn onClick={urlDecodeComp}>Decode (componente)</Btn>
-            <Btn onClick={urlEncodeFull}>Encode URI</Btn>
-            <Btn onClick={urlDecodeFull}>Decode URI</Btn>
-          </div>
-          <textarea value={urlOut} onChange={e => setUrlOut(e.target.value)} placeholder="Resultado..." className="w-full min-h-[90px] p-3 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-          <CopyBtn text={urlOut} id="url" />
-        </Card>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setAnatomyCommand(GIT_UPDATE_COMMAND)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+              title="Aprender detalhadamente cada parte deste script"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-[#FF5A36]" />
+              <span>Dissecar Script</span>
+            </button>
 
-        <Card title="Timestamp" icon={<Clock3 className="w-4 h-4" />} subtitle="Unix ↔ data/hora (local)">
-          <div className="flex flex-wrap gap-2 items-center">
-            <input value={tsInput} onChange={e => setTsInput(e.target.value)} placeholder="Unix (s/ms) ou data (ex: 2026-11-20T12:00:00)" className="flex-1 min-w-[220px] p-2.5 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-            <Btn variant="primary" onClick={tsNow}>Agora</Btn>
-            <Btn variant="danger" onClick={() => setTsInput('')}><Trash2 className="w-3.5 h-3.5" />Limpar</Btn>
+            <button
+              onClick={() => copyToClipboard(GIT_UPDATE_COMMAND, 'git-update-cmd')}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#1A1A2E]"
+              title="Copiar comando completo"
+            >
+              {copiedId === 'git-update-cmd' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
+              <span>{copiedId === 'git-update-cmd' ? 'Copiado!' : 'Copiar'}</span>
+            </button>
+
+            <button
+              onClick={() => requestExecution(GIT_UPDATE_COMMAND)}
+              disabled={isExecuting}
+              className="flex items-center gap-1.5 px-4 py-1.5 bg-[#FF5A36] hover:bg-[#E04522] disabled:opacity-50 text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-black transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+              title="Executar atualização com dupla confirmação"
+            >
+              <Play className="w-3.5 h-3.5 fill-[#1A1A2E]" />
+              <span>Executar Atualização</span>
+            </button>
           </div>
-          {tsDate ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
-              {[{ l: 'ISO 8601', v: tsDate.toISOString() }, { l: 'Local', v: tsDate.toLocaleString('pt-BR') }, { l: 'Unix (s)', v: String(Math.floor(tsDate.getTime() / 1000)) }, { l: 'Unix (ms)', v: String(tsDate.getTime()) }].map(it => (
-                <div key={it.l} className="p-2.5 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]/40 flex items-center justify-between gap-2">
-                  <div className="min-w-0"><div className="text-[10px] font-bold text-[#717188]">{it.l}</div><div className="font-bold break-all">{it.v}</div></div>
-                  <button onClick={() => copy(it.v, `ts-${it.l}`)} className="p-1.5 rounded hover:bg-white border border-transparent hover:border-[#1A1A2E]" title="Copiar">{copied === `ts-${it.l}` ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}</button>
+        </div>
+
+        {/* Bloco de Código com cursor interativo */}
+        <div 
+          onClick={() => setAnatomyCommand(GIT_UPDATE_COMMAND)}
+          className="p-3 bg-[#FFF7E8] text-[#1A1A2E] rounded-lg border-2 border-[#1A1A2E] font-mono text-xs overflow-x-hidden break-words whitespace-pre-wrap leading-relaxed shadow-inner cursor-pointer hover:border-[#FF5A36] transition relative group"
+          title="Clique aqui para abrir o dicionário e aprender a função de cada letra e barra"
+        >
+          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition bg-[#FF5A36] text-[#1A1A2E] text-[10px] font-mono font-bold px-2 py-0.5 rounded border border-[#1A1A2E] shadow">
+            Clique para dissecar código
+          </div>
+          <code>{GIT_UPDATE_COMMAND}</code>
+        </div>
+      </div>
+
+      {/* TERMINAL CONSOLE WINDOW - REFORMULADO, MAIOR E CONFORTÁVEL */}
+      <div 
+        className={isFullScreen 
+          ? "fixed inset-0 z-50 p-2 sm:p-4 bg-[#1A1A2E]/80 backdrop-blur-sm flex flex-col items-center justify-center motion-reduce:transition-none"
+          : "w-full"
+        }
+      >
+        <div 
+          className={isFullScreen
+            ? "w-full h-full max-w-full bg-[#0D0D15] border-2 border-[#1A1A2E] shadow-[6px_6px_0px_#1A1A2E] rounded-xl overflow-hidden flex flex-col font-mono text-[13px] md:text-[14px] leading-relaxed"
+            : "w-full h-[60vh] md:h-[70vh] md:min-h-[480px] bg-[#0D0D15] border-2 border-[#1A1A2E] shadow-[5px_5px_0px_#1A1A2E] rounded-xl overflow-hidden flex flex-col font-mono text-[13px] md:text-[14px] leading-relaxed transition-all motion-reduce:transition-none"
+          }
+        >
+          {/* Terminal Titlebar Estilo Janela Escura */}
+          <div className="bg-[#181828] px-4 py-3 border-b-2 border-[#1A1A2E] flex items-center justify-between text-[#F1F5F9] shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full bg-[#F04438] border border-[#1A1A2E]" />
+              <span className="w-3 h-3 rounded-full bg-[#FFC857] border border-[#1A1A2E]" />
+              <span className="w-3 h-3 rounded-full bg-[#12B76A] border border-[#1A1A2E]" />
+              <span className="text-xs md:text-sm font-bold text-[#F1F5F9] ml-2 truncate">
+                samuel@samuelserver ({currentCwd})
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono font-bold text-[#94A3B8] hidden sm:inline">
+                Bash Interativo Seguro
+              </span>
+
+              {/* Botão Expandir / Tela Cheia */}
+              <button
+                onClick={() => setIsFullScreen(!isFullScreen)}
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-[#222238] hover:bg-[#2F2F4E] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] rounded-md text-xs font-mono font-bold text-[#F1F5F9] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+                title={isFullScreen ? "Sair da Tela Cheia (ESC)" : "Expandir Terminal (Tela Cheia)"}
+              >
+                {isFullScreen ? (
+                  <>
+                    <Minimize2 className="w-3.5 h-3.5 text-[#FF5A36]" />
+                    <span>Sair da Tela Cheia (ESC)</span>
+                  </>
+                ) : (
+                  <>
+                    <Maximize2 className="w-3.5 h-3.5 text-[#FF5A36]" />
+                    <span>Tela Cheia</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Terminal Output Area Preto com rolagem suave */}
+          <div className="flex-1 p-4 md:p-5 overflow-y-auto space-y-4 bg-[#0D0D15] text-[#E2E8F0] font-mono text-[13px] md:text-[14px] leading-relaxed">
+            {history.length === 0 ? (
+              <div className="text-[#94A3B8] py-12 text-center space-y-3">
+                <div className="w-12 h-12 mx-auto rounded-full bg-[#181828] border-2 border-[#2E2E48] flex items-center justify-center shadow-[2px_2px_0px_#1A1A2E]">
+                  <TerminalIcon className="w-6 h-6 text-[#12B76A]" />
                 </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs font-mono text-[#717188]">Informe um timestamp ou data válida para ver as conversões.</div>
-          )}
-        </Card>
-
-        <Card title="UUID v4" icon={<Fingerprint className="w-4 h-4" />} subtitle="Gerador de identificadores únicos">
-          <div className="flex flex-wrap gap-2">
-            <Btn variant="primary" onClick={addUuid}>Gerar novo</Btn>
-            <Btn variant="danger" onClick={() => setUuids([generateUuid()])}><Trash2 className="w-3.5 h-3.5" />Resetar</Btn>
-            <CopyBtn text={uuids[0] || ''} id="uuid0" />
-          </div>
-          <div className="space-y-1.5 max-h-56 overflow-auto pr-1">
-            {uuids.map((u, i) => (
-              <div key={u + i} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]/40">
-                <code className="text-xs font-mono font-bold break-all">{u}</code>
-                <button onClick={() => copy(u, `uuid-${i}`)} className="p-1.5 rounded hover:bg-white border border-transparent hover:border-[#1A1A2E]" title="Copiar">{copied === `uuid-${i}` ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}</button>
+                <h4 className="text-sm font-bold text-[#F1F5F9]">Terminal preto pronto para execução</h4>
+                <p className="text-xs max-w-md mx-auto text-[#94A3B8]">
+                  Console shell com dupla confirmação e política de allowlist ativa para proteção do servidor Ubuntu.
+                </p>
+                <div className="inline-block bg-[#181828] px-3.5 py-1.5 rounded-lg border border-[#2E2E48] text-xs font-mono font-bold text-[#FFC857] shadow-[2px_2px_0px_#1A1A2E]">
+                  Dica: Digite <code className="text-[#12B76A]">uptime</code>, <code className="text-[#12B76A]">df -h</code> ou <code className="text-[#12B76A]">free -h</code> e aperte Enter.
+                </div>
               </div>
-            ))}
-          </div>
-        </Card>
+            ) : (
+              history.map((entry) => (
+                <div key={entry.id} className="space-y-2 border-b border-[#222238] pb-4">
+                  {/* Command Prompt Line */}
+                  <div className="flex items-center justify-between flex-wrap gap-2 text-xs md:text-sm">
+                    <div className="flex items-center gap-2 flex-wrap font-bold">
+                      <span className="text-[#12B76A]">➜</span>
+                      <span className="text-[#38BDF8]">samuel@samuelserver</span>
+                      <span className="text-[#94A3B8]">:</span>
+                      <span className="text-[#FFC857]">{entry.result.cwd || '~'}</span>
+                      <span className="text-[#12B76A]">$</span>
+                      <span 
+                        onClick={() => setAnatomyCommand(entry.command)}
+                        className="text-[#FFFFFF] font-black hover:text-[#12B76A] hover:underline cursor-pointer break-all"
+                        title="Clique para dissecar a anatomia deste comando"
+                      >
+                        {entry.command}
+                      </span>
+                    </div>
 
-        <Card title="Hash SHA-256" icon={<Hash className="w-4 h-4" />} subtitle="Resumo criptográfico do texto (Web Crypto)">
-          <textarea value={hashIn} onChange={e => setHashIn(e.target.value)} placeholder="Texto para gerar hash..." className="w-full min-h-[110px] p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-          <div className="flex flex-wrap gap-2">
-            <Btn variant="primary" onClick={doHash} disabled={hashing || !hashIn}>{hashing ? 'Gerando...' : 'Gerar SHA-256'}</Btn>
-            <Btn variant="danger" onClick={() => { setHashIn(''); setHashOut(''); setHashErr(null); }}><Trash2 className="w-3.5 h-3.5" />Limpar</Btn>
-            <CopyBtn text={hashOut} id="hash" />
+                    <div className="flex items-center gap-3 text-xs text-[#94A3B8] shrink-0 font-mono">
+                      <span>{entry.result.executionTimeMs}ms</span>
+                      <span>{entry.timestamp}</span>
+                      <button
+                        onClick={() => copyToClipboard(entry.result.stdout || entry.result.stderr, entry.id)}
+                        className="p-1 hover:text-[#FFFFFF] transition rounded hover:bg-[#181828]"
+                        title="Copiar saída do comando"
+                      >
+                        {copiedId === entry.id ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5 text-[#94A3B8]" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Output Text - Terminal Preto com texto de alto contraste */}
+                  {entry.result.stdout && (
+                    <pre className="text-[#E2E8F0] whitespace-pre-wrap break-words leading-relaxed pl-3.5 pr-2 py-2.5 border-l-4 border-[#12B76A] bg-[#121422] rounded-r-md font-mono text-[13px] md:text-[14px] overflow-x-hidden">
+                      {entry.result.stdout}
+                    </pre>
+                  )}
+
+                  {/* Stderr Error Output - Vermelho Legível em fundo escuro */}
+                  {entry.result.stderr && (
+                    <pre className="text-[#FCA5A5] whitespace-pre-wrap break-words leading-relaxed pl-3.5 pr-2 py-2.5 border-l-4 border-[#F04438] bg-[#2A1518] rounded-r-md font-mono text-[13px] md:text-[14px] font-semibold overflow-x-hidden">
+                      {entry.result.stderr}
+                    </pre>
+                  )}
+
+                  {/* Exit Status Badge */}
+                  <div className="flex items-center gap-2 text-xs font-mono font-bold">
+                    {entry.result.success ? (
+                      <span className="text-[#12B76A] flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        Exit code: 0 (Sucesso)
+                      </span>
+                    ) : (
+                      <span className="text-[#F87171] flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        Exit code: {entry.result.exitCode} (Erro)
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+            <div ref={terminalEndRef} />
           </div>
-          {hashErr && <div className="text-xs font-mono font-bold text-[#B42318] bg-[#FEE4E2] border border-[#F04438] rounded p-2">Erro: {hashErr}</div>}
-          {hashOut && <div className="p-3 bg-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold break-all">{hashOut}</div>}
-        </Card>
+
+          {/* Command Input Prompt Bar Escuro - Sempre Visível na Parte Inferior */}
+          <div className="bg-[#181828] border-t-2 border-[#1A1A2E] shrink-0">
+            {/* Banner de Bloco Multi-Linha Detectado */}
+            {commandInput.includes('\n') && (
+              <div className="bg-[#121422] px-3.5 py-1.5 border-b border-[#2E2E48] flex items-center justify-between text-xs font-mono text-[#94A3B8]">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-[#12B76A] animate-pulse" />
+                  <span className="text-[#F1F5F9] font-bold">Bloco de Comandos:</span>
+                  <span className="text-[#38BDF8]">
+                    {commandInput.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} comando(s)
+                  </span>
+                  <span className="text-[#64748B] hidden sm:inline">({commandInput.split('\n').length} linhas)</span>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-[11px] text-[#94A3B8] hidden sm:inline">
+                    Pressione <kbd className="px-1.5 py-0.5 rounded bg-[#222238] text-[#F1F5F9] border border-[#3E3E58] text-[10px]">Ctrl+Enter</kbd> para rodar bloco
+                  </span>
+                  <button
+                    onClick={() => setCommandInput('')}
+                    className="text-[#F04438] hover:text-[#FFA5A5] text-[11px] font-bold hover:underline ml-2"
+                  >
+                    Limpar Bloco
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="p-3 md:p-3.5 flex items-start gap-2">
+              <div className="flex items-center gap-1 text-[#12B76A] font-black text-sm md:text-base shrink-0 select-none pt-2">
+                <span>$</span>
+              </div>
+
+              <textarea
+                ref={textareaRef}
+                value={commandInput}
+                onChange={(e) => setCommandInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={isExecuting}
+                rows={1}
+                placeholder="Digite ou cole comandos bash (ex: uptime, df -h ou cole um bloco de comandos completo)..."
+                className="flex-1 bg-[#0D0D15] px-3 py-2 border-2 border-[#2E2E48] rounded-lg text-[#F1F5F9] text-[13px] md:text-[14px] font-mono font-bold focus:outline-none focus-visible:ring-2 focus-visible:ring-[#12B76A] shadow-[2px_2px_0px_#1A1A2E] placeholder-[#64748B] resize-none overflow-y-auto leading-relaxed"
+              />
+
+              <button
+                onClick={() => setAnatomyCommand(commandInput)}
+                disabled={!commandInput.trim()}
+                className="p-2.5 bg-[#222238] hover:bg-[#2F2F4E] disabled:opacity-30 text-[#F1F5F9] border-2 border-[#1A1A2E] rounded-lg shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0 focus-visible:ring-2 focus-visible:ring-[#FF5A36] mt-0.5"
+                title="Aprender sobre o comando antes de rodar"
+              >
+                <BookOpen className="w-4 h-4 text-[#FFC857]" />
+              </button>
+
+              <button
+                onClick={() => requestExecution()}
+                disabled={isExecuting || !commandInput.trim()}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-[#FF5A36] hover:bg-[#E04522] disabled:opacity-40 disabled:cursor-not-allowed text-[#1A1A2E] text-xs md:text-sm font-mono font-black rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none shrink-0 focus-visible:ring-2 focus-visible:ring-[#FF5A36] mt-0.5"
+              >
+                {isExecuting ? (
+                  <span className="flex items-center gap-1.5">
+                    <RefreshCw className="w-4 h-4 animate-spin text-[#1A1A2E]" />
+                    <span>Rodando...</span>
+                  </span>
+                ) : commandInput.includes('\n') ? (
+                  <span className="flex items-center gap-1.5">
+                    <Play className="w-4 h-4 fill-[#1A1A2E]" />
+                    <span>Executar Bloco ({commandInput.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length})</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <Play className="w-4 h-4 fill-[#1A1A2E]" />
+                    <span>Executar</span>
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <Card title="Texto rápido" icon={<Type className="w-4 h-4" />} subtitle="Contagem e transformações simples">
-        <textarea value={textIn} onChange={e => setTextIn(e.target.value)} placeholder="Cole ou digite um texto..." className="w-full min-h-[140px] p-3 bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] focus:outline-none focus:ring-2 focus:ring-[#FF5A36]" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-          {[{ l: 'Caracteres', v: textStats.chars }, { l: 'Palavras', v: textStats.words }, { l: 'Linhas', v: textStats.lines }, { l: 'Bytes (UTF-8)', v: textStats.bytes }].map(s => (
-            <div key={s.l} className="p-2.5 rounded-lg bg-white border border-[#1A1A2E]/40 text-center"><div className="text-[10px] font-bold text-[#717188] uppercase">{s.l}</div><div className="text-base font-black text-[#1A1A2E]">{s.v}</div></div>
-          ))}
+      {/* QUICK PRESET COMMANDS EM LINHA COM QUEBRA (FLEX-WRAP) */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-[#FF5A36]" />
+            <h3 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+              Comandos Rápidos do Ubuntu
+            </h3>
+          </div>
+          <span className="text-[11px] font-mono text-[#717188] font-bold">
+            Clique no código para aprender sua anatomia ou no botão para executar
+          </span>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Btn onClick={() => setTextIn(t => t.toUpperCase())}>MAIÚSCULAS</Btn>
-          <Btn onClick={() => setTextIn(t => t.toLowerCase())}>minúsculas</Btn>
-          <Btn onClick={() => setTextIn(t => t.trim())}>Trim</Btn>
-          <Btn variant="danger" onClick={() => setTextIn('')}><Trash2 className="w-3.5 h-3.5" />Limpar</Btn>
-          <CopyBtn text={textIn} id="text" />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+          {COMMAND_CATEGORIES.map((cat) => {
+            const Icon = cat.icon;
+            return (
+              <div 
+                key={cat.id} 
+                className="bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] rounded-xl p-4 flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center gap-2 pb-2.5 border-b-2 border-[#1A1A2E] mb-3">
+                    <Icon className="w-4 h-4 text-[#FF5A36]" />
+                    <span className="text-xs font-bold font-title uppercase tracking-wider text-[#1A1A2E]">
+                      {cat.name}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    {cat.commands.map((cmd, idx) => (
+                      <div 
+                        key={cmd.command + idx}
+                        className="p-2.5 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E] hover:border-[#FF5A36] transition flex flex-col gap-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <code 
+                            onClick={() => setAnatomyCommand(cmd.command)}
+                            className="text-xs font-mono font-bold text-[#1A1A2E] truncate cursor-pointer hover:text-[#FF5A36] hover:underline"
+                            title="Clique para dissecar e aprender este comando"
+                          >
+                            {cmd.command}
+                          </code>
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => setAnatomyCommand(cmd.command)}
+                              className="p-1 rounded bg-white hover:bg-[#FFEECB] text-[#717188] hover:text-[#FF5A36] border border-[#1A1A2E] transition focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+                              title="Anatomia do código"
+                            >
+                              <BookOpen className="w-3 h-3" />
+                            </button>
+
+                            <button
+                              onClick={() => requestExecution(cmd.command)}
+                              disabled={isExecuting}
+                              className="px-2.5 py-1 rounded bg-[#FFC857] hover:bg-[#e6b44e] text-[#1A1A2E] text-[11px] font-mono font-black border border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+                              title="Executar no terminal com dupla confirmação"
+                            >
+                              Rodar
+                            </button>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-[#717188] leading-tight font-medium">
+                          {cmd.desc}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </Card>
+      </div>
+
+      {/* MODAL DE CONFIRMAÇÃO EM DUAS ETAPAS */}
+      {confirmStage !== null && pendingCommand && (
+        <div className="fixed inset-0 z-50 bg-[#1A1A2E]/70 flex items-center justify-center p-4">
+          <div className="bg-white border-2 border-[#1A1A2E] shadow-[8px_8px_0px_#1A1A2E] rounded-xl max-w-lg w-full p-6 space-y-4 font-sans">
+            
+            {/* Header da Confirmação */}
+            <div className="flex items-center justify-between pb-3 border-b-2 border-[#1A1A2E]">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-9 h-9 rounded-lg border-2 border-[#1A1A2E] flex items-center justify-center ${
+                  confirmStage === 1 ? 'bg-[#FFF7E8] text-[#FF5A36]' : 'bg-[#FEE4E2] text-[#F04438]'
+                }`}>
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-[#1A1A2E] font-title">
+                    {confirmStage === 1 
+                      ? 'Confirmação 1 de 2: Executar Comando?' 
+                      : 'Confirmação 2 de 2: Confirmação Definitiva!'}
+                  </h3>
+                  <span className="text-[11px] font-mono text-[#717188] font-bold">
+                    {confirmStage === 1 
+                      ? 'Primeira etapa de verificação de segurança' 
+                      : 'O comando será enviado ao terminal do sistema'}
+                  </span>
+                </div>
+              </div>
+
+              <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold border ${
+                confirmStage === 1 
+                  ? 'bg-[#FFF7E8] border-[#FFC857] text-[#1A1A2E]' 
+                  : 'bg-[#FEE4E2] border-[#F04438] text-[#F04438]'
+              }`}>
+                Etapa {confirmStage}/2
+              </span>
+            </div>
+
+            {/* Comando a ser executado */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono text-[#717188] font-bold">
+                  Comando que será executado:
+                </span>
+                {pendingCommand.includes('\n') && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#ECFDF3] border border-[#12B76A] text-[#12B76A]">
+                    Bloco com {pendingCommand.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length} comandos ativos ({pendingCommand.split('\n').length} linhas)
+                  </span>
+                )}
+              </div>
+              <div className="p-3 bg-[#FFF7E8] text-[#1A1A2E] rounded-lg border-2 border-[#1A1A2E] font-mono text-xs overflow-x-hidden break-words whitespace-pre-wrap max-h-48 overflow-y-auto shadow-inner leading-relaxed">
+                {pendingCommand}
+              </div>
+            </div>
+
+            {/* Mensagem da etapa */}
+            {confirmStage === 1 ? (
+              <p className="text-xs text-[#4A4A68] leading-relaxed">
+                Você solicitou a execução deste comando no servidor Ubuntu. Para evitar execuções acidentais, clique abaixo para avançar para a confirmação final.
+              </p>
+            ) : (
+              <div className="p-3 rounded-lg bg-[#FEF3F2] border border-[#F04438] text-xs text-[#B42318] space-y-1">
+                <div className="font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-[#F04438]" />
+                  Atenção: Ação real no sistema operacional!
+                </div>
+                <p>
+                  Esta é a confirmação final. Tem certeza absoluta que deseja prosseguir e disparar o processo no shell?
+                </p>
+              </div>
+            )}
+
+            {/* Ações */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t-2 border-[#1A1A2E]">
+              <button
+                onClick={handleCancelExecution}
+                className="px-4 py-2 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-bold text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#1A1A2E]"
+              >
+                Cancelar
+              </button>
+
+              {confirmStage === 1 ? (
+                <button
+                  onClick={handleProceedToStage2}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#FFC857] hover:bg-[#e6b44e] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-black text-[#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#FF5A36]"
+                >
+                  <span>Avançar para Etapa 2</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleConfirmedExecution}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-[#F04438] hover:bg-[#D92D20] text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] rounded-lg text-xs font-mono font-black transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none focus-visible:ring-2 focus-visible:ring-[#F04438]"
+                >
+                  <Play className="w-3.5 h-3.5 fill-[#1A1A2E]" />
+                  <span>Sim, Executar Definitivamente</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE ANATOMIA DO CÓDIGO */}
+      {anatomyCommand && (
+        <CommandAnatomyModal
+          command={anatomyCommand}
+          onClose={() => setAnatomyCommand(null)}
+          onExecuteNow={() => requestExecution(anatomyCommand)}
+        />
+      )}
     </div>
   );
 };
