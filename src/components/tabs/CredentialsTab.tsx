@@ -55,6 +55,7 @@ interface ServerConfig {
     enabled: boolean;
     botToken?: string;
     chatId?: string;
+    aiModel?: string;
     notifyOnLoginFailure: boolean;
     notifyOnLoginSuccess: boolean;
     notifyOnBlockIp: boolean;
@@ -176,7 +177,7 @@ export const CredentialsTab: React.FC = () => {
         if (!res.ok || data.ok === false) throw new Error(data.error || `Erro ${res.status}`);
         const chats = Array.isArray(data.chats) ? data.chats : [];
         if (chats.length === 0) {
-          setTelegramNotice('Nenhum chat encontrado em getUpdates. Envie uma mensagem para o bot (ou /start) e tente novamente. Depois salve o chatId.');
+          setTelegramNotice('Nenhum chat detectado ainda. Envie /start para @SAMUEL_MIKROBOT no Telegram (com o bot ativado) — ele deve responder o menu e vincular automaticamente. Depois recarregue/salve se necessário.');
         } else {
           const first = chats[0];
           setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, chatId: String(first.id) } } : prev);
@@ -187,7 +188,7 @@ export const CredentialsTab: React.FC = () => {
         const res = await fetch('/api/telegram/test', { method: 'POST', headers: { 'Accept': 'application/json', ...getAuthHeaders() } });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.ok === false) throw new Error(data.error || `Erro ${res.status}`);
-        setTelegramNotice('Mensagem de teste enviada com sucesso no Telegram.');
+        setTelegramNotice('Mensagem de teste enviada com sucesso no Telegram. Verifique seu chat.');
       } else {
         const res = await fetch('/api/telegram/status', { headers: { 'Accept': 'application/json', ...getAuthHeaders() } });
         const data = await res.json().catch(() => ({}));
@@ -568,7 +569,7 @@ export const CredentialsTab: React.FC = () => {
               <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
                 5. Telegram (Bot & Notificações)
               </h2>
-              <p className="text-[11px] text-[#4A4A68] font-medium">Configure token/chat e alertas de login, segurança e firewall.</p>
+              <p className="text-[11px] text-[#4A4A68] font-medium">Bot interativo: menu, status, segurança e chat com IA (Google). Envie /start no Telegram após ativar.</p>
             </div>
           </div>
           <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs font-mono font-bold cursor-pointer">
@@ -602,7 +603,7 @@ export const CredentialsTab: React.FC = () => {
             </div>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1 md:col-span-2">
             <label className="block text-xs font-mono font-bold text-[#1A1A2E]">Chat ID (usuário/grupo/canal)</label>
             <input
               type="text"
@@ -611,7 +612,19 @@ export const CredentialsTab: React.FC = () => {
               placeholder="Ex: 123456789 ou -100..."
               className="w-full p-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
             />
-            <p className="text-[11px] text-[#717188]">Envie /start ou uma mensagem ao bot e clique em “Detectar chat” para preencher.</p>
+            <p className="text-[11px] text-[#717188]">Com o bot ativo, envie /start para @SAMUEL_MIKROBOT: ele responde com menu e vincula o chat automaticamente (se vazio). Ou use “Detectar chat”.</p>
+          </div>
+
+          <div className="space-y-1 md:col-span-2">
+            <label className="block text-xs font-mono font-bold text-[#1A1A2E]">Modelo de IA (Google via opencode) para o chat no Telegram</label>
+            <input
+              type="text"
+              value={config?.telegram?.aiModel || 'google/gemini-3.5-flash'}
+              onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, aiModel: e.target.value } } : prev)}
+              placeholder="google/gemini-3.5-flash"
+              className="w-full p-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
+            />
+            <p className="text-[11px] text-[#717188]">Modelo usado quando você fala com a IA pelo Telegram. Sugestões Google: google/gemini-3.5-flash, google/gemini-3.8-flash, google/gemini-3.7-flash. Em falha do Google, tenta fallback automático.</p>
           </div>
         </div>
 

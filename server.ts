@@ -66,6 +66,7 @@ import {
 } from './server/securityMonitor.js';
 import { logAudit, getAuditLog, clearAuditLog } from './server/auditLog.js';
 import { testTelegramConnection, getTelegramUpdates, sendTelegramTestMessage, notifyTelegramLoginFailure, notifyTelegramLoginSuccess, notifyTelegramIpBlock } from './server/telegramNotifier.js';
+import { startTelegramBotPolling, getDetectedTelegramChats } from './server/telegramBot.js';
 import { loadMetricsHistory, getMetricsHistory, addMetricPoint } from './server/metricsHistory.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
@@ -1582,6 +1583,7 @@ export function createApp() {
         configured: !!(t.botToken),
         enabled: t.enabled === true,
         chatId: t.chatId || '',
+        aiModel: t.aiModel || 'google/gemini-3.5-flash',
         notifyOnLoginFailure: t.notifyOnLoginFailure !== false,
         notifyOnLoginSuccess: t.notifyOnLoginSuccess === true,
         notifyOnBlockIp: t.notifyOnBlockIp !== false,
@@ -1604,8 +1606,14 @@ export function createApp() {
 
   app.get('/api/telegram/updates', requireAdminAuth, async (_req, res) => {
     try {
+      const botChats = typeof getDetectedTelegramChats === 'function' ? getDetectedTelegramChats() : [];
       const result = await getTelegramUpdates(30);
-      return res.json(result);
+      const chats = [...botChats, ...(((result as any).chats) || [])];
+      const map = new Map<string, any>();
+      for (const c of chats) {
+        if (c && c.id != null) map.set(String(c.id), c);
+      }
+      return res.json({ ok: result.ok !== false, chats: Array.from(map.values()), data: result.data, error: result.error });
     } catch (err: any) {
       return res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar updates do Telegram.' });
     }
@@ -2372,6 +2380,7 @@ export async function startServer() {
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
       attachBrowserWebSocket(server);
+      try { startTelegramBotPolling(); } catch (e) { console.warn('[telegram] falha ao iniciar polling:', e); }
       resolve(server);
     });
   });

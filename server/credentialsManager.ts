@@ -37,6 +37,7 @@ export interface ServerConfigData {
     enabled: boolean;
     botToken?: string;
     chatId?: string;
+    aiModel?: string;
     notifyOnLoginFailure: boolean;
     notifyOnLoginSuccess: boolean;
     notifyOnBlockIp: boolean;
@@ -76,10 +77,11 @@ const DEFAULT_CONFIG: ServerConfigData = {
     enabled: false,
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     chatId: process.env.TELEGRAM_CHAT_ID || '',
+    aiModel: process.env.TELEGRAM_AI_MODEL || 'google/gemini-3.5-flash',
     notifyOnLoginFailure: true,
     notifyOnLoginSuccess: false,
     notifyOnBlockIp: true,
-    description: 'Bot Telegram para notificações do painel'
+    description: 'Bot Telegram para notificações e chat com IA'
   },
   customVariables: [
     {
@@ -149,9 +151,10 @@ export function getServerConfig(): ServerConfigData {
     telegram: {
       ...DEFAULT_CONFIG.telegram,
       ...(fileData.telegram || {}),
-      enabled: (fileData.telegram?.enabled ?? DEFAULT_CONFIG.telegram.enabled) === true,
-      botToken: fileData.telegram?.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_CONFIG.telegram.botToken || '',
-      chatId: fileData.telegram?.chatId || process.env.TELEGRAM_CHAT_ID || DEFAULT_CONFIG.telegram.chatId || '',
+      enabled: (fileData.telegram?.enabled ?? (fileData.telegram || ({} as any))?.botToken ? true : DEFAULT_CONFIG.telegram.enabled) === true,
+      botToken: String(fileData.telegram?.botToken || process.env.TELEGRAM_BOT_TOKEN || (DEFAULT_CONFIG as any).telegram?.botToken || ''),
+      chatId: String(fileData.telegram?.chatId || process.env.TELEGRAM_CHAT_ID || (DEFAULT_CONFIG as any).telegram?.chatId || ''),
+      aiModel: String(fileData.telegram?.aiModel || process.env.TELEGRAM_AI_MODEL || (DEFAULT_CONFIG as any).telegram?.aiModel || 'google/gemini-3.5-flash'),
       notifyOnLoginFailure: fileData.telegram?.notifyOnLoginFailure !== false,
       notifyOnLoginSuccess: fileData.telegram?.notifyOnLoginSuccess === true,
       notifyOnBlockIp: fileData.telegram?.notifyOnBlockIp !== false
