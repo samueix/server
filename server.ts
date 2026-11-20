@@ -65,6 +65,7 @@ import {
   unblockIpInUfw 
 } from './server/securityMonitor.js';
 import { logAudit, getAuditLog, clearAuditLog } from './server/auditLog.js';
+import { testTelegramConnection, getTelegramUpdates, sendTelegramTestMessage, notifyTelegramLoginFailure, notifyTelegramLoginSuccess, notifyTelegramIpBlock } from './server/telegramNotifier.js';
 import { loadMetricsHistory, getMetricsHistory, addMetricPoint } from './server/metricsHistory.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
@@ -578,6 +579,7 @@ export function createApp() {
       // Sucesso: reseta histórico de falhas do IP
       failedLoginAttempts.delete(clientIp);
       logAudit({ actor: authenticatedUser, role: userRole, ip: clientIp, action: 'login', target: 'panel', details: 'Login bem-sucedido', status: 'success' });
+      void notifyTelegramLoginSuccess(authenticatedUser, userRole, clientIp);
       return res.json({
         authenticated: true,
         user: authenticatedUser,
@@ -599,6 +601,7 @@ export function createApp() {
     } catch {}
     recordPanelFailedLogin(clientIp, attemptedUser);
     logAudit({ actor: attemptedUser, role: 'unknown', ip: clientIp, action: 'login_failed', target: 'panel', details: `Tentativa de login falhou (usuário: ${attemptedUser})`, status: 'failure', meta: { attemptedUser } });
+    void notifyTelegramLoginFailure(clientIp, attemptedUser);
     if (!rateLimit || now > rateLimit.resetAt) {
       failedLoginAttempts.set(clientIp, { count: 1, resetAt: now + 300000 });
     } else {
@@ -1548,6 +1551,7 @@ export function createApp() {
       const { ip } = req.body || {};
       if (!ip) return res.status(400).json({ error: 'IP não fornecido.' });
       const result = await blockIpInUfw(ip);
+      void notifyTelegramIpBlock(String(ip), 'block', result?.message);
       return res.json(result);
     } catch (err: any) {
       return res.status(400).json({ error: err.message });
@@ -1560,9 +1564,50 @@ export function createApp() {
       const { ip } = req.body || {};
       if (!ip) return res.status(400).json({ error: 'IP não fornecido.' });
       const result = await unblockIpInUfw(ip);
+      void notifyTelegramIpBlock(String(ip), 'unblock', result?.message);
       return res.json(result);
     } catch (err: any) {
       return res.status(400).json({ error: err.message });
+    }
+  });
+
+  // Telegram: status, teste e detecção de chat (admin)
+  app.get('/api/telegram/status', requireAdminAuth, async (_req, res) => {
+    try {
+      const me = await testTelegramConnection();
+      const cfg = getServerConfig() as any;
+      const t = cfg.telegram || {};
+      return res.json({
+        ok: true,
+        configured: !!(t.botToken),
+        enabled: t.enabled === true,
+        chatId: t.chatId || '',
+        notifyOnLoginFailure: t.notifyOnLoginFailure !== false,
+        notifyOnLoginSuccess: t.notifyOnLoginSuccess === true,
+        notifyOnBlockIp: t.notifyOnBlockIp !== false,
+        bot: me.ok ? me.bot : null,
+        connection: me.ok ? 'ok' : (me.error || 'not_configured')
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Falha ao consultar Telegram.' });
+    }
+  });
+
+  app.post('/api/telegram/test', requireAdminAuth, async (_req, res) => {
+    try {
+      const result = await sendTelegramTestMessage();
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Falha ao testar Telegram.' });
+    }
+  });
+
+  app.get('/api/telegram/updates', requireAdminAuth, async (_req, res) => {
+    try {
+      const result = await getTelegramUpdates(30);
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar updates do Telegram.' });
     }
   });
 
@@ -1665,6 +1710,7 @@ export function createApp() {
       '/api/files',
       '/api/credentials',
       '/api/security',
+      '/api/telegram',
       '/api/terminal'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {

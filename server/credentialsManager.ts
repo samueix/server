@@ -33,6 +33,15 @@ export interface ServerConfigData {
     apiKey?: string;
     description?: string;
   };
+  telegram: {
+    enabled: boolean;
+    botToken?: string;
+    chatId?: string;
+    notifyOnLoginFailure: boolean;
+    notifyOnLoginSuccess: boolean;
+    notifyOnBlockIp: boolean;
+    description?: string;
+  };
   customVariables: CustomVariable[];
 }
 
@@ -62,6 +71,15 @@ const DEFAULT_CONFIG: ServerConfigData = {
     url: process.env.N8N_URL || 'http://127.0.0.1:5678',
     apiKey: '',
     description: 'Chave de API e endpoint do n8n Workflow Automation'
+  },
+  telegram: {
+    enabled: false,
+    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    chatId: process.env.TELEGRAM_CHAT_ID || '',
+    notifyOnLoginFailure: true,
+    notifyOnLoginSuccess: false,
+    notifyOnBlockIp: true,
+    description: 'Bot Telegram para notificações do painel'
   },
   customVariables: [
     {
@@ -128,6 +146,16 @@ export function getServerConfig(): ServerConfigData {
       url: fileData.n8n?.url || process.env.N8N_URL || DEFAULT_CONFIG.n8n.url,
       apiKey: fileData.n8n?.apiKey || process.env.N8N_API_KEY || ''
     },
+    telegram: {
+      ...DEFAULT_CONFIG.telegram,
+      ...(fileData.telegram || {}),
+      enabled: (fileData.telegram?.enabled ?? DEFAULT_CONFIG.telegram.enabled) === true,
+      botToken: fileData.telegram?.botToken || process.env.TELEGRAM_BOT_TOKEN || DEFAULT_CONFIG.telegram.botToken || '',
+      chatId: fileData.telegram?.chatId || process.env.TELEGRAM_CHAT_ID || DEFAULT_CONFIG.telegram.chatId || '',
+      notifyOnLoginFailure: fileData.telegram?.notifyOnLoginFailure !== false,
+      notifyOnLoginSuccess: fileData.telegram?.notifyOnLoginSuccess === true,
+      notifyOnBlockIp: fileData.telegram?.notifyOnBlockIp !== false
+    },
     customVariables: Array.isArray(fileData.customVariables) ? fileData.customVariables : DEFAULT_CONFIG.customVariables
   };
 }
@@ -141,6 +169,7 @@ export function saveServerConfig(data: Partial<ServerConfigData>): ServerConfigD
     adguard: { ...current.adguard, ...(data.adguard || {}) },
     auth: { ...current.auth, ...(data.auth || {}) },
     n8n: { ...current.n8n, ...(data.n8n || {}) },
+    telegram: { ...current.telegram, ...(data.telegram || {}) },
     customVariables: Array.isArray(data.customVariables) ? data.customVariables : current.customVariables
   };
 

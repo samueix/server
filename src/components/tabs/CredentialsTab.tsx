@@ -51,6 +51,15 @@ interface ServerConfig {
     apiKey?: string;
     description?: string;
   };
+  telegram: {
+    enabled: boolean;
+    botToken?: string;
+    chatId?: string;
+    notifyOnLoginFailure: boolean;
+    notifyOnLoginSuccess: boolean;
+    notifyOnBlockIp: boolean;
+    description?: string;
+  };
   customVariables: CustomVar[];
 }
 
@@ -60,6 +69,8 @@ export const CredentialsTab: React.FC = () => {
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [telegramNotice, setTelegramNotice] = useState<string | null>(null);
+  const [telegramBusy, setTelegramBusy] = useState<string | null>(null);
 
   // Controle de visibilidade de senhas
   const [showPass, setShowPass] = useState<Record<string, boolean>>({});
@@ -153,6 +164,41 @@ export const CredentialsTab: React.FC = () => {
     if (!config) return;
     const filtered = config.customVariables.filter(v => v.id !== id);
     setConfig({ ...config, customVariables: filtered });
+  };
+
+  const testTelegram = async (mode: 'test' | 'updates' | 'status') => {
+    setTelegramNotice(null);
+    setTelegramBusy(mode);
+    try {
+      if (mode === 'updates') {
+        const res = await fetch('/api/telegram/updates', { headers: { 'Accept': 'application/json', ...getAuthHeaders() } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || `Erro ${res.status}`);
+        const chats = Array.isArray(data.chats) ? data.chats : [];
+        if (chats.length === 0) {
+          setTelegramNotice('Nenhum chat encontrado em getUpdates. Envie uma mensagem para o bot (ou /start) e tente novamente. Depois salve o chatId.');
+        } else {
+          const first = chats[0];
+          setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, chatId: String(first.id) } } : prev);
+          const list = chats.map((c: any) => `${c.id}${c.username ? ' (@'+c.username+')' : ''}${c.title ? ' - '+c.title : ''}`).join(', ');
+          setTelegramNotice(`Chats detectados: ${list}. Primeiro chatId preenchido (salve para persistir).`);
+        }
+      } else if (mode === 'test') {
+        const res = await fetch('/api/telegram/test', { method: 'POST', headers: { 'Accept': 'application/json', ...getAuthHeaders() } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || `Erro ${res.status}`);
+        setTelegramNotice('Mensagem de teste enviada com sucesso no Telegram.');
+      } else {
+        const res = await fetch('/api/telegram/status', { headers: { 'Accept': 'application/json', ...getAuthHeaders() } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || `Erro ${res.status}`);
+        setTelegramNotice(`Conexão: ${data.connection}${data.bot?.username ? ' (@'+data.bot.username+')' : ''}${data.chatId ? ' | chatId: '+data.chatId : ' | chatId não configurado'}`);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Falha na operação do Telegram.');
+    } finally {
+      setTelegramBusy(null);
+    }
   };
 
   if (loading && !config) {
@@ -511,13 +557,100 @@ export const CredentialsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* 5. Variáveis Personalizadas Extras */}
+      {/* 5. Telegram (Bot & Notificações) */}
+      <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl space-y-3.5 md:col-span-2">
+        <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-[#0088cc] text-white flex items-center justify-center border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
+              <Shield className="w-4 h-4" />
+            </div>
+            <div>
+              <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
+                5. Telegram (Bot & Notificações)
+              </h2>
+              <p className="text-[11px] text-[#4A4A68] font-medium">Configure token/chat e alertas de login, segurança e firewall.</p>
+            </div>
+          </div>
+          <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs font-mono font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config?.telegram?.enabled === true}
+              onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, enabled: e.target.checked } } : prev)}
+            />
+            <span>{config?.telegram?.enabled ? 'Ativado' : 'Desativado'}</span>
+          </label>
+        </div>
+
+        {telegramNotice && (
+          <div className="p-2.5 bg-[#D1FADF] border border-[#12B76A] rounded-lg text-[#027A48] text-xs font-bold">{telegramNotice}</div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <label className="block text-xs font-mono font-bold text-[#1A1A2E]">Bot Token</label>
+            <div className="relative">
+              <input
+                type={showPass['telegramToken'] ? 'text' : 'password'}
+                value={config?.telegram?.botToken || ''}
+                onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, botToken: e.target.value } } : prev)}
+                placeholder="123456:ABC..."
+                className="w-full pl-3 pr-10 py-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
+              />
+              <button type="button" onClick={() => toggleShowPass('telegramToken')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#717188] hover:text-[#1A1A2E] p-1">
+                {showPass['telegramToken'] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-mono font-bold text-[#1A1A2E]">Chat ID (usuário/grupo/canal)</label>
+            <input
+              type="text"
+              value={config?.telegram?.chatId || ''}
+              onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, chatId: e.target.value } } : prev)}
+              placeholder="Ex: 123456789 ou -100..."
+              className="w-full p-2 bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] rounded-lg text-xs font-mono text-[#1A1A2E]"
+            />
+            <p className="text-[11px] text-[#717188]">Envie /start ou uma mensagem ao bot e clique em “Detectar chat” para preencher.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs font-mono font-bold">
+          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
+            <input type="checkbox" checked={config?.telegram?.notifyOnLoginFailure !== false} onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, notifyOnLoginFailure: e.target.checked } } : prev)} />
+            <span>Falhas de login</span>
+          </label>
+          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
+            <input type="checkbox" checked={config?.telegram?.notifyOnLoginSuccess === true} onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, notifyOnLoginSuccess: e.target.checked } } : prev)} />
+            <span>Logins bem-sucedidos</span>
+          </label>
+          <label className="flex items-center gap-2 p-2.5 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]">
+            <input type="checkbox" checked={config?.telegram?.notifyOnBlockIp !== false} onChange={(e) => setConfig(prev => prev ? { ...prev, telegram: { ...prev.telegram, notifyOnBlockIp: e.target.checked } } : prev)} />
+            <span>Bloqueio/Desbloqueio UFW</span>
+          </label>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap pt-1">
+          <button type="button" onClick={() => testTelegram('status')} disabled={!!telegramBusy} className="px-3 py-1.5 bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-50">
+            {telegramBusy === 'status' ? 'Verificando...' : 'Verificar conexão'}
+          </button>
+          <button type="button" onClick={() => testTelegram('updates')} disabled={!!telegramBusy} className="px-3 py-1.5 bg-[#FFF7E8] hover:bg-[#FFEECB] border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-50">
+            {telegramBusy === 'updates' ? 'Buscando...' : 'Detectar chat'}
+          </button>
+          <button type="button" onClick={() => testTelegram('test')} disabled={!!telegramBusy} className="px-3 py-1.5 bg-[#0088cc] hover:bg-[#0077b3] text-white border-2 border-[#1A1A2E] rounded-lg text-xs font-mono font-bold shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-50">
+            {telegramBusy === 'test' ? 'Enviando...' : 'Enviar teste'}
+          </button>
+          <span className="text-[11px] text-[#717188]">Salve as alterações para persistir token/chat e preferências.</span>
+        </div>
+      </div>
+
+      {/* 6. Variáveis Personalizadas Extras */}
       <div className="p-5 bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl space-y-4">
         <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Layers className="w-4 h-4 text-[#FF5A36]" />
             <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-              5. Variáveis de Sistema Personalizadas (Chave e Valor)
+              6. Variáveis de Sistema Personalizadas (Chave e Valor)
             </h2>
           </div>
 
