@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowRight,
   Check,
@@ -952,9 +952,14 @@ const MERMAID_SOURCE = `flowchart TD
 export const ArchitectureDiagram: React.FC = () => {
   const [activeLayer, setActiveLayer] = useState<LayerId>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string>('ts_server');
-  const [zoomLevel, setZoomLevel] = useState<'fit' | 'medium' | 'large'>('fit');
+  const [zoom, setZoom] = useState(1);
   const [copiedMermaid, setCopiedMermaid] = useState(false);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const inspectorRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ active: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0, moved: false });
+  const didDragRef = useRef(false);
+  const hasInteractedRef = useRef(false);
 
   const selectedNode = useMemo(
     () => NODES.find((n) => n.id === selectedNodeId) ?? NODES[0],
@@ -996,12 +1001,104 @@ export const ArchitectureDiagram: React.FC = () => {
     }
   };
 
-  const svgWidthClass =
-    zoomLevel === 'fit'
-      ? 'w-full min-w-[820px] lg:min-w-0 max-w-full'
-      : zoomLevel === 'medium'
-      ? 'w-[1320px]'
-      : 'w-[1640px]';
+  const clampZoom = (z: number) => Math.min(2.8, Math.max(0.35, z));
+
+  const fitToWidth = () => {
+    const el = canvasRef.current;
+    if (!el) {
+      setZoom(1);
+      return;
+    }
+    const available = Math.max(320, el.clientWidth - 24);
+    setZoom(clampZoom(available / 1320));
+  };
+
+  useEffect(() => {
+    fitToWidth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left + el.scrollLeft;
+      const mouseY = e.clientY - rect.top + el.scrollTop;
+      const prev = zoom;
+      const factor = e.deltaY < 0 ? 1.12 : 0.9;
+      const next = clampZoom(prev * factor);
+      if (Math.abs(next - prev) < 0.0005) return;
+      const ratio = next / prev;
+      setZoom(next);
+      requestAnimationFrame(() => {
+        el.scrollLeft = mouseX * ratio - (e.clientX - rect.left);
+        el.scrollTop = mouseY * ratio - (e.clientY - rect.top);
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [zoom]);
+
+  useEffect(() => {
+    if (!hasInteractedRef.current) return;
+    inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedNodeId]);
+
+  const handleCanvasPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-node-id]') || target.closest('button, a, input, textarea, select, summary, details')) return;
+    const el = canvasRef.current;
+    if (!el) return;
+    dragRef.current = {
+      active: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+      moved: false,
+    };
+    didDragRef.current = false;
+    try { el.setPointerCapture(e.pointerId); } catch {}
+  };
+
+  const handleCanvasPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = canvasRef.current;
+    const drag = dragRef.current;
+    if (!el || !drag.active) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) > 4) {
+      drag.moved = true;
+      didDragRef.current = true;
+    }
+    if (drag.moved) {
+      el.scrollLeft = drag.scrollLeft - dx;
+      el.scrollTop = drag.scrollTop - dy;
+      e.preventDefault();
+    }
+  };
+
+  const endPan = (e?: React.PointerEvent<HTMLDivElement>) => {
+    const el = canvasRef.current;
+    if (e && el) {
+      try { if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId); } catch {}
+    }
+    dragRef.current.active = false;
+    window.setTimeout(() => { didDragRef.current = false; }, 0);
+  };
+
+  const selectNode = (id: string) => {
+    if (didDragRef.current) return;
+    hasInteractedRef.current = true;
+    setSelectedNodeId(id);
+  };
+
+  const svgWidth = Math.round(1320 * zoom);
+  const svgHeight = Math.round(916 * zoom);
 
   return (
     <div className="p-4 sm:p-5 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] space-y-4">
@@ -1028,28 +1125,29 @@ export const ArchitectureDiagram: React.FC = () => {
           </span>
           {(
             [
-              { id: 'fit', label: 'Ajustar', icon: Minimize2 },
-              { id: 'medium', label: '100%', icon: Layers },
-              { id: 'large', label: 'Ampliar', icon: Maximize2 },
+              { id: 'fit', label: 'Ajustar', icon: Minimize2, onClick: fitToWidth, active: false },
+              { id: 'out', label: '−', icon: null, onClick: () => setZoom((z) => clampZoom(z / 1.15)), active: false },
+              { id: 'in', label: '+', icon: null, onClick: () => setZoom((z) => clampZoom(z * 1.15)), active: false },
+              { id: 'reset', label: '100%', icon: Layers, onClick: () => setZoom(1), active: Math.abs(zoom - 1) < 0.04 },
             ] as const
           ).map((z) => {
-            const Icon = z.icon;
+            const Icon = z.icon as any;
             return (
               <button
                 key={z.id}
                 type="button"
-                onClick={() => setZoomLevel(z.id)}
+                onClick={z.onClick}
                 className={`px-2.5 py-1 rounded-md border-2 border-[#1A1A2E] text-xs font-bold flex items-center gap-1 shadow-[2px_2px_0px_#1A1A2E] cursor-pointer transition-colors ${
-                  zoomLevel === z.id
-                    ? 'bg-[#1A1A2E] text-white'
-                    : 'bg-white text-[#1A1A2E] hover:bg-[#FFC857]/30'
+                  z.active ? 'bg-[#1A1A2E] text-white' : 'bg-white text-[#1A1A2E] hover:bg-[#FFC857]/30'
                 }`}
+                title={z.label === '+' ? 'Ampliar' : z.label === '−' ? 'Reduzir' : z.label}
               >
-                <Icon className="w-3 h-3" />
+                {Icon ? <Icon className="w-3 h-3" /> : null}
                 {z.label}
               </button>
             );
           })}
+          <span className="ml-1 text-[11px] font-mono font-bold text-[#4A4A68] min-w-[3.5rem] text-right">{Math.round(zoom * 100)}%</span>
         </div>
       </div>
 
@@ -1094,10 +1192,21 @@ export const ArchitectureDiagram: React.FC = () => {
       </div>
 
       {/* Canvas SVG Interativo */}
-      <div className="rounded-xl border-2 border-[#1A1A2E] bg-white shadow-[3px_3px_0px_#1A1A2E] overflow-auto p-2 max-h-[75vh] relative">
+      <div
+        ref={canvasRef}
+        className="rounded-xl border-2 border-[#1A1A2E] bg-white shadow-[3px_3px_0px_#1A1A2E] overflow-auto p-2 max-h-[75vh] relative cursor-grab active:cursor-grabbing"
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        onPointerLeave={endPan}
+      >
         <svg
           viewBox="0 0 1320 916"
-          className={`${svgWidthClass} h-auto block select-none`}
+          width={svgWidth}
+          height={svgHeight}
+          className="block select-none"
+          style={{ minWidth: svgWidth, minHeight: svgHeight }}
           role="img"
           aria-label="Diagrama de arquitetura completo do servidor e painel samuelserver"
         >
@@ -1385,9 +1494,10 @@ export const ArchitectureDiagram: React.FC = () => {
                 return (
                   <g
                     key={node.id}
+                    data-node-id={node.id}
                     opacity={opacity}
                     className="cursor-pointer"
-                    onClick={() => setSelectedNodeId(node.id)}
+                    onClick={() => selectNode(node.id)}
                     onMouseEnter={() => setHoveredNodeId(node.id)}
                     onMouseLeave={() => setHoveredNodeId(null)}
                   >
@@ -1431,9 +1541,10 @@ export const ArchitectureDiagram: React.FC = () => {
               return (
                 <g
                   key={node.id}
+                  data-node-id={node.id}
                   opacity={opacity}
                   className="cursor-pointer"
-                  onClick={() => setSelectedNodeId(node.id)}
+                  onClick={() => selectNode(node.id)}
                   onMouseEnter={() => setHoveredNodeId(node.id)}
                   onMouseLeave={() => setHoveredNodeId(null)}
                 >
@@ -1507,10 +1618,10 @@ export const ArchitectureDiagram: React.FC = () => {
           </g>
         </svg>
       </div>
-      <p className="text-[11px] font-mono text-[#4A4A68] -mt-1">Dica: clique nos blocos para inspecionar; use zoom e role para navegar em telas menores.</p>
+      <p className="text-[11px] font-mono text-[#4A4A68] -mt-1">Dica: <b>clique</b> em um bloco para ver a explicação • <b>arraste</b> para mover • segure <kbd className="px-1 py-0.5 border border-[#1A1A2E] rounded bg-white font-bold">Ctrl</kbd> e role o mouse para ampliar/reduzir.</p>
 
       {/* Painel Inspetor do Bloco Selecionado */}
-      <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] space-y-3">
+      <div ref={inspectorRef} className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] space-y-3 scroll-mt-4 ring-2 ring-transparent focus-within:ring-[#FF5A36]/30">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b-2 border-[#1A1A2E]">
           <div className="flex items-center gap-2.5 flex-wrap">
             <span
@@ -1520,9 +1631,10 @@ export const ArchitectureDiagram: React.FC = () => {
             >
               {LAYER_META[selectedNode.layer].name}
             </span>
-            <h4 className="text-sm font-black font-title text-[#1A1A2E]">
-              {selectedNode.label}
-            </h4>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="text-sm font-black font-title text-[#1A1A2E]">{selectedNode.label}</h4>
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#ECFDF3] border border-[#12B76A] text-[10px] font-bold text-[#027A48]"><Info className="w-3 h-3" /> Explicação</span>
+            </div>
             <code className="px-2 py-0.5 rounded bg-[#FFF7E8] border border-[#1A1A2E] text-[11px] font-mono font-bold text-[#1A1A2E]">
               {selectedNode.file}
             </code>
