@@ -531,6 +531,15 @@ function extractBrowserTarget(text: string): string | null {
     [/\btwitter\b|\bx\.com\b/, 'https://x.com/'],
   ];
   for (const [re, url] of map) if (re.test(t)) return url;
+  // generic subject: "foto do X", "print de X" -> search images
+  const subj = raw
+    .replace(/^(manda|me manda|envia|tira|faz|mostra|quero|ver)\b/ig, ' ')
+    .replace(/\b(uma|um|o|a|do|da|de|no|na|agora|pra mim|por favor|pfv|favor)\b/ig, ' ')
+    .replace(/\b(foto|print|screenshot|captura|printscreen|tela|imagem|screen)\b/ig, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if (subj && subj.length >= 2 && subj.length <= 80) {
+    return 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(subj);
+  }
   return null;
 }
 
@@ -752,6 +761,7 @@ async function handleAiMessage(chatId: string, text: string): Promise<void> {
   const screenshotRequested = wantsScreenshot(text);
   const browserActionRequested = /\b(abrir|abre|toca|tocar|coloca|p[õo]e|pesquisa|buscar|navega|navegar|entra no|acessa|vai no|clique|clicar)\b/i.test(text)
     && /\b(youtube|site|p[áa]gina|google|navegador|browser|link|http|www\.|m[uú]sica|video|v[ií]deo)\b/i.test(text);
+  const browserScreenshotRequested = screenshotRequested && !/\b(status|servi[cç]os?|seguran[cç]a|processos|rede|disco|docker|logs?)\b/i.test(text);
   let placeholderMsgId: number | undefined;
 
   try {
@@ -763,6 +773,14 @@ async function handleAiMessage(chatId: string, text: string): Promise<void> {
         await sendTelegramMessage((action.ok ? action.message : action.message) + `\n\n📷 ${shot.message || 'Sem captura.'}`, { chatId });
       } else if (!action.ok) {
         await sendTelegramMessage(action.message, { chatId });
+      }
+      return;
+    }
+
+    if (browserScreenshotRequested) {
+      const shot = await trySendBrowserScreenshot(chatId, undefined, undefined, text);
+      if (!shot.ok) {
+        await sendTelegramMessage(`📷 ${shot.message || 'Não consegui capturar a tela.'}`, { chatId });
       }
       return;
     }
