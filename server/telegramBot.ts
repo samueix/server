@@ -538,7 +538,7 @@ function extractBrowserTarget(text: string): string | null {
     .replace(/\b(foto|print|screenshot|captura|printscreen|tela|imagem|screen)\b/ig, ' ')
     .replace(/\s+/g, ' ').trim();
   if (subj && subj.length >= 2 && subj.length <= 80) {
-    return 'https://duckduckgo.com/?iax=images&ia=images&q=' + encodeURIComponent(subj);
+    return 'https://www.bing.com/images/search?q=' + encodeURIComponent(subj) + '&setlang=pt-br&first=1';
   }
   return null;
 }
@@ -586,6 +586,22 @@ async function trySendBrowserScreenshot(
       } catch {}
     }
 
+    // dismiss common consent/overlay popups best-effort
+    try {
+      const { browserEval } = await import('./browserSession.js');
+      await browserEval(`() => {
+        const clickByText = (re) => {
+          const els = Array.from(document.querySelectorAll('button,a,[role="button"]'));
+          const el = els.find(e => re.test((e.innerText||e.textContent||'').trim()));
+          if (el) { el.click(); return true; }
+          return false;
+        };
+        clickByText(/aceitar|accept|concordo|agree|got it|ok/i);
+        document.querySelector('#bnp_btn_accept,#bnp_close_link')?.click?.();
+        return true;
+      }`).catch(()=>{});
+      await new Promise(r=>setTimeout(r,1200));
+    } catch {}
     const buf = await takeScreenshot();
     if (!buf || !buf.length) return { ok: false, message: 'Não foi possível capturar a tela (imagem vazia).' };
     const st2 = getBrowserState();
