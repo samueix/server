@@ -1,5 +1,15 @@
 import { getServerConfig } from './credentialsManager.js';
 
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data?: string;
+  url?: string;
+}
+
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
 export interface TelegramConfig {
   enabled: boolean;
   botToken: string;
@@ -57,7 +67,15 @@ export function isTelegramReady(): boolean {
   return c.enabled && !!c.botToken && !!c.chatId;
 }
 
-export async function sendTelegramMessage(text: string, opts?: { chatId?: string; parseMode?: 'HTML' | 'Markdown'; disableNotification?: boolean }): Promise<TelegramResult> {
+export async function sendTelegramMessage(
+  text: string,
+  opts?: {
+    chatId?: string;
+    parseMode?: 'HTML' | 'Markdown';
+    disableNotification?: boolean;
+    replyMarkup?: InlineKeyboardMarkup;
+  }
+): Promise<TelegramResult> {
   const c = getTelegramConfig();
   if (!c.enabled) return { ok: false, skipped: true, error: 'Telegram desabilitado.' };
   if (!c.botToken) return { ok: false, skipped: true, error: 'Bot token não configurado.' };
@@ -68,16 +86,70 @@ export async function sendTelegramMessage(text: string, opts?: { chatId?: string
   const max = 4000;
   for (let i = 0; i < text.length; i += max) chunks.push(text.slice(i, i + max));
   let last: TelegramResult = { ok: true };
-  for (const chunk of chunks) {
-    last = await telegramApi('sendMessage', c.botToken, {
+  for (let idx = 0; idx < chunks.length; idx++) {
+    const chunk = chunks[idx];
+    const isLast = idx === chunks.length - 1;
+    const payload: any = {
       chat_id: chatId,
       text: chunk,
       ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
       ...(opts?.disableNotification ? { disable_notification: true } : {}),
-    });
+      ...(isLast && opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+    };
+    last = await telegramApi('sendMessage', c.botToken, payload);
+    if (!last.ok && opts?.parseMode && /parse entities/i.test(last.error || '')) {
+      delete payload.parse_mode;
+      last = await telegramApi('sendMessage', c.botToken, payload);
+    }
     if (!last.ok) return last;
   }
   return last;
+}
+
+export async function editTelegramMessageText(
+  chatId: string,
+  messageId: number,
+  text: string,
+  opts?: {
+    parseMode?: 'HTML' | 'Markdown';
+    replyMarkup?: InlineKeyboardMarkup;
+  }
+): Promise<TelegramResult> {
+  const c = getTelegramConfig();
+  if (!c.enabled || !c.botToken) return { ok: false, skipped: true, error: 'Telegram indisponível.' };
+  const trimmed = text.slice(0, 4000);
+  const payload: any = {
+    chat_id: chatId,
+    message_id: messageId,
+    text: trimmed,
+    ...(opts?.parseMode ? { parse_mode: opts.parseMode } : {}),
+    ...(opts?.replyMarkup ? { reply_markup: opts.replyMarkup } : {}),
+  };
+  let res = await telegramApi('editMessageText', c.botToken, payload);
+  if (!res.ok && opts?.parseMode && /parse entities/i.test(res.error || '')) {
+    delete payload.parse_mode;
+    res = await telegramApi('editMessageText', c.botToken, payload);
+  }
+  return res;
+}
+
+export async function deleteTelegramMessage(chatId: string, messageId: number): Promise<TelegramResult> {
+  const c = getTelegramConfig();
+  if (!c.enabled || !c.botToken) return { ok: false, skipped: true, error: 'Telegram indisponível.' };
+  return telegramApi('deleteMessage', c.botToken, { chat_id: chatId, message_id: messageId });
+}
+
+export async function answerTelegramCallbackQuery(
+  callbackQueryId: string,
+  opts?: { text?: string; showAlert?: boolean }
+): Promise<TelegramResult> {
+  const c = getTelegramConfig();
+  if (!c.botToken) return { ok: false, skipped: true, error: 'Bot token não configurado.' };
+  return telegramApi('answerCallbackQuery', c.botToken, {
+    callback_query_id: callbackQueryId,
+    ...(opts?.text ? { text: opts.text.slice(0, 190) } : {}),
+    ...(opts?.showAlert ? { show_alert: true } : {}),
+  });
 }
 
 export async function testTelegramConnection(): Promise<TelegramResult & { bot?: any }> {
@@ -161,7 +233,11 @@ export async function notifyTelegramIpBlock(ip: string, action: 'block' | 'unblo
 }
 
 
-export async function sendTelegramPhoto(photo: Buffer | Uint8Array, caption?: string, opts?: { chatId?: string }): Promise<TelegramResult> {
+export async function sendTelegramPhoto(
+  photo: Buffer | Uint8Array,
+  caption?: string,
+  opts?: { chatId?: string; parseMode?: 'HTML' | 'Markdown'; replyMarkup?: InlineKeyboardMarkup }
+): Promise<TelegramResult> {
   const c = getTelegramConfig();
   if (!c.enabled) return { ok: false, skipped: true, error: 'Telegram desabilitado.' };
   if (!c.botToken) return { ok: false, skipped: true, error: 'Bot token não configurado.' };
@@ -171,9 +247,12 @@ export async function sendTelegramPhoto(photo: Buffer | Uint8Array, caption?: st
   try {
     const form = new FormData();
     form.append('chat_id', chatId);
-    const bytes = photo instanceof Buffer ? new Uint8Array(photo) : photo;
+    const bytes = new Uint8Array(photo.length);
+    bytes.set(photo);
     form.append('photo', new Blob([bytes], { type: 'image/jpeg' }), 'screenshot.jpg');
     if (caption) form.append('caption', caption.slice(0, 1024));
+    if (opts?.parseMode) form.append('parse_mode', opts.parseMode);
+    if (opts?.replyMarkup) form.append('reply_markup', JSON.stringify(opts.replyMarkup));
 
     const res = await fetch(apiUrl(c.botToken, 'sendPhoto'), {
       method: 'POST',
