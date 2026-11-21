@@ -8,6 +8,7 @@ import { promisify } from 'util';
 import type { DomainAnalysis } from './db.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
 import { getAllMonitoredServices } from './servicesMonitor.js';
+import { fetchAdGuardStats, fetchAdGuardStatus } from './adguardClient.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -268,6 +269,37 @@ async function buildServerContextBlock(): Promise<string> {
     let dockerPs = sh("docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' 2>&1 | head -n 30", 3500, 8000);
     let dockerImages = sh("docker images --format 'table {{.Repository}}\t{{.Tag}}\t{{.Size}}' 2>&1 | head -n 20", 3500, 6000);
 
+    // adguard
+    let adguardBlock = '(indisponível)';
+    try {
+      const [agStatus, agStats] = await Promise.all([fetchAdGuardStatus().catch(() => null), fetchAdGuardStats().catch(() => null)]);
+      const topClients = Array.isArray(agStats?.top_clients) ? agStats.top_clients.slice(0, 8).map((c: any) => {
+        const name = Object.keys(c || {})[0] || 'desconhecido';
+        const val = c?.[name] ?? 0;
+        return `${name}: ${val}`;
+      }) : [];
+      const topBlocked = Array.isArray(agStats?.top_blocked_domains) ? agStats.top_blocked_domains.slice(0, 8).map((d: any) => {
+        const name = Object.keys(d || {})[0] || 'dominio';
+        const val = d?.[name] ?? 0;
+        return `${name}: ${val}`;
+      }) : [];
+      adguardBlock = [
+        `Conectado: ${agStats?.connected ? 'sim' : 'não'}${agStats?.stale ? ' (stale/cache)' : ''}`,
+        `Proteção: ${agStatus?.protection_enabled ? 'ativa' : 'inativa/desconhecida'} | Versão: ${agStatus?.version || 'N/D'}`,
+        `Consultas DNS (total): ${agStats?.num_dns_queries ?? 0}`,
+        `Bloqueados (total): ${agStats?.num_blocked_filtering ?? 0}`,
+        `Bloqueio: ${agStats?.blocked_percentage ?? 0}%`,
+        `Safebrowsing substituídos: ${agStats?.num_replaced_safebrowsing ?? 0} | Safesearch: ${agStats?.num_replaced_safesearch ?? 0}`,
+        `Tempo médio processamento: ${agStats?.avg_processing_time ?? 0}`,
+        `Top clientes: ${topClients.length ? topClients.join('; ') : 'N/D'}`,
+        `Top domínios bloqueados: ${topBlocked.length ? topBlocked.join('; ') : 'N/D'}`,
+        `Última atualização: ${agStats?.last_updated || 'N/D'}`,
+        agStats?.error ? `Erro: ${agStats.error}` : null,
+      ].filter(Boolean).join('\n');
+    } catch (e: any) {
+      adguardBlock = `Erro ao coletar AdGuard: ${e?.message || e}`;
+    }
+
     // network/listeners/dns
     const ipA = sh("ip -br a 2>&1 | head -n 40", 2500, 6000);
     const routes = sh("ip route 2>&1 | head -n 40", 2500, 4000);
@@ -352,6 +384,8 @@ async function buildServerContextBlock(): Promise<string> {
       dockerPs || '(docker indisponível ou sem containers)',
       '\n[Docker images]',
       dockerImages || '(indisponível)',
+      '\n[AdGuard Home]',
+      adguardBlock,
       '\n[Recursos visuais]',
       'Captura de tela: você pode enviar uma imagem no chat ao usuário incluindo o marcador [SCREENSHOT] na resposta (o sistema anexará automaticamente um screenshot JPEG do Navegador Remoto do painel, se houver sessão ativa em /api/browser/screenshot). Também funciona quando o usuário pedir foto/print/captura/tela. Não há DISPLAY gráfico local.',
       '[/CONTEXTO REAL DO SERVIDOR]'
