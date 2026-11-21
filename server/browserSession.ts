@@ -889,6 +889,48 @@ async function handleClientMessage(ws: WebSocket, msg: any): Promise<void> {
   }
 }
 
+
+export async function browserEval<T = any>(fn: string, arg?: any): Promise<T> {
+  if (!activePage || activePage.isClosed()) throw new Error('Página ativa indisponível.');
+  // fn is evaluated in browser context; arg passed as single param
+  return await activePage.evaluate(({ fn, arg }) => {
+    // eslint-disable-next-line no-eval
+    const f = (0, eval)('(' + fn + ')');
+    return f(arg);
+  }, { fn, arg });
+}
+
+export async function browserClickSelector(selector: string): Promise<void> {
+  if (!activePage || activePage.isClosed()) throw new Error('Página ativa indisponível.');
+  await activePage.click(selector, { timeout: 10000 });
+  pushHistory('click', selector);
+}
+
+export async function browserTypeText(text: string, selector?: string): Promise<void> {
+  if (!activePage || activePage.isClosed()) throw new Error('Página ativa indisponível.');
+  if (selector) {
+    await activePage.click(selector, { timeout: 10000 });
+    await activePage.fill(selector, '');
+  }
+  await activePage.keyboard.type(text, { delay: 20 });
+  pushHistory('type', `${text.length} chars${selector ? ' into '+selector : ''}`);
+}
+
+export async function browserPressKey(key: string): Promise<void> {
+  if (!activePage || activePage.isClosed()) throw new Error('Página ativa indisponível.');
+  await activePage.keyboard.press(key);
+  pushHistory('key', key);
+}
+
+export async function browserWait(ms: number): Promise<void> {
+  await new Promise(r => setTimeout(r, Math.max(0, Math.min(ms, 15000))));
+}
+
+export async function browserGetInfo(): Promise<{url:string; title:string}> {
+  if (!activePage || activePage.isClosed()) throw new Error('Página ativa indisponível.');
+  return { url: activePage.url(), title: await activePage.title().catch(()=> '') };
+}
+
 export function attachBrowserWebSocket(server: HttpServer): void {
   if (wssAttached) return;
   wssAttached = true;

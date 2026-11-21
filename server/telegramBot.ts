@@ -12,7 +12,7 @@ import {
   type InlineKeyboardButton,
   type InlineKeyboardMarkup,
 } from './telegramNotifier.js';
-import { takeScreenshot, getBrowserState, startBrowser, navigateBrowser } from './browserSession.js';
+import { takeScreenshot, getBrowserState, startBrowser, navigateBrowser, browserClickSelector, browserTypeText, browserPressKey, browserWait, browserGetInfo } from './browserSession.js';
 import { askOpencodeAgent, listOpencodeModels } from './opencode.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
 import { getAllMonitoredServices } from './servicesMonitor.js';
@@ -685,14 +685,88 @@ async function sendOrEditReport(
   return true;
 }
 
+
+async function performYouTubePlay(requestText: string): Promise<{ ok: boolean; message: string; finalUrl?: string; title?: string }> {
+  const qMatch = requestText.match(/(?:m[uú]sica|video|v[ií]deo|toca|tocar|coloca|p[õo]e|abre)\s+(?:do\s+|da\s+|de\s+)?(.+)/i);
+  let query = qMatch ? qMatch[1] : requestText;
+  query = query.replace(/\b(no youtube|youtube|manda|uma foto|print|screenshot|abre|abrir|toca|tocar|coloca|p[õo]e)\b/gi, ' ')
+               .replace(/\s+/g, ' ').trim();
+  // specific common case in conversation
+  if (/sal\b.*matu[eê]/i.test(requestText)) query = 'Sal Matuê';
+  if (!query) query = requestText.trim().slice(0, 80);
+
+  try {
+    const st = getBrowserState();
+    if (!st || (st.status !== 'running' && st.status !== 'paused')) {
+      await startBrowser();
+    }
+    // go to youtube search directly
+    const searchUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query);
+    await navigateBrowser(searchUrl);
+    await browserWait(3500);
+
+    // click first video renderer
+    const clicked = await browserEval(`() => {
+      const selectors = [
+        'ytd-video-renderer a#video-title',
+        'ytd-video-renderer a#thumbnail',
+        'a#video-title.yt-simple-endpoint',
+        'ytd-rich-item-renderer a#thumbnail'
+      ];
+      for (const sel of selectors) {
+        const el = document.querySelector(sel);
+        if (el) { el.scrollIntoView({block:'center'}); el.click(); return sel; }
+      }
+      // fallback: first /watch link
+      const a = Array.from(document.querySelectorAll('a[href*="/watch"]')).find(x=>x.offsetParent !== null);
+      if (a) { a.click(); return 'a[href*=/watch]'; }
+      return null;
+    }`);
+    if (!clicked) {
+      const info = await browserGetInfo().catch(()=>({url:'',title:''}));
+      return { ok:false, message:`Não encontrei resultado clicável para "${query}" no YouTube.`, finalUrl: info.url, title: info.title };
+    }
+    await browserWait(5000);
+    // try to accept consent / play if needed
+    await browserEval(`() => {
+      const btns = Array.from(document.querySelectorAll('button, tp-yt-paper-button, yt-button-shape button'));
+      const accept = btns.find(b => /accept|aceitar|agree|concordo/i.test(b.textContent||''));
+      if (accept) { accept.click(); }
+      const play = document.querySelector('button.ytp-play-button');
+      if (play && play.getAttribute('aria-label')?.toLower().includes('play')) play.click();
+      const video = document.querySelector('video');
+      if (video && video.paused) { video.play().catch(()=>{}); }
+      return true;
+    }`).catch(()=>{});
+    await browserWait(2500);
+    const info = await browserGetInfo().catch(()=>({url:'',title:''}));
+    return { ok:true, message:`Abri o YouTube e tentei tocar "${query}".`, finalUrl: info.url, title: info.title };
+  } catch (e:any) {
+    return { ok:false, message:`Falha ao controlar navegador: ${e?.message || e}` };
+  }
+}
 async function handleAiMessage(chatId: string, text: string): Promise<void> {
   const model = getEffectiveAiModel(chatId);
   const st = getState(chatId);
   st.mode = 'ai';
   const screenshotRequested = wantsScreenshot(text);
+  const browserActionRequested = /\b(abrir|abre|toca|tocar|coloca|p[õo]e|pesquisa|buscar|navega|navegar|entra no|acessa|vai no|clique|clicar)\b/i.test(text)
+    && /\b(youtube|site|p[áa]gina|google|navegador|browser|link|http|www\.|m[uú]sica|video|v[ií]deo)\b/i.test(text);
   let placeholderMsgId: number | undefined;
 
   try {
+    if (browserActionRequested) {
+      await sendTelegramMessage('🌐 Executando ação no navegador remoto...', { chatId });
+      const action = await performYouTubePlay(text);
+      const shot = await trySendBrowserScreenshot(chatId, (action.ok ? '✅ ' : '⚠️ ') + action.message + (action.finalUrl ? `\n${action.finalUrl}` : ''), undefined, text);
+      if (!shot.ok) {
+        await sendTelegramMessage((action.ok ? action.message : action.message) + `\n\n📷 ${shot.message || 'Sem captura.'}`, { chatId });
+      } else if (!action.ok) {
+        await sendTelegramMessage(action.message, { chatId });
+      }
+      return;
+    }
+
     const pending = await sendTelegramMessage(`⏳ Consultando IA (<code>${escapeHtml(model)}</code>)...`, {
       chatId,
       parseMode: 'HTML',
