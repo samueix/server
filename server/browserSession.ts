@@ -599,6 +599,9 @@ export async function startBrowser(): Promise<BrowserState> {
       '--media-cache-size=10485760',
       '--renderer-process-limit=2',
       '--js-flags=--max-old-space-size=256',
+      '--disable-blink-features=AutomationControlled',
+      '--lang=pt-BR,pt,en-US,en',
+      '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       '--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints,InterestFeedContentSuggestions,AutofillServerCommunication,CalculateNativeWinOcclusion,DialMediaRouteProvider,GlobalMediaControls,ChromeWhatsNewUI,ChromeLabs'
     ];
     if (NO_SANDBOX) args.push('--no-sandbox');
@@ -655,7 +658,26 @@ export async function startBrowser(): Promise<BrowserState> {
     }
 
     const contexts = browser.contexts();
-    context = contexts[0] || (await browser.newContext({ viewport: VIEWPORT, acceptDownloads: false }));
+    context = contexts[0] || (await browser.newContext({
+      viewport: VIEWPORT,
+      acceptDownloads: false,
+      locale: 'pt-BR',
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    }));
+    try {
+      await context.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        // @ts-ignore
+        window.chrome = window.chrome || { runtime: {} };
+        const origQuery = navigator.permissions?.query?.bind(navigator.permissions);
+        if (origQuery) {
+          // @ts-ignore
+          navigator.permissions.query = (p: any) => p?.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission } as any)
+            : origQuery(p);
+        }
+      });
+    } catch {}
     context.on('page', (page) => {
       void setActivePage(page);
     });
