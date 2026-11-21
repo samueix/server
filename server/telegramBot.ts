@@ -12,7 +12,7 @@ import {
   type InlineKeyboardButton,
   type InlineKeyboardMarkup,
 } from './telegramNotifier.js';
-import { takeScreenshot, getBrowserState } from './browserSession.js';
+import { takeScreenshot, getBrowserState, startBrowser, navigateBrowser } from './browserSession.js';
 import { askOpencodeAgent, listOpencodeModels } from './opencode.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
 import { getAllMonitoredServices } from './servicesMonitor.js';
@@ -514,23 +514,73 @@ function stripScreenshotMarker(text: string): string {
     .trim();
 }
 
+function extractBrowserTarget(text: string): string | null {
+  const raw = String(text || '');
+  const m = raw.match(/https?:\/\/[^\s<>"')\]]+/i);
+  if (m) return m[0];
+  const t = raw.toLowerCase();
+  const map: Array<[RegExp, string]> = [
+    [/\byoutube\b|\byt\b/, 'https://www.youtube.com/'],
+    [/\bgoogle\b/, 'https://www.google.com/'],
+    [/\bgithub\b/, 'https://github.com/'],
+    [/\bwhatsapp\b/, 'https://web.whatsapp.com/'],
+    [/\bgmail\b/, 'https://mail.google.com/'],
+    [/\bchatgpt\b|\bopenai\b/, 'https://chatgpt.com/'],
+    [/\bfacebook\b/, 'https://www.facebook.com/'],
+    [/\binstagram\b/, 'https://www.instagram.com/'],
+    [/\btwitter\b|\bx\.com\b/, 'https://x.com/'],
+  ];
+  for (const [re, url] of map) if (re.test(t)) return url;
+  return null;
+}
+
 async function trySendBrowserScreenshot(
   chatId: string,
   caption?: string,
-  replyMarkup?: InlineKeyboardMarkup
+  replyMarkup?: InlineKeyboardMarkup,
+  requestedText?: string
 ): Promise<{ ok: boolean; message?: string }> {
   try {
-    const state = getBrowserState();
-    if (!state || (state.status !== 'running' && state.status !== 'paused') || !state.url) {
-      return {
-        ok: false,
-        message:
-          'Navegador remoto não está ativo. Inicie uma sessão no painel (Navegador) e abra uma página para capturar a tela.',
-      };
+    let state = getBrowserState();
+    const targetUrl = extractBrowserTarget(requestedText || caption || '');
+    if (!state || (state.status !== 'running' && state.status !== 'paused')) {
+      try {
+        await sendTelegramMessage('🌐 Iniciando navegador remoto...', { chatId });
+        await startBrowser();
+        state = getBrowserState();
+      } catch (e: any) {
+        return { ok: false, message: `Não consegui iniciar o navegador remoto: ${e?.message || e}` };
+      }
     }
+
+    if (targetUrl) {
+      try {
+        const cur = (getBrowserState().url || '').toLowerCase().replace(/\/$/, '');
+        const tgt = targetUrl.toLowerCase().replace(/\/$/, '');
+        const sameSite = cur === tgt || cur.startsWith(tgt + '/') || cur.startsWith(tgt);
+        if (!sameSite) {
+          await sendTelegramMessage(`🔎 Abrindo ${targetUrl} ...`, { chatId });
+          await navigateBrowser(targetUrl);
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      } catch (e: any) {
+        return { ok: false, message: `Navegador ativo, mas falha ao abrir ${targetUrl}: ${e?.message || e}` };
+      }
+    }
+
+    state = getBrowserState();
+    if (!state?.url || state.url === 'about:blank') {
+      const fallback = targetUrl || 'https://www.google.com/';
+      try {
+        await navigateBrowser(fallback);
+        await new Promise(r => setTimeout(r, 3000));
+      } catch {}
+    }
+
     const buf = await takeScreenshot();
     if (!buf || !buf.length) return { ok: false, message: 'Não foi possível capturar a tela (imagem vazia).' };
-    const cap = (caption || `📸 Captura: ${state.title || state.url || 'navegador remoto'}`).slice(0, 1024);
+    const st2 = getBrowserState();
+    const cap = (caption || `📸 ${st2.title || st2.url || 'navegador remoto'}`).slice(0, 1024);
     const sent = await sendTelegramPhoto(buf, cap, { chatId, replyMarkup });
     if (!sent.ok) return { ok: false, message: sent.error || 'Falha ao enviar foto no Telegram.' };
     return { ok: true };
