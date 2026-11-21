@@ -538,7 +538,7 @@ function extractBrowserTarget(text: string): string | null {
     .replace(/\b(foto|print|screenshot|captura|printscreen|tela|imagem|screen)\b/ig, ' ')
     .replace(/\s+/g, ' ').trim();
   if (subj && subj.length >= 2 && subj.length <= 80) {
-    return 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(subj);
+    return 'https://duckduckgo.com/?iax=images&ia=images&q=' + encodeURIComponent(subj);
   }
   return null;
 }
