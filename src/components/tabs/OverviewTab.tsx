@@ -19,6 +19,7 @@ import {
 } from '../../types';
 import { NetworkTelemetry } from '../../services/api';
 import { SparklineChart } from '../SparklineChart';
+import { CpuCoresChart } from '../CpuCoresChart';
 import { SERVER_IPV4, SERVER_IPV6 } from '../../config';
 
 interface OverviewTabProps {
@@ -244,6 +245,18 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 max={100}
                 unit="%"
                 showLabels={false}
+              />
+            </div>
+
+            <div className="pt-1">
+              <CpuCoresChart
+                history={history}
+                currentCores={server?.cpu?.nucleos_uso}
+                fallbackCpuPercent={cpuPercent}
+                coreCount={cpuCoresLogical || 4}
+                isConnected={isConnected}
+                height={148}
+                compact
               />
             </div>
           </div>

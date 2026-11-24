@@ -11,6 +11,7 @@ import {
 import { ApiServerResponse, ApiTemperatureResponse, HistoryPoint } from '../../types';
 import { NetworkTelemetry } from '../../services/api';
 import { SparklineChart } from '../SparklineChart';
+import { CpuCoresChart } from '../CpuCoresChart';
 
 interface MonitoringTabProps {
   server: ApiServerResponse | null;
@@ -272,8 +273,8 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
         </div>
 
         {/* Processamento e Carga Individual por Núcleo da CPU */}
-        <div className="pt-2 border-t-2 border-[#1A1A2E]/10 space-y-2.5">
-          <div className="flex items-center justify-between">
+        <div className="pt-2 border-t-2 border-[#1A1A2E]/10 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5 font-sans">
               <Cpu className="w-3.5 h-3.5 text-[#FF5A36]" />
               Processamento por Núcleo Individual ({server?.cpu?.nucleos_uso?.length || cpuLogical} núcleos):
@@ -282,6 +283,15 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
               Média global: {cpuPercent.toFixed(1)}%
             </span>
           </div>
+
+          <CpuCoresChart
+            history={history}
+            currentCores={server?.cpu?.nucleos_uso}
+            fallbackCpuPercent={cpuPercent}
+            coreCount={cpuLogical}
+            isConnected={isConnected}
+            height={186}
+          />
 
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-mono text-xs">
             {Array.from({ length: Math.max(server?.cpu?.nucleos_uso?.length || 0, coresList.length, cpuLogical || 4) }).map((_, idx) => {

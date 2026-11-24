@@ -323,6 +323,9 @@ export default function App() {
     const timeStr = `${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
     const cpu = server?.cpu?.uso_percentual ?? 0;
+    const cores = Array.isArray(server?.cpu?.nucleos_uso)
+      ? server.cpu.nucleos_uso.map(v => Number(v) || 0)
+      : undefined;
     const ram = server?.memoria?.uso_percentual ?? 0;
     const temp = tempResp?.disponivel && tempResp?.sensores?.[0]
       ? (tempResp.sensores[0].temperatura_c ?? 0)
@@ -335,6 +338,7 @@ export default function App() {
         time: timeStr,
         timestamp: Date.now(),
         cpu,
+        ...(cores && cores.length > 0 ? { cores } : {}),
         ram,
         temp,
         diskRead: 0,

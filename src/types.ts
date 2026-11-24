@@ -279,6 +279,7 @@ export interface HistoryPoint {
   time: string;
   timestamp: number;
   cpu: number;
+  cores?: number[];
   ram: number;
   temp?: number;
   diskRead?: number;
