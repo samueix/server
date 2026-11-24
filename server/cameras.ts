@@ -10,6 +10,8 @@ import { execFile, spawn as spawnProc } from 'child_process';
 import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 
+export type CameraBrand = 'generic' | 'yoosee' | 'icsee' | 'v380' | 'camhi' | 'custom';
+
 export interface CameraConfig {
   id: string;
   name: string;
@@ -21,6 +23,11 @@ export interface CameraConfig {
   subStream: string;
   nvrEnabled?: boolean;
   profileToken?: string;
+  brand?: CameraBrand;
+  model?: string;
+  onvifPort?: number;
+  rtspPort?: number;
+  enabled?: boolean;
 }
 
 interface CameraSecretsFile {
@@ -33,6 +40,11 @@ export interface CameraPublic {
   ip: string;
   mac?: string;
   nvrEnabled?: boolean;
+  brand: CameraBrand;
+  model?: string;
+  onvifPort: number;
+  rtspPort: number;
+  enabled: boolean;
   mainPath: string;
   subPath: string;
   streamNameMain: string;
@@ -57,6 +69,18 @@ function safeCamId(id: string) {
   return String(id || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_').slice(0, 64) || 'cam';
 }
 
+function sanitizeBrand(v: any): CameraBrand {
+  const b = String(v || 'generic').toLowerCase().trim();
+  return (['generic','yoosee','icsee','v380','camhi','custom'] as const).includes(b as CameraBrand) ? (b as CameraBrand) : 'generic';
+}
+
+function normalizeStream(urlOrPath: string, ip: string, port: number, fallbackPath: string) {
+  const raw = String(urlOrPath || '').trim();
+  if (/^rtsp:\/\//i.test(raw)) return raw;
+  const p = raw.startsWith('/') ? raw : (raw ? `/${raw}` : fallbackPath);
+  return `rtsp://${ip}:${port}${p}`;
+}
+
 export function loadCameraConfigs(): CameraConfig[] {
   if (!fs.existsSync(SECRETS_PATH)) return [];
   const stat = fs.statSync(SECRETS_PATH);
@@ -69,6 +93,9 @@ export function loadCameraConfigs(): CameraConfig[] {
     const ip = String(c.ip || '').trim();
     const username = String(c.username || 'admin').trim();
     const password = String(c.password || '');
+    const rtspPort = Number(c.rtspPort || 554) || 554;
+    const onvifPort = Number(c.onvifPort || 5000) || 5000;
+    const brand = sanitizeBrand((c as any).brand);
     return {
       id,
       name: String(c.name || `Câmera ${idx+1}`).trim(),
@@ -76,23 +103,85 @@ export function loadCameraConfigs(): CameraConfig[] {
       mac: c.mac ? String(c.mac).trim() : undefined,
       username,
       password,
-      mainStream: String(c.mainStream || `rtsp://${ip}:554/onvif1`),
-      subStream: String(c.subStream || `rtsp://${ip}:554/onvif2`),
+      mainStream: normalizeStream(String(c.mainStream || ''), ip, rtspPort, '/onvif1'),
+      subStream: normalizeStream(String(c.subStream || ''), ip, rtspPort, '/onvif2'),
       nvrEnabled: !!c.nvrEnabled,
       profileToken: String(c.profileToken || 'IPCProfilesToken0'),
+      brand,
+      model: c.model ? String(c.model).trim() : undefined,
+      onvifPort,
+      rtspPort,
+      enabled: c.enabled !== false,
     } as CameraConfig;
-  }).filter(c => c.ip && c.password);
+  }).filter(c => c.ip && c.password && c.enabled !== false);
 }
 
 export function getPublicCameras(): CameraPublic[] {
   return loadCameraConfigs().map(c => ({
     id: c.id, name: c.name, ip: c.ip, mac: c.mac, nvrEnabled: c.nvrEnabled,
+    brand: c.brand || 'generic', model: c.model, onvifPort: c.onvifPort || 5000, rtspPort: c.rtspPort || 554, enabled: c.enabled !== false,
     mainPath: `/api/cameras/${c.id}/stream/main`,
     subPath: `/api/cameras/${c.id}/stream/sub`,
     streamNameMain: `${c.id}_main`,
     streamNameSub: `${c.id}_sub`,
-    profileToken: c.profileToken,
   }));
+}
+
+function saveCameraConfigs(cams: CameraConfig[]) {
+  const payload: CameraSecretsFile = { cameras: cams.map(c => ({
+    id: c.id, name: c.name, ip: c.ip, mac: c.mac, username: c.username, password: c.password,
+    mainStream: c.mainStream, subStream: c.subStream, nvrEnabled: !!c.nvrEnabled, profileToken: c.profileToken,
+    brand: c.brand || 'generic', model: c.model, onvifPort: c.onvifPort || 5000, rtspPort: c.rtspPort || 554, enabled: c.enabled !== false,
+  })) };
+  fs.writeFileSync(SECRETS_PATH, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 });
+  try { fs.chmodSync(SECRETS_PATH, 0o600); } catch {}
+}
+
+export function addCameraConfig(input: Partial<CameraConfig>) {
+  const ip = String(input.ip || '').trim();
+  if (!ip) throw new Error('IP obrigatório');
+  const cams = loadCameraConfigs();
+  const id = safeCamId(String(input.id || input.name || ip).trim() || `cam${cams.length+1}`);
+  if (cams.some(c => c.id === id)) throw new Error('ID de câmera já existe');
+  const rtspPort = Number(input.rtspPort || 554) || 554;
+  const onvifPort = Number(input.onvifPort || 5000) || 5000;
+  const cam: CameraConfig = {
+    id,
+    name: String(input.name || `Câmera ${ip}`).trim(),
+    ip,
+    mac: input.mac ? String(input.mac).trim() : undefined,
+    username: String(input.username || 'admin').trim(),
+    password: String(input.password || ''),
+    mainStream: normalizeStream(String(input.mainStream || ''), ip, rtspPort, '/onvif1'),
+    subStream: normalizeStream(String(input.subStream || ''), ip, rtspPort, '/onvif2'),
+    nvrEnabled: !!input.nvrEnabled,
+    profileToken: String(input.profileToken || 'IPCProfilesToken0'),
+    brand: sanitizeBrand(input.brand),
+    model: input.model ? String(input.model).trim() : undefined,
+    onvifPort, rtspPort, enabled: input.enabled !== false,
+  };
+  if (!cam.password) throw new Error('Senha obrigatória');
+  cams.push(cam);
+  saveCameraConfigs(cams);
+  return getPublicCameras().find(c => c.id === cam.id);
+}
+
+export function deleteCameraConfig(id: string) {
+  const sid = safeCamId(id);
+  const cams = loadCameraConfigs();
+  const next = cams.filter(c => c.id !== sid);
+  if (next.length === cams.length) throw new Error('Câmera não encontrada');
+  saveCameraConfigs(next);
+  return { ok: true };
+}
+
+export function brandCapabilities(brand: CameraBrand) {
+  const common = { live: true, onvif: true, rtsp: true };
+  if (brand === 'yoosee') return { ...common, ptz: 'onvif-unstable', led: 'proprietary', sdPlayback: 'proprietary', notes: 'Yoosee: PTZ/LED/SD geralmente via P2P proprietário; ONVIF parcial.' };
+  if (brand === 'icsee') return { ...common, ptz: 'onvif-or-proprietary', led: 'unknown', sdPlayback: 'unknown', notes: 'iCSee: validar ONVIF/RTSP por modelo.' };
+  if (brand === 'v380') return { ...common, ptz: 'proprietary', led: 'unknown', sdPlayback: 'proprietary', notes: 'V380: geralmente depende de protocolo proprietário.' };
+  if (brand === 'camhi') return { ...common, ptz: 'onvif-or-proprietary', led: 'unknown', sdPlayback: 'unknown', notes: 'CamHi: alguns modelos expõem ONVIF.' };
+  return { ...common, ptz: 'onvif', led: 'unknown', sdPlayback: 'unknown', notes: 'Genérica: usa RTSP/ONVIF padrão quando disponível.' };
 }
 
 function rtspUrlWithAuth(url: string, username: string, password: string) {

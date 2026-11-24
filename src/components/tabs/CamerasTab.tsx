@@ -30,6 +30,10 @@ interface CamStatus {
   ip: string;
   mac?: string;
   nvrEnabled?: boolean;
+  brand?: string;
+  model?: string;
+  onvifPort?: number;
+  rtspPort?: number;
   mainPath: string;
   subPath: string;
   streamNameMain: string;
@@ -742,6 +746,10 @@ export const CamerasTab: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeCam, setActiveCam] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addBusy, setAddBusy] = useState(false);
+  const [addMsg, setAddMsg] = useState<string | null>(null);
+  const [form, setForm] = useState({ name:'', ip:'', username:'admin', password:'', brand:'generic', rtspPort:'554', onvifPort:'5000', mainStream:'/onvif1', subStream:'/onvif2', model:'' });
 
   const refresh = useCallback(async () => {
     try {
@@ -758,6 +766,31 @@ export const CamerasTab: React.FC = () => {
       setLoading(false);
     }
   }, []);
+
+  const addCamera = async () => {
+    setAddBusy(true); setAddMsg(null);
+    try {
+      const body = { ...form, rtspPort: Number(form.rtspPort)||554, onvifPort: Number(form.onvifPort)||5000 };
+      const res = await fetch('/api/cameras/config', { method:'POST', headers:{ ...getAuthHeaders(), 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+      const data = await res.json().catch(()=>null);
+      if (!res.ok || data?.ok === false) throw new Error(data?.error || `HTTP ${res.status}`);
+      setAddMsg(`Câmera adicionada: ${data?.camera?.name || form.name || form.ip}`);
+      setForm({ name:'', ip:'', username:'admin', password:'', brand:form.brand, rtspPort:'554', onvifPort:'5000', mainStream:'/onvif1', subStream:'/onvif2', model:'' });
+      setShowAdd(false);
+      await refresh();
+    } catch (e:any) { setAddMsg(e?.message || 'Falha ao adicionar câmera'); }
+    finally { setAddBusy(false); }
+  };
+
+  const removeCamera = async (id: string) => {
+    if (!confirm(`Remover câmera ${id}?`)) return;
+    try {
+      const res = await fetch(`/api/cameras/${encodeURIComponent(id)}/config`, { method:'DELETE', headers:getAuthHeaders() });
+      const data = await res.json().catch(()=>null);
+      if (!res.ok || data?.ok === false) throw new Error(data?.error || `HTTP ${res.status}`);
+      await refresh();
+    } catch (e:any) { setError(e?.message || 'Falha ao remover câmera'); }
+  };
 
   useEffect(() => {
     refresh();
@@ -787,6 +820,7 @@ export const CamerasTab: React.FC = () => {
           <div className="text-xs font-mono font-bold text-[#1A1A2E] bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-lg px-3 py-2 shadow-[2px_2px_0px_#1A1A2E]">
             Somente SD • ao vivo
           </div>
+          <button type="button" onClick={()=>setShowAdd(v=>!v)} className="min-h-[40px] px-3.5 py-2 rounded-lg bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] text-[#1A1A2E] font-bold text-xs sm:text-sm cursor-pointer">{showAdd?'Fechar':'Adicionar câmera'}</button>
           <button
             type="button"
             onClick={refresh}
@@ -797,6 +831,33 @@ export const CamerasTab: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {showAdd && (
+        <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-3">
+          <div className="font-black font-title text-[#1A1A2E]">Adicionar câmera (RTSP/ONVIF)</div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+            {[
+              ['name','Nome'],['ip','IP *'],['username','Usuário'],['password','Senha *'],['model','Modelo'],['mainStream','Stream principal'],['subStream','Stream SD'],
+            ].map(([k,l]) => (
+              <label key={k} className="text-xs font-bold text-[#4A4A68]">{l}
+                <input value={(form as any)[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))} type={k==='password'?'password':'text'} className="mt-1 w-full min-h-[38px] px-2 rounded-lg border-2 border-[#1A1A2E] bg-[#FFF7E8] font-mono text-xs" />
+              </label>
+            ))}
+            <label className="text-xs font-bold text-[#4A4A68]">Marca
+              <select value={form.brand} onChange={e=>setForm(f=>({...f,brand:e.target.value}))} className="mt-1 w-full min-h-[38px] px-2 rounded-lg border-2 border-[#1A1A2E] bg-[#FFF7E8] font-mono text-xs">
+                <option value="generic">Genérica RTSP/ONVIF</option><option value="yoosee">Yoosee</option><option value="icsee">iCSee</option><option value="v380">V380</option><option value="camhi">CamHi</option><option value="custom">Custom</option>
+              </select>
+            </label>
+            <label className="text-xs font-bold text-[#4A4A68]">RTSP porta<input value={form.rtspPort} onChange={e=>setForm(f=>({...f,rtspPort:e.target.value}))} className="mt-1 w-full min-h-[38px] px-2 rounded-lg border-2 border-[#1A1A2E] bg-[#FFF7E8] font-mono text-xs"/></label>
+            <label className="text-xs font-bold text-[#4A4A68]">ONVIF porta<input value={form.onvifPort} onChange={e=>setForm(f=>({...f,onvifPort:e.target.value}))} className="mt-1 w-full min-h-[38px] px-2 rounded-lg border-2 border-[#1A1A2E] bg-[#FFF7E8] font-mono text-xs"/></label>
+          </div>
+          <div className="flex gap-2 items-center flex-wrap">
+            <button type="button" disabled={addBusy} onClick={addCamera} className="min-h-[38px] px-3 py-2 rounded-lg bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] font-bold text-xs disabled:opacity-50">{addBusy?'Salvando...':'Salvar câmera'}</button>
+            {addMsg && <div className="text-xs font-mono text-[#4A4A68]">{addMsg}</div>}
+          </div>
+          <div className="text-[11px] text-[#4A4A68]">Suporta RTSP/ONVIF genérico. Yoosee: ao vivo OK; PTZ/LED/SD podem exigir protocolo proprietário.</div>
+        </div>
+      )}
 
       {/* Erro do Serviço de Câmera */}
       {error && (
@@ -828,13 +889,15 @@ export const CamerasTab: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
           {cameras.map((cam) => (
-            <CameraCard
-              key={cam.id}
-              cam={cam}
-              onRefresh={refresh}
-              active={activeCam === cam.id}
-              onActivate={() => setActiveCam(cam.id)}
-            />
+            <div key={cam.id} className="space-y-2">
+              <div className="flex justify-end"><button type="button" onClick={()=>removeCamera(cam.id)} className="text-[11px] font-mono px-2 py-1 rounded border border-[#1A1A2E] bg-white hover:bg-[#FEE4E2] cursor-pointer">Remover</button></div>
+              <CameraCard
+                cam={cam}
+                onRefresh={refresh}
+                active={activeCam === cam.id}
+                onActivate={() => setActiveCam(cam.id)}
+              />
+            </div>
           ))}
         </div>
       )}

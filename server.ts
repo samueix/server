@@ -58,7 +58,7 @@ import {
 } from './server/opencode.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { runShellCommand } from './server/terminalRunner.js';
-import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed } from './server/cameras.js';
+import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities } from './server/cameras.js';
 import { 
   getSecurityAttackStatus, 
   recordPanelFailedLogin, 
@@ -442,6 +442,16 @@ export function createApp() {
   });
   app.get('/api/cameras/config', requireAdminAuth, (_req, res) => {
     try { res.json({ ok:true, cameras: getPublicCameras().map(c=>({...c})) }); } catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.post('/api/cameras/config', requireAdminAuth, async (req, res) => {
+    try {
+      const cam = addCameraConfig(req.body || {});
+      res.json({ ok:true, camera: cam, capabilities: brandCapabilities((cam as any)?.brand || 'generic') });
+    } catch (e:any) { res.status(400).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.delete('/api/cameras/:id/config', requireAdminAuth, async (req, res) => {
+    try { res.json(deleteCameraConfig(req.params.id)); }
+    catch (e:any) { res.status(400).json({ ok:false, error:e?.message||String(e) }); }
   });
   app.post('/api/cameras/start', requireAdminAuth, async (_req, res) => {
     res.json(await ensureGo2rtcRunning());
