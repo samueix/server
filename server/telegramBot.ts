@@ -831,15 +831,35 @@ async function handleCameraSnapshot(chatId: string, camId?: string, editMessageI
     }
     const url = `http://127.0.0.1:${process.env.PORT || 3000}/api/cameras/${cam.id}/stream/sub/frame.jpeg?t=${Date.now()}`;
     const cfg = getServerConfig() as any;
-    const auth = Buffer.from(`${cfg.auth?.adminUser || 'admin'}:${cfg.auth?.adminPass || ''}`).toString('base64');
-    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(10000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
+    const user = String(process.env.ADMIN_USERNAME || cfg.auth?.adminUser || 'admin');
+    const pass = String(process.env.ADMIN_PASSWORD || cfg.auth?.adminPass || '');
+    const auth = Buffer.from(`${user}:${pass}`).toString('base64');
+    let buf: Buffer | null = null;
+    try {
+      const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(12000) });
+      if (res.ok) buf = Buffer.from(await res.arrayBuffer());
+      else throw new Error(`HTTP ${res.status}`);
+    } catch {
+      // fallback: capture directly via ffmpeg from RTSP
+      const { execFile: ef } = await import('child_process');
+      const { promisify: p } = await import('util');
+      const efAsync = p(ef);
+      const camCfg = (await import('./cameras.js')).loadCameraConfigs().find((c:any)=>String(c.id)===String(cam.id));
+      if (!camCfg) throw new Error('Config da câmera não encontrada');
+      const rtsp = `rtsp://${encodeURIComponent(camCfg.username)}:${encodeURIComponent(camCfg.password)}@${camCfg.ip}:${camCfg.rtspPort||554}/onvif2`;
+      const tmp = `/tmp/tg-cam-${cam.id}-${Date.now()}.jpg`;
+      await efAsync('ffmpeg', ['-hide_banner','-loglevel','error','-rtsp_transport','tcp','-y','-i',rtsp,'-frames:v','1','-q:v','3',tmp], { timeout: 12000 });
+      buf = fs.readFileSync(tmp);
+      try { fs.unlinkSync(tmp); } catch {}
+    }
+    if (!buf || !buf.length) throw new Error('Imagem vazia');
     const cap = `📷 ${cam.name} (${cam.ip}) - ${new Date().toLocaleString('pt-BR')}`;
     const rows: InlineKeyboardButton[][] = cams.slice(0,6).map((c:any)=>[{ text: `📷 ${c.name}`, callback_data: `cam:snap:${c.id}` }]);
     rows.push([{ text: '⬅️ Voltar ao Menu', callback_data: 'act:menu' }]);
-    await sendTelegramPhoto(buf, cap, { chatId, replyMarkup: { inline_keyboard: rows } });
+    const sent = await sendTelegramPhoto(buf, cap, { chatId, replyMarkup: { inline_keyboard: rows } });
+    if (!sent.ok) throw new Error(sent.error || 'Falha no sendPhoto');
   } catch (e:any) {
+    console.error('[telegramBot] camera snapshot error', e);
     await sendTelegramMessage(`❌ Erro ao capturar câmera: ${escapeHtml(e?.message || e)}`, { chatId, parseMode:'HTML', replyMarkup: reportFooterKeyboard('act:camera') });
   }
 }

@@ -172,6 +172,13 @@ export function getAuthHeaders(): Record<string, string> {
   return headers;
 }
 
+export function getAuthQueryParam(): string {
+  const session = getStoredAuth();
+  if (session?.authHeader?.startsWith('Basic ')) return `auth=${encodeURIComponent(session.authHeader.slice(6))}`;
+  if (session?.apiKey) return `token=${encodeURIComponent(session.apiKey)}`;
+  return '';
+}
+
 /**
  * Fetch autenticado que retorna blob URL para uso em <img src> / <video src>
  */

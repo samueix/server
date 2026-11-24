@@ -173,6 +173,22 @@ function extractCaller(req: express.Request): { authenticated: boolean; role?: '
     return { authenticated: true, role: 'admin', username: 'api-admin' };
   }
 
+  const qToken = String((req.query as any)?.token || '');
+  if (qToken && verifyApiKey(qToken)) {
+    return { authenticated: true, role: 'admin', username: 'token-admin' };
+  }
+  const qAuth = String((req.query as any)?.auth || '');
+  if (qAuth) {
+    try {
+      const decoded = Buffer.from(qAuth, 'base64').toString('utf-8');
+      const colonIdx = decoded.indexOf(':');
+      const u = colonIdx !== -1 ? decoded.slice(0, colonIdx) : decoded;
+      const p = colonIdx !== -1 ? decoded.slice(colonIdx + 1) : '';
+      const r = verifyUserPass(u, p);
+      if (r.authenticated) return r;
+    } catch {}
+  }
+
   const authHeader = req.headers['authorization'];
   if (authHeader && authHeader.startsWith('Basic ')) {
     try {
@@ -461,7 +477,7 @@ export function createApp() {
     catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
   });
   app.post('/api/cameras/:id/ptz', requireAdminAuth, async (req, res) => {
-    try { const action = String(req.body?.action || ''); res.json(await cameraPtz(req.params.id, action)); }
+    try { const action = String(req.body?.action || ''); const speed = Number(req.body?.speed); res.json(await cameraPtz(req.params.id, action, Number.isFinite(speed)?speed:undefined)); }
     catch (e:any) { res.status(400).json({ ok:false, error:e?.message||String(e) }); }
   });
   app.get('/api/cameras/:id/recordings', requireUserOrAdminAuth, async (req, res) => {
@@ -472,7 +488,7 @@ export function createApp() {
     try { const mode = String(req.body?.mode || 'auto'); res.json(await cameraLed(req.params.id, mode as any)); }
     catch (e:any) { res.status(400).json({ ok:false, error:e?.message||String(e) }); }
   });
-  app.get('/api/cameras/:id/audio.wav', requireUserOrAdminAuth, async (req,res) => {
+  app.get(['/api/cameras/:id/audio.wav','/api/cameras/:id/audio.mp3'], requireUserOrAdminAuth, async (req,res) => {
     await serveLiveAudio(req, res, req.params.id);
   });
   // Proxy de mídia: somente leitura, autenticado

@@ -427,13 +427,29 @@ export async function serveLiveAudio(req: http.IncomingMessage, res: http.Server
   const cams = loadCameraConfigs();
   const cam = cams.find(c => c.id === safeCamId(camId));
   if (!cam) { res.statusCode = 404; res.end('camera not found'); return; }
-  const srcUrl = rtspUrlWithAuth(cam.subStream, cam.username, cam.password);
-  res.writeHead(200, { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-cache, no-store', 'Connection': 'close', 'X-Accel-Buffering': 'no' });
-  const args = ['-hide_banner','-loglevel','error','-i',srcUrl,'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le','-f','wav','pipe:1'];
-  const proc = spawnProc('ffmpeg', args, { stdio: ['ignore','pipe','ignore'] });
+  // onvif1/main usually carries audio; onvif2/sub often video-only
+  const srcUrl = rtspUrlWithAuth(cam.mainStream || cam.subStream, cam.username, cam.password);
+  res.writeHead(200, {
+    'Content-Type': 'audio/mpeg',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Connection': 'close',
+    'X-Accel-Buffering': 'no',
+    'Accept-Ranges': 'none',
+  });
+  const args = [
+    '-hide_banner','-loglevel','error',
+    '-timeout','5000000',
+    '-i', srcUrl,
+    '-vn','-ac','1','-ar','16000',
+    '-c:a','libmp3lame','-b:a','64k',
+    '-f','mp3','pipe:1'
+  ];
+  const proc = spawnProc('ffmpeg', args, { stdio: ['ignore','pipe','pipe'] });
   proc.stdout.pipe(res);
   const kill = () => { try { proc.kill('SIGKILL'); } catch {} };
-  req.on('close', kill); req.on('error', kill); proc.on('exit', () => { try { res.end(); } catch {} });
+  req.on('close', kill); req.on('error', kill);
+  proc.on('exit', () => { try { res.end(); } catch {} });
 }
 
 export function stopGo2rtc() {
@@ -477,13 +493,94 @@ function parseXmlTags(xml: string, tag: string): string[] {
   return out;
 }
 
+function parseXmlBlocks(xml: string, tag: string): string[] {
+  const re = new RegExp(`<[^:>]*:?${tag}\\b[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tag}>`, 'gi');
+  const out: string[] = []; let m: RegExpExecArray | null;
+  while ((m = re.exec(xml))) out.push(m[1]);
+  return out;
+}
+function xmlVal(xml: string, tag: string): string { return parseXmlTags(xml, tag)[0] || ''; }
+
+async function probeCameraWifi(cam: CameraConfig) {
+  const attempts: any[] = [];
+  const probes: Array<{name:string; path:string; body:string}> = [
+    { name: 'GetDot11Status', path: '/onvif/device_service', body: '<tds:GetDot11Status><tds:InterfaceToken>eth0</tds:InterfaceToken></tds:GetDot11Status>' },
+    { name: 'GetDot11Status-wlan0', path: '/onvif/device_service', body: '<tds:GetDot11Status><tds:InterfaceToken>wlan0</tds:InterfaceToken></tds:GetDot11Status>' },
+    { name: 'GetDot11Capabilities', path: '/onvif/device_service', body: '<tds:GetDot11Capabilities/>' },
+    { name: 'GetNetworkInterfaces', path: '/onvif/device_service', body: '<tds:GetNetworkInterfaces/>' },
+  ];
+  for (const p of probes) {
+    try {
+      const r = await onvifPost(cam, p.path, p.body, 5000);
+      const b = r.body || '';
+      const hasSignal = /SignalStrength|Signal|RSSI|dBm|SSID/i.test(b);
+      attempts.push({ name: p.name, ok: r.ok, status: r.status, hasSignal, fault: /Fault/i.test(b) });
+      if (r.ok && hasSignal) {
+        const ssid = xmlVal(b, 'SSID');
+        const strength = xmlVal(b, 'SignalStrength') || xmlVal(b, 'Strength') || xmlVal(b, 'SignalQuality');
+        const signal = xmlVal(b, 'Signal');
+        return { supported: true, ssid: ssid || null, signalStrength: strength || signal || null, source: p.name, attempts };
+      }
+      // Parse network interfaces for wireless extensions
+      if (p.name === 'GetNetworkInterfaces' && b) {
+        const ifaces = parseXmlBlocks(b, 'NetworkInterface');
+        for (const iface of ifaces) {
+          const ssid = xmlVal(iface, 'SSID');
+          const strength = xmlVal(iface, 'SignalStrength') || xmlVal(iface, 'Strength') || xmlVal(iface, 'SignalQuality');
+          const wireless = /Wireless|Dot11|Wifi|802\.11/i.test(iface);
+          if (wireless || ssid || strength) {
+            return { supported: !!(ssid || strength), ssid: ssid || null, signalStrength: strength || null, wireless, source: 'GetNetworkInterfaces', attempts };
+          }
+        }
+      }
+    } catch (e:any) { attempts.push({ name: p.name, ok:false, error: String(e?.message||e).slice(0,120) }); }
+  }
+  return { supported: false, ssid: null, signalStrength: null, reason: 'Câmera não expõe RSSI/SSID por ONVIF padrão; pode exigir API proprietária Yoosee.', attempts };
+}
+
+async function probeCameraStorage(cam: CameraConfig) {
+  const attempts: any[] = [];
+  const probes: Array<{name:string; path:string; body:string}> = [
+    { name: 'GetStorageConfigurations', path: '/onvif/device_service', body: '<tds:GetStorageConfigurations/>' },
+    { name: 'GetStorageConfiguration', path: '/onvif/device_service', body: '<tds:GetStorageConfiguration><tds:Token>SD_CARD</tds:Token></tds:GetStorageConfiguration>' },
+    { name: 'GetRecordingSummary', path: '/onvif/recording_service', body: '<trc:GetRecordingSummary xmlns:trc="http://www.onvif.org/ver10/recording/wsdl"/>' },
+    { name: 'GetRecordings', path: '/onvif/recording_service', body: '<trc:GetRecordings xmlns:trc="http://www.onvif.org/ver10/recording/wsdl"/>' },
+  ];
+  for (const p of probes) {
+    try {
+      const r = await onvifPost(cam, p.path, p.body, 5000);
+      const b = r.body || '';
+      const fault = /Fault/i.test(b);
+      attempts.push({ name: p.name, ok: r.ok, status: r.status, fault, len: b.length });
+      if (r.ok && !fault) {
+        const configs = parseXmlBlocks(b, 'StorageConfiguration').concat(parseXmlBlocks(b, 'RecordingInformation'));
+        if (configs.length) {
+          const items = configs.map(c => ({
+            token: xmlVal(c,'Token') || xmlVal(c,'RecordingToken') || null,
+            type: xmlVal(c,'Type') || null,
+            state: xmlVal(c,'State') || null,
+            total: xmlVal(c,'TotalCapacity') || xmlVal(c,'TotalSpace') || null,
+            free: xmlVal(c,'FreeSpace') || xmlVal(c,'Remaining') || null,
+          }));
+          return { supported: true, items, source: p.name, attempts };
+        }
+        // Even without parseable items, a successful non-fault response is informative
+        if (/StorageConfiguration|Recording/i.test(b)) return { supported: true, raw: b.slice(0, 2000), source: p.name, attempts };
+      }
+    } catch (e:any) { attempts.push({ name: p.name, ok:false, error: String(e?.message||e).slice(0,120) }); }
+  }
+  return { supported: false, items: [], reason: 'Armazenamento/SD não exposto por ONVIF padrão nesta câmera; Yoosee geralmente usa API proprietária.', attempts };
+}
+
 export async function getCameraDetails(camId: string) {
   const cam = loadCameraConfigs().find(c => c.id === safeCamId(camId));
   if (!cam) throw new Error('camera not found');
-  const [dev, caps, netifs] = await Promise.all([
+  const [dev, caps, netifs, wifi, storage] = await Promise.all([
     onvifPost(cam, '/onvif/device_service', '<tds:GetDeviceInformation/>'),
     onvifPost(cam, '/onvif/device_service', '<tds:GetCapabilities><tds:Category>All</tds:Category></tds:GetCapabilities>'),
     onvifPost(cam, '/onvif/device_service', '<tds:GetNetworkInterfaces/>'),
+    probeCameraWifi(cam),
+    probeCameraStorage(cam),
   ]);
   const devBody = dev.body || ''; const capsBody = caps.body || ''; const netBody = netifs.body || '';
   const get = (b:string,t:string)=>parseXmlTags(b,t)[0]||'';
@@ -492,9 +589,10 @@ export async function getCameraDetails(camId: string) {
   if (hw || addr) interfaces.push({ hwAddress: hw, ipv4: addr, dhcp });
   return {
     ok: true,
-    camera: { id: cam.id, name: cam.name, ip: cam.ip, mac: cam.mac, nvrEnabled: !!cam.nvrEnabled, mainStream: cam.mainStream, subStream: cam.subStream },
+    camera: { id: cam.id, name: cam.name, ip: cam.ip, mac: cam.mac, nvrEnabled: !!cam.nvrEnabled, mainStream: cam.mainStream, subStream: cam.subStream, brand: cam.brand || 'generic' },
     device: { manufacturer: get(devBody,'Manufacturer'), model: get(devBody,'Model'), firmware: get(devBody,'FirmwareVersion'), serial: get(devBody,'SerialNumber'), hardwareId: get(devBody,'HardwareId') },
-    network: { interfaces },
+    network: { interfaces, wifi },
+    storage,
     capabilities: {
       ptz: /PTZ/i.test(capsBody),
       imaging: /Imaging/i.test(capsBody),
@@ -504,10 +602,11 @@ export async function getCameraDetails(camId: string) {
       audio: true,
     },
     controls: {
-      ptz: { supported: /PTZ/i.test(capsBody), actions: ['left','right','up','down','stop'] },
-      led: { supported: 'unknown', note: 'ONVIF imaging não exposto; LED pode exigir API proprietária Yoosee.' },
+      ptz: { supported: /PTZ/i.test(capsBody), actions: ['left','right','up','down','stop'], speedRange: [0.1, 1] },
+      led: { supported: false, note: 'LED/IR não exposto por ONVIF padrão nesta Yoosee; controle provável via protocolo proprietário/P2P.' },
       audio: { supported: true, note: 'Áudio via ffmpeg/RTSP (PCMA).' },
-      recordingPlayback: { supported: false, note: 'Replay microSD/NVR não exposto por ONVIF padrão nesta câmera.' },
+      recordingPlayback: { supported: !!storage.supported, note: storage.supported ? 'Armazenamento detectado via ONVIF.' : 'Replay microSD/NVR não exposto por ONVIF padrão nesta câmera.' },
+      wifi: { supported: !!wifi.supported, note: wifi.supported ? 'Wi-Fi reportado por ONVIF.' : (wifi.reason || 'Wi-Fi/RSSI não exposto por ONVIF padrão.') },
     },
     rawOk: { dev: dev.ok, caps: caps.ok, netifs: netifs.ok },
   };
@@ -516,15 +615,29 @@ export async function getCameraDetails(camId: string) {
 export async function cameraLed(camId: string, mode: 'on'|'off'|'auto') {
   const cam = loadCameraConfigs().find(c => c.id === safeCamId(camId));
   if (!cam) throw new Error('camera not found');
-  // Best-effort ONVIF imaging IR cut / auxiliary commands are model-specific; report unsupported if no clear endpoint.
-  return { ok:false, supported:false, mode, error:'LED/IR não exposto por ONVIF padrão nesta Yoosee. Requer API proprietária.' };
+  const attempts: any[] = [];
+  // Best-effort: some cameras expose auxiliary commands or imaging settings.
+  const auxCmd = mode === 'on' ? 'tt:IRCutFilterOn' : mode === 'off' ? 'tt:IRCutFilterOff' : 'tt:IRCutFilterAuto';
+  const probes: Array<{name:string; path:string; body:string}> = [
+    { name:'SendAuxiliaryCommand', path:'/onvif/device_service', body:`<tds:SendAuxiliaryCommand><tds:AuxiliaryCommand>${auxCmd}</tds:AuxiliaryCommand></tds:SendAuxiliaryCommand>` },
+    { name:'SetRelayOutputState', path:'/onvif/deviceio_service', body:`<tmd:SetRelayOutputState xmlns:tmd="http://www.onvif.org/ver10/deviceIO/wsdl"><tmd:RelayOutputToken>relay0</tmd:RelayOutputToken><tmd:LogicalState>${mode==='off'?'inactive':'active'}</tmd:LogicalState></tmd:SetRelayOutputState>` },
+  ];
+  for (const p of probes) {
+    try {
+      const r = await onvifPost(cam, p.path, p.body, 5000);
+      const fault = /Fault|not implemented|not supported|ActionNotSupported/i.test(r.body || '');
+      attempts.push({ name:p.name, ok:r.ok, status:r.status, fault });
+      if (r.ok && !fault) return { ok:true, supported:true, mode, method:p.name, attempts };
+    } catch (e:any) { attempts.push({ name:p.name, ok:false, error:String(e?.message||e).slice(0,120) }); }
+  }
+  return { ok:false, supported:false, mode, error:'LED/IR não exposto por ONVIF padrão nesta Yoosee. Requer API proprietária/P2P.', attempts };
 }
 
-export async function cameraPtz(camId: string, action: string) {
+export async function cameraPtz(camId: string, action: string, speedInput?: number) {
   const cam = loadCameraConfigs().find(c => c.id === safeCamId(camId));
   if (!cam) throw new Error('camera not found');
   const token = cam.profileToken || 'IPCProfilesToken0';
-  const speed = 0.5;
+  const speed = Math.max(0.1, Math.min(1, Number(speedInput) || 1));
   const panTilt = (x:number,y:number) => `<tt:PanTilt x="${x}" y="${y}"/><tt:Zoom x="0"/>`;
   let body = '';
   // Some Yoosee/XM firmwares invert X axis on ONVIF ContinuousMove; swap left/right by default.
@@ -539,16 +652,16 @@ export async function cameraPtz(camId: string, action: string) {
     if (!r.ok && action === 'stop') {
       const stopBody = `<tptz:Stop><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`;
       const r2 = await onvifPost(cam, '/onvif/ptz_service', stopBody, 5000);
-      if (r2.ok) return { ok: true, status: r2.status, action, fallback: 'stop' };
+      if (r2.ok) return { ok: true, status: r2.status, action, speed, fallback: 'stop' };
       const r3 = await onvifPost(cam, '/onvif/ptz_service', `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(0,0)}</tptz:Velocity></tptz:ContinuousMove>`, 5000);
-      return { ok: r3.ok, status: r3.status, error: r3.error || r2.error || r.error, action, fallback: 'zero-velocity' };
+      return { ok: r3.ok, status: r3.status, error: r3.error || r2.error || r.error, action, speed, fallback: 'zero-velocity' };
     }
     if (!r.ok && action !== 'stop') {
       await new Promise(res => setTimeout(res, 250));
       const r2 = await onvifPost(cam, '/onvif/ptz_service', body, 5000);
-      return { ok: r2.ok, status: r2.status, error: r2.error || r.error, action, retried: !r2.ok ? false : true };
+      return { ok: r2.ok, status: r2.status, error: r2.error || r.error, action, speed, retried: !r2.ok ? false : true };
     }
-    return { ok: r.ok, status: r.status, error: r.error, action };
+    return { ok: r.ok, status: r.status, error: r.error, action, speed };
   });
 }
 
@@ -557,17 +670,18 @@ export async function cameraProbeRecordings(camId: string) {
   if (!cam) throw new Error('camera not found');
   // ONVIF replay/recording search is not exposed by this model; report clearly.
   // Probe RTSP common paths quickly with ffprobe DESCRIBE-like via rtsp url options? Use ffmpeg low timeout.
-  const common = ['/onvif1','/onvif2','/playback','/record','/replay','/sd','/stream1'];
+  const storage = await probeCameraStorage(cam);
+  const common = ['/onvif1','/onvif2','/playback','/record','/replay','/sd','/stream1','/cam/playback?channel=1&subtype=0','/onvif/recording'];
   const findings: any[] = [];
   for (const p of common) {
-    const url = rtspUrlWithAuth(`rtsp://${cam.ip}:554${p}`, cam.username, cam.password);
+    const url = rtspUrlWithAuth(`rtsp://${cam.ip}:${cam.rtspPort || 554}${p}`, cam.username, cam.password);
     try {
-      const { stdout, stderr } = await execFileAsync('ffprobe', ['-v','error','-rtsp_transport','tcp','-stimeout','2000000','-show_streams','-of','json', url], { timeout: 5000, maxBuffer: 1024*1024 });
+      const { stdout } = await execFileAsync('ffprobe', ['-v','error','-rtsp_transport','tcp','-timeout','2000000','-rw_timeout','2000000','-show_streams','-of','json', url], { timeout: 7000, maxBuffer: 1024*1024 });
       findings.push({ path:p, ok:true, out:(stdout||'').slice(0,300) });
     } catch (e:any) {
       const msg = String(e?.stderr || e?.message || e).slice(0,180);
       findings.push({ path:p, ok:false, error: msg });
     }
   }
-  return { ok:true, supported:false, reason:'ONVIF replay/search não exposto por esta câmera; gravações parecem proprietárias/SD local. Nenhum path RTSP de playback confirmado.', findings };
+  return { ok:true, supported:!!storage.supported, storage, reason: storage.supported ? 'Armazenamento detectado via ONVIF; playback ainda pode ser proprietário.' : 'ONVIF replay/search não exposto por esta câmera; gravações parecem proprietárias/SD local. Nenhum path RTSP de playback confirmado.', findings };
 }
