@@ -527,8 +527,9 @@ export async function cameraPtz(camId: string, action: string) {
   const speed = 0.5;
   const panTilt = (x:number,y:number) => `<tt:PanTilt x="${x}" y="${y}"/><tt:Zoom x="0"/>`;
   let body = '';
-  if (action === 'left') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(-speed,0)}</tptz:Velocity></tptz:ContinuousMove>`;
-  else if (action === 'right') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(speed,0)}</tptz:Velocity></tptz:ContinuousMove>`;
+  // Some Yoosee/XM firmwares invert X axis on ONVIF ContinuousMove; swap left/right by default.
+  if (action === 'left') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(speed,0)}</tptz:Velocity></tptz:ContinuousMove>`;
+  else if (action === 'right') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(-speed,0)}</tptz:Velocity></tptz:ContinuousMove>`;
   else if (action === 'up') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(0,speed)}</tptz:Velocity></tptz:ContinuousMove>`;
   else if (action === 'down') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(0,-speed)}</tptz:Velocity></tptz:ContinuousMove>`;
   else if (action === 'stop') body = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(0,0)}</tptz:Velocity></tptz:ContinuousMove>`;
