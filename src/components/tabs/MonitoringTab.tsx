@@ -111,7 +111,12 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
   const diskFree = server?.disco?.livre_gb ?? 0;
   const diskPercent = server?.disco?.uso_percentual ?? 0;
 
-  const primaryIface = network?.interfaces?.[0];
+  const primaryIface = network?.interfaces?.find(i => i.nome !== 'lo' && i.status === 'UP')
+    || network?.interfaces?.find(i => i.nome !== 'lo')
+    || network?.interfaces?.[0];
+  const primarySpeedLabel = primaryIface?.speed_mbps && primaryIface.speed_mbps > 0
+    ? (primaryIface.speed_mbps >= 1000 ? `${primaryIface.speed_mbps / 1000} Gbps` : `${primaryIface.speed_mbps} Mbps`)
+    : (primaryIface?.nome && /^wl/i.test(primaryIface.nome) ? 'Wi-Fi' : 'N/D');
   const downloadSpeed = network?.downloadSpeedFormatted || '0 B/s';
   const uploadSpeed = network?.uploadSpeedFormatted || '0 B/s';
   const downloadBytes = network?.downloadSpeedBytes || 0;
@@ -558,7 +563,7 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
             <div>
               <h3 className="text-sm font-bold font-title text-[#1A1A2E]">Tráfego de rede</h3>
               <span className="text-xs text-[#4A4A68] font-medium">
-                {isConnected ? `Interface ${primaryIface?.nome || 'enp2s0'}, 1 Gbps full duplex` : 'Não disponível'}
+                {isConnected ? `Interface ${primaryIface?.nome || 'N/D'}${primarySpeedLabel !== 'N/D' ? `, ${primarySpeedLabel}` : ''}` : 'Não disponível'}
               </span>
             </div>
           </div>
@@ -603,7 +608,7 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
           </div>
           <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]">
             <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">Velocidade link</span>
-            <span className="text-[#1A1A2E] font-bold">1 Gbps</span>
+            <span className="text-[#1A1A2E] font-bold">{isConnected ? primarySpeedLabel : 'N/D'}</span>
           </div>
         </div>
       </div>

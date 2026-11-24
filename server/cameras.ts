@@ -449,6 +449,7 @@ export async function serveLiveAudio(req: http.IncomingMessage, res: http.Server
   proc.stdout.pipe(res);
   const kill = () => { try { proc.kill('SIGKILL'); } catch {} };
   req.on('close', kill); req.on('error', kill);
+  proc.on('error', () => { try { res.end(); } catch {} });
   proc.on('exit', () => { try { res.end(); } catch {} });
 }
 
@@ -477,7 +478,7 @@ async function withPtzLock<T>(camId: string, fn: () => Promise<T>): Promise<T> {
 async function onvifPost(cam: CameraConfig, servicePath: string, bodyXml: string, timeoutMs = 6000): Promise<{ ok: boolean; status?: number; body?: string; error?: string }> {
   const xml = `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"><s:Header>${wsse(cam.username, cam.password)}</s:Header><s:Body>${bodyXml}</s:Body></s:Envelope>`;
   return await new Promise((resolve) => {
-    const req = http.request({ hostname: cam.ip, port: 5000, path: servicePath, method: 'POST', timeout: timeoutMs, headers: { 'Content-Type': 'application/soap+xml; charset=utf-8', 'Content-Length': Buffer.byteLength(xml), 'Connection': 'close' } }, (res) => {
+    const req = http.request({ hostname: cam.ip, port: cam.onvifPort || 5000, path: servicePath, method: 'POST', timeout: timeoutMs, headers: { 'Content-Type': 'application/soap+xml; charset=utf-8', 'Content-Length': Buffer.byteLength(xml), 'Connection': 'close' } }, (res) => {
       let buf=''; res.setEncoding('utf8'); res.on('data', c=>buf+=c); res.on('end', ()=> resolve({ ok: (res.statusCode||500) < 400 && !/Fault/i.test(buf), status: res.statusCode, body: buf.slice(0, 120000) }));
     });
     req.on('timeout', ()=> req.destroy(new Error('timeout')));

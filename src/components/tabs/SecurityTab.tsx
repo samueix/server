@@ -424,12 +424,12 @@ export const SecurityTab: React.FC = () => {
         <div className="p-4 bg-white border-2 border-[#1A1A2E] rounded-xl shadow-[3px_3px_0px_#1A1A2E]">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-[#717188]">Firewall UFW do Ubuntu</span>
-            <ShieldCheck className="w-4 h-4 text-[#12B76A]" />
+            <ShieldCheck className={`w-4 h-4 ${data?.ufwActive ? 'text-[#12B76A]' : data ? 'text-[#F04438]' : 'text-[#717188]'}`} />
           </div>
           <div className="flex items-center gap-2 mt-2">
-            <span className="w-3 h-3 rounded-full bg-[#12B76A] border border-[#1A1A2E]" />
+            <span className={`w-3 h-3 rounded-full border border-[#1A1A2E] ${data?.ufwActive ? 'bg-[#12B76A]' : data ? 'bg-[#F04438]' : 'bg-[#FFC857]'}`} />
             <span className="text-sm font-black font-title text-[#1A1A2E]">
-              {data?.ufwActive ? 'UFW Ativo & Protegido' : 'UFW Protegido'}
+              {!data ? 'Verificando UFW...' : data.ufwActive ? 'UFW Ativo & Protegido' : 'UFW Inativo / Verificar'}
             </span>
           </div>
           <span className="text-[11px] text-[#4A4A68] mt-1 font-mono font-bold block">
@@ -526,65 +526,12 @@ export const SecurityTab: React.FC = () => {
             <div className="flex items-center gap-2">
               <Ban className="w-4 h-4 text-[#FF5A36]" />
               <h2 className="text-xs font-black text-[#1A1A2E] font-title uppercase tracking-wider">
-                'IPs hostis e tentativas de invasão'
+                IPs hostis e tentativas de invasão
               </h2>
             </div>
           </div>
 
           <div className="overflow-x-auto">
-            {false ? (
-              <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
-                <thead className="bg-[#FFF7E8]/60 border-b-2 border-[#1A1A2E] font-black text-xs">
-                  <tr>
-                    <th className="py-2.5 px-3.5">Nº</th>
-                    <th className="py-2.5 px-3.5">Destino / Porta</th>
-                    <th className="py-2.5 px-3.5">Ação</th>
-                    <th className="py-2.5 px-3.5">Origem (From)</th>
-                    <th className="py-2.5 px-3.5">Comentário</th>
-                    <th className="py-2.5 px-3.5 text-right">Ação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#E2DFD8]">
-                  {((data?.ufwRules || []).length === 0) ? (
-                    <tr>
-                      <td colSpan={6} className="py-10 text-center text-[#717188]">
-                        <ShieldCheck className="w-8 h-8 text-[#12B76A] mx-auto mb-2" />
-                        <span className="font-bold block text-sm text-[#1A1A2E]">Nenhuma regra numerada no UFW.</span>
-                        <span className="text-xs">O firewall padrão está ativo aplicando a política padrão do sistema.</span>
-                      </td>
-                    </tr>
-                  ) : (
-                    (data?.ufwRules || []).map((rule, idx) => (
-                      <tr key={idx} className="hover:bg-[#FFF7E8]/60 transition">
-                        <td className="py-2.5 px-3.5 font-bold tabular-nums">[{rule.number}]</td>
-                        <td className="py-2.5 px-3.5 font-bold">{rule.to}</td>
-                        <td className="py-2.5 px-3.5">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                            rule.action === 'DENY' || rule.action === 'REJECT'
-                              ? 'bg-[#FEE4E2] text-[#F04438] border-[#F04438]'
-                              : 'bg-[#D1FADF] text-[#12B76A] border-[#12B76A]'
-                          }`}>
-                            {rule.action}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3.5 font-bold tabular-nums">{rule.from}</td>
-                        <td className="py-2.5 px-3.5 text-[#717188]">{rule.comment || '--'}</td>
-                        <td className="py-2.5 px-3.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleBlockUfw(rule.from.split(/\s+/)[0], true)}
-                            className="px-2 py-1 bg-[#1A1A2E] hover:bg-[#F04438] text-white rounded text-[10px] font-bold border border-[#1A1A2E] transition"
-                            title="Remover regra do UFW"
-                          >
-                            Excluir Regra
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            ) : (
               <table className="w-full text-left text-xs font-mono text-[#1A1A2E]">
                 <thead className="bg-[#FFF7E8]/60 border-b-2 border-[#1A1A2E] font-black text-xs">
                   <tr>
@@ -701,7 +648,6 @@ export const SecurityTab: React.FC = () => {
                   )}
                 </tbody>
               </table>
-            )}
           </div>
         </div>
 

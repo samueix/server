@@ -43,7 +43,7 @@ import {
 } from './server/db.js';
 import { analyzeDomainWithOpencode } from './server/opencode.js';
 import { listDirectory, readTargetFile, createTargetFile, saveTargetFile, assertPathSecurity } from './server/fileExplorer.js';
-import { getWifiInfo, triggerWifiScan, connectWifi } from './server/wifiMonitor.js';
+import { getWifiInfo, triggerWifiScan, connectWifi, getFastConnectivityStatus } from './server/wifiMonitor.js';
 import { 
   getTokenQuotaMetrics, 
   listOpencodeSessions, 
@@ -410,6 +410,18 @@ export function createApp() {
       osVersion = osInfo.os_version || '';
     } catch {}
 
+    let conn = {
+      connection_type: 'unknown' as 'wifi' | 'ethernet' | 'unknown',
+      interface: primaryInterface,
+      link_speed_mbps: null as number | null,
+      wifi_signal_dbm: null as number | null,
+      wifi_signal_percent: null as number | null,
+      wifi_signal_quality: null as string | null
+    };
+    try {
+      conn = getFastConnectivityStatus(primaryInterface);
+    } catch {}
+
     res.status(200).json({ 
       status: 'online', 
       service: 'Server Monitor & AdGuard AI', 
@@ -423,7 +435,12 @@ export function createApp() {
         uptime_seconds: uptimeSeconds,
         ipv4,
         ipv6,
-        primary_interface: primaryInterface,
+        primary_interface: conn.interface || primaryInterface,
+        connection_type: conn.connection_type,
+        link_speed_mbps: conn.link_speed_mbps,
+        wifi_signal_dbm: conn.wifi_signal_dbm,
+        wifi_signal_percent: conn.wifi_signal_percent,
+        wifi_signal_quality: conn.wifi_signal_quality,
         os: osName,
         os_version: osVersion
       }
@@ -658,7 +675,7 @@ export function createApp() {
 
   // Verificação de autenticação de dois usuários: admin e user
   app.get('/api/auth/verify', async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
 
@@ -759,7 +776,7 @@ export function createApp() {
 
   // Endpoint seguro de desbloqueio do cofre (valida VAULT_PASSWORD em tempo constante no servidor)
   app.post('/api/vault/unlock', (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
 
@@ -929,7 +946,7 @@ export function createApp() {
 
   // Endpoint de Ping do servidor para a internet (com resolução híbrida TCP/ICMP/HTTP de alta confiabilidade)
   app.get('/api/ping', async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
     if (req.method === 'OPTIONS') {
@@ -1032,7 +1049,7 @@ export function createApp() {
 
   // Traceroute progressivo (stream SSE): envia cada salto assim que descoberto (multi-probe + rDNS)
   app.get('/api/trace/stream', async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -1153,7 +1170,7 @@ export function createApp() {
 
   // Traceroute/MTR em tempo real (path trace com latência por salto) - dados reais via mtr
   app.get('/api/trace', async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
     if (req.method === 'OPTIONS') return res.status(204).end();
 
@@ -1243,7 +1260,7 @@ export function createApp() {
 
   // Rotas nativas do n8n Workflow Automation
   app.get('/api/n8n/status', async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     try {
       const status = await fetchN8nFallback();
       return res.json(status);
@@ -1279,7 +1296,7 @@ export function createApp() {
 
   // Controle do container n8n (Docker) - iniciar/parar para economizar RAM
   app.post('/api/n8n/start', requireAdminAuth, async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
     try {
       await execFileAsync('docker', ['start', 'n8n'], { timeout: 30000 });
@@ -1294,7 +1311,7 @@ export function createApp() {
   });
 
   app.post('/api/n8n/stop', requireAdminAuth, async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
     try {
       await execFileAsync('docker', ['update', '--restart=no', 'n8n'], { timeout: 15000 }).catch(() => ({}));
@@ -1530,7 +1547,7 @@ export function createApp() {
   // Auditoria persistente de ações sensíveis
   app.get('/api/audit', requireAdminAuth, (req, res) => {
     try {
-      const limit = Math.min(1000, Math.max(1, parseInt((req.query.limit as string) || '200', 10)));
+      const limit = Math.min(1000, Math.max(1, parseInt((req.query.limit as string) || '200', 10) || 200));
       return res.json({ entries: getAuditLog(limit) });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -1883,7 +1900,7 @@ export function createApp() {
       return next();
     }
 
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Accept');
     res.setHeader('Access-Control-Allow-Private-Network', 'true');
@@ -2039,7 +2056,7 @@ export function createApp() {
     }
     if (subPath === 'processes') {
       const sortBy = (req.query.sort as string) || 'cpu';
-      const limit = parseInt((req.query.limit as string) || '30', 10);
+      const limit = Math.min(500, Math.max(1, parseInt((req.query.limit as string) || '30', 10) || 30));
       const resData = getProcessesList(sortBy, limit);
       const procsList = Array.isArray(resData) ? resData : (resData.processes || []);
       return res.json({
@@ -2078,7 +2095,7 @@ export function createApp() {
     }
     if (subPath.startsWith('logs')) {
       const source = (req.query.source as string) || 'syslog';
-      const lines = parseInt((req.query.lines as string) || '50', 10);
+      const lines = Math.min(2000, Math.max(1, parseInt((req.query.lines as string) || '50', 10) || 50));
       const filter = (req.query.filter as string) || '';
       const logsResult = getSystemLogsFallback(source, lines, filter);
       return res.json(logsResult);
@@ -2092,7 +2109,7 @@ export function createApp() {
 
   // Rota Nginx-compatible /adguard-api/* (Injeta autenticação automaticamente e libera CORS)
   app.all('/adguard-api/*', requireUserOrAdminAuth, async (req, res) => {
-    applyCors(res);
+    applyCors(res, req);
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept');
 

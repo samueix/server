@@ -25,7 +25,7 @@ export function loadAdGuardHistory(): void {
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf-8'));
     buffer = Array.isArray(parsed?.points) ? parsed.points : (Array.isArray(parsed) ? parsed : []);
-    lastSample = parsed?.lastSample || (buffer.length ? { ts: buffer[buffer.length - 1].ts, totalQueries: 0, totalBlocked: 0 } : null);
+    lastSample = parsed?.lastSample || null;
   } catch { buffer = []; lastSample = null; }
 }
 

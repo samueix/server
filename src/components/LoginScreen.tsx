@@ -34,6 +34,11 @@ type Telemetry = {
   ipv4?: string;
   ipv6?: string;
   primary_interface?: string;
+  connection_type?: 'wifi' | 'ethernet' | 'unknown';
+  link_speed_mbps?: number | null;
+  wifi_signal_dbm?: number | null;
+  wifi_signal_percent?: number | null;
+  wifi_signal_quality?: string | null;
   os?: string;
   os_version?: string;
 };
@@ -61,8 +66,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [apiHealth, setApiHealth] = useState<'checking' | 'online' | 'offline'>('checking');
   const [telemetry, setTelemetry] = useState<Telemetry | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -78,7 +81,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
           const data = await res.json();
           setApiHealth('online');
           if (data.telemetry) setTelemetry(data.telemetry);
-          setLastUpdated(new Date());
         } else {
           setApiHealth('offline');
         }
@@ -94,21 +96,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
       clearInterval(interval);
     };
   }, []);
-
-  // atualiza o rótulo "há Xs" sem recarregar
-  useEffect(() => {
-    const t = setInterval(() => setTick((v) => v + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const lastUpdatedLabel = useMemo(() => {
-    if (!lastUpdated) return '—';
-    const diff = Math.max(0, Math.floor((Date.now() - lastUpdated.getTime()) / 1000));
-    if (diff < 2) return 'agora';
-    if (diff < 60) return `há ${diff}s`;
-    const m = Math.floor(diff / 60);
-    return `há ${m}min`;
-  }, [lastUpdated, tick]);
 
   const systemVersion = useMemo(() => {
     const os = (telemetry?.os || 'Ubuntu Server').trim();
@@ -155,6 +142,9 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
   const temp = typeof telemetry?.temp_c === 'number' ? telemetry.temp_c : null;
   const uptime = formatUptime(telemetry?.uptime_seconds, telemetry?.uptime_human);
   const iface = telemetry?.primary_interface || '—';
+  const connType = telemetry?.connection_type ?? (iface !== '—' && /^wl/i.test(iface) ? 'wifi' : 'unknown');
+  const isWifi = connType === 'wifi';
+  const isCable = connType === 'ethernet';
 
   return (
     <div className="min-h-screen bg-[#FFF7E8] text-[#1A1A2E] flex flex-col justify-center items-center p-4 sm:p-6 font-sans relative overflow-hidden select-none">
@@ -227,9 +217,27 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
                 </div>
               </div>
 
-              <div className="p-2.5 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-white/85"><Network className="w-3.5 h-3.5 text-[#12B76A]" /><span>Interface ativa</span></div>
-                <span className="font-bold text-white">{iface}</span>
+              <div className="p-2.5 rounded-lg bg-black/20 border border-white/30 flex items-center justify-between gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 text-white/85 shrink-0">
+                  {isWifi ? <Wifi className="w-3.5 h-3.5 text-[#12B76A]" /> : <Network className="w-3.5 h-3.5 text-[#12B76A]" />}
+                  <span>Interface ativa</span>
+                </div>
+                <span className="font-bold text-white text-right truncate">
+                  {isWifi ? (
+                    <>
+                      Wi-Fi{iface !== '—' ? ` • ${iface}` : ''}
+                      {typeof telemetry?.wifi_signal_percent === 'number' ? ` • ${telemetry.wifi_signal_percent}%` : ''}
+                      {typeof telemetry?.wifi_signal_dbm === 'number' ? ` (${telemetry.wifi_signal_dbm} dBm)` : ''}
+                    </>
+                  ) : isCable ? (
+                    <>
+                      Cabo{iface !== '—' ? ` • ${iface}` : ''}
+                      {typeof telemetry?.link_speed_mbps === 'number' && telemetry.link_speed_mbps > 0 ? ` /${telemetry.link_speed_mbps}` : ''}
+                    </>
+                  ) : (
+                    iface
+                  )}
+                </span>
               </div>
             </div>
           </div>
@@ -366,10 +374,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess, logout
             </form>
           </div>
         </section>
-      </div>
-
-      <div className="fixed bottom-3 right-4 text-[10px] font-mono text-[#4A4A68] pointer-events-none select-none z-20">
-        Última atualização: <span className="font-semibold text-[#1A1A2E]">{lastUpdatedLabel}</span>
       </div>
     </div>
   );

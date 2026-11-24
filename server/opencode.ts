@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import os from 'os';
 import dns from 'dns';
-import { spawn, execFile } from 'child_process';
+import { spawn, execFile, execSync } from 'child_process';
 import { promisify } from 'util';
 import type { DomainAnalysis } from './db.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
@@ -25,6 +25,9 @@ export interface OpencodeMessage {
   content: string;
   reasoning?: string;
   tokensUsed?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  model?: string;
   timestamp: string;
   imageDataUrl?: string;
 }
@@ -228,17 +231,9 @@ export async function listOpencodeModels(): Promise<string[]> {
 }
 
 
-function safeExec(cmd: string, args: string[], timeoutMs = 3000, max = 12000): string {
-  try {
-    // execFileSync-like via child_process sync? easier use require? no, already have execFileAsync in other places but need sync helper.
-  } catch { return ''; }
-  return '';
-}
-
 // lightweight sync exec (avoid async context build complexity)
 function sh(cmd: string, timeoutMs = 2500, max = 14000): string {
   try {
-    const { execSync } = require('child_process');
     const out = execSync(cmd, { encoding: 'utf-8', timeout: timeoutMs, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 1024 * 1024 });
     const s = String(out || '').trim();
     return s.length > max ? s.slice(0, max) + '\n...[truncado]' : s;
@@ -729,6 +724,9 @@ Responda com base no contexto real acima quando a pergunta for sobre este servid
     content: assistantReplyText,
     reasoning: `Processado pelo opencode (${effectiveModel}, agente ${OPENCODE_AGENT}).`,
     tokensUsed: totalTokensForTurn,
+    promptTokens,
+    completionTokens,
+    model: effectiveModel,
     timestamp: new Date().toISOString()
   };
 

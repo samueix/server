@@ -563,7 +563,8 @@ export function getNetworkInfo() {
       const oper = fs.readFileSync(`/sys/class/net/${name}/operstate`, 'utf-8').trim().toLowerCase();
       if (oper && oper !== 'unknown') isUp = oper === 'up';
     } catch {}
-    const speedMbps = readInterfaceSpeedMbps(name) ?? (isUp ? 1000 : 0);
+    const isWireless = /^wl/i.test(name) || fs.existsSync(`/sys/class/net/${name}/wireless`) || fs.existsSync(`/sys/class/net/${name}/phy80211`);
+    const speedMbps = (name === 'lo' || isWireless) ? 0 : (readInterfaceSpeedMbps(name) ?? 0);
 
     interfaces.push({
       interface: name,

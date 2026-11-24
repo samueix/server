@@ -74,7 +74,10 @@ const CameraCard: React.FC<{
   };
 
   const audioAbortRef = useRef<AbortController | null>(null);
+  const suppressAudioErrorRef = useRef(false);
+  const ptzHeldRef = useRef(false);
   const stopAudio = useCallback(() => {
+    suppressAudioErrorRef.current = true;
     audioAbortRef.current?.abort();
     audioAbortRef.current = null;
     const el = audioRef.current;
@@ -208,6 +211,17 @@ const CameraCard: React.FC<{
     [sendPtz]
   );
 
+  const startHoldPtz = useCallback((action: string) => {
+    ptzHeldRef.current = true;
+    void doPtz(action);
+  }, [doPtz]);
+
+  const endHoldPtz = useCallback(() => {
+    if (!ptzHeldRef.current) return;
+    ptzHeldRef.current = false;
+    void doPtz('stop');
+  }, [doPtz]);
+
   useEffect(() => {
     if (!active) return;
     const isTyping = (t: EventTarget | null) => {
@@ -280,6 +294,7 @@ const CameraCard: React.FC<{
     if (!next) { stopAudio(); return; }
     try {
       stopAudio();
+      suppressAudioErrorRef.current = false;
       // Prefer MediaSource streaming for MP3; fallback to src+auth query.
       const MS = (window as any).MediaSource;
       const canMS = !!MS && MS.isTypeSupported?.('audio/mpeg');
@@ -299,9 +314,9 @@ const CameraCard: React.FC<{
               if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
               const reader = res.body.getReader();
               const pump = async (): Promise<void> => {
-                if (ac.signal.aborted) return;
+                if (ac.signal.aborted) { resolve(); return; }
                 const { value, done } = await reader.read();
-                if (done) { try { if (mediaSource.readyState==='open') mediaSource.endOfStream(); } catch {} return; }
+                if (done) { try { if (mediaSource.readyState==='open') mediaSource.endOfStream(); } catch {} resolve(); return; }
                 if (value?.length) {
                   await new Promise<void>((r2, j2) => {
                     const onEnd = () => { sb.removeEventListener('updateend', onEnd); sb.removeEventListener('error', onErr); r2(); };
@@ -441,52 +456,97 @@ const CameraCard: React.FC<{
         </div>
       </div>
 
-      {/* Viewport do Stream MJPEG */}
-      <div
-        ref={containerRef}
-        className="relative bg-[#12131F] aspect-video max-h-[52vh] flex items-center justify-center overflow-hidden border-b-2 border-[#1A1A2E]"
-      >
-        <img
-          ref={imgRef}
-          alt={cam.name}
-          className={`w-full h-full object-contain bg-[#12131F] transition-opacity duration-200 ${
-            liveState === 'live' ? 'opacity-100' : 'opacity-25'
-          }`}
-        />
-        {liveState !== 'live' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center bg-[#12131F]/65">
-            <div className="p-2.5 rounded-2xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E]">
-              <UbuntuRoundelLogo size="lg" />
-            </div>
-            <div className="text-sm text-white font-bold font-title">
-              {liveState === 'connecting' ? 'Conectando à câmera...' : 'Reconectando...'}
-            </div>
-            <div className="text-[11px] font-mono text-white/80">
-              Iniciando stream SD, pode levar alguns segundos
+      {/* Corpo Principal: Câmera à esquerda + Controles Laterais à direita */}
+      <div className="p-3 grid grid-cols-1 lg:grid-cols-[minmax(0,1.45fr)_minmax(290px,360px)] gap-3 items-start">
+        {/* Coluna Esquerda: Vídeo + Status + Avisos */}
+        <div className="min-w-0 space-y-3">
+          {/* Viewport do Stream MJPEG */}
+          <div
+            ref={containerRef}
+            className="relative bg-[#12131F] aspect-video max-h-[58vh] flex items-center justify-center overflow-hidden rounded-lg border-2 border-[#1A1A2E]"
+          >
+            <img
+              ref={imgRef}
+              alt={cam.name}
+              className={`w-full h-full object-contain bg-[#12131F] transition-opacity duration-200 ${
+                liveState === 'live' ? 'opacity-100' : 'opacity-25'
+              }`}
+            />
+            {liveState !== 'live' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center bg-[#12131F]/65">
+                <div className="p-2.5 rounded-2xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E]">
+                  <UbuntuRoundelLogo size="lg" />
+                </div>
+                <div className="text-sm text-white font-bold font-title">
+                  {liveState === 'connecting' ? 'Conectando à câmera...' : 'Reconectando...'}
+                </div>
+                <div className="text-[11px] font-mono text-white/80">
+                  Iniciando stream SD, pode levar alguns segundos
+                </div>
+              </div>
+            )}
+            <audio
+              ref={audioRef}
+              playsInline
+              onError={() => {
+                if (suppressAudioErrorRef.current || !audioRef.current?.getAttribute('src')) return;
+                setAudioOn(false);
+                setAudioErr('Stream de áudio indisponível nesta câmera/codec.');
+              }}
+            />
+            <div className="absolute left-3 bottom-3 flex items-center gap-2 text-[11px] font-mono font-bold flex-wrap">
+              <span className={`px-2.5 py-0.5 rounded-md border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E] ${liveState === 'live' ? 'bg-[#D1FADF] text-[#027A48]' : liveState === 'connecting' ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#FEE4E2] text-[#B42318]'}`}>
+                {liveState === 'live' ? 'AO VIVO' : liveState === 'connecting' ? 'CONECTANDO' : 'ERRO'}
+              </span>
+              <span className="px-2.5 py-0.5 rounded-md bg-white text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">SD</span>
+              {audioOn && <span className="px-2.5 py-0.5 rounded-md bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">ÁUDIO</span>}
+              {audioErr && <span className="px-2.5 py-0.5 rounded-md bg-[#FEE4E2] text-[#B42318] border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">{audioErr}</span>}
             </div>
           </div>
-        )}
-        <audio ref={audioRef} playsInline onError={()=>{ setAudioOn(false); setAudioErr('Stream de áudio indisponível nesta câmera/codec.'); }} />
-        <div className="absolute left-3 bottom-3 flex items-center gap-2 text-[11px] font-mono font-bold flex-wrap">
-          <span className={`px-2.5 py-0.5 rounded-md border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E] ${liveState === 'live' ? 'bg-[#D1FADF] text-[#027A48]' : liveState === 'connecting' ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#FEE4E2] text-[#B42318]'}`}>
-            {liveState === 'live' ? 'AO VIVO' : liveState === 'connecting' ? 'CONECTANDO' : 'ERRO'}
-          </span>
-          <span className="px-2.5 py-0.5 rounded-md bg-white text-[#1A1A2E] border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">SD</span>
-          {audioOn && <span className="px-2.5 py-0.5 rounded-md bg-[#FF5A36] text-white border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">ÁUDIO</span>}
-          {audioErr && <span className="px-2.5 py-0.5 rounded-md bg-[#FEE4E2] text-[#B42318] border-2 border-[#1A1A2E] shadow-[1.5px_1.5px_0px_#1A1A2E]">{audioErr}</span>}
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">Status</div><div className={`font-mono font-extrabold ${cam.online?'text-[#027A48]':'text-[#B42318]'}`}>{cam.online?'Online':'Sem sinal'}</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">Fonte</div><div className="font-mono font-extrabold text-[#1A1A2E]">RTSP SD</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">NVR</div><div className="font-mono font-extrabold text-[#1A1A2E]">{cam.nvrEnabled?'microSD':'—'}</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">Servidor</div><div className="font-mono font-extrabold text-[#027A48]">Sem gravação</div></div>
+          </div>
+
+          {(playerError || cam.error) && (
+            <div className="text-xs text-[#B54708] bg-[#FEF0C7] border-2 border-[#1A1A2E] rounded-lg p-3 flex gap-2 items-start shadow-[2px_2px_0px_#1A1A2E]">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-[#B54708]" />
+              <div>
+                <div className="font-bold">Aviso</div>
+                <div className="mt-0.5 font-mono text-[11px]">{playerError || cam.error}</div>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
 
-      <div className="p-3 grid grid-cols-4 gap-2 text-[11px]">
-        <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">Status</div><div className={`font-mono font-extrabold ${cam.online?'text-[#027A48]':'text-[#B42318]'}`}>{cam.online?'Online':'Sem sinal'}</div></div>
-        <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">Fonte</div><div className="font-mono font-extrabold text-[#1A1A2E]">RTSP SD</div></div>
-        <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">NVR</div><div className="font-mono font-extrabold text-[#1A1A2E]">{cam.nvrEnabled?'microSD':'—'}</div></div>
-        <div className="bg-[#FFF7E8] border border-[#1A1A2E]/30 rounded-md px-2 py-1.5"><div className="text-[#4A4A68] font-bold">Servidor</div><div className="font-mono font-extrabold text-[#027A48]">Sem gravação</div></div>
-      </div>
+        {/* Coluna Lateral Direita: PTZ, LED / Controles, Gravações microSD e Detalhes */}
+        <aside className="space-y-3 min-w-0" aria-label={`Controles da câmera ${cam.name}`}>
+          <div className="bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-xl p-3.5 shadow-[2px_2px_0px_#1A1A2E]">
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="text-xs font-black font-title text-[#1A1A2E] flex items-center gap-2">
+                <Gamepad2 className="w-4 h-4 text-[#FF5A36]" /> PTZ
+                {ptzBusy && <span className="text-[10px] font-mono text-[#FF5A36] uppercase">({ptzBusy})</span>}
+              </div>
+              <div className="text-[10px] font-mono font-bold text-[#4A4A68]">{ptzSpeed.toFixed(1)}x</div>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 w-[156px] mx-auto select-none touch-none">
+              <div />
+              <button type="button" aria-label="Mover câmera para cima" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('up');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">↑</button>
+              <div />
+              <button type="button" aria-label="Mover câmera para esquerda" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('left');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">←</button>
+              <button type="button" aria-label="Parar movimento PTZ" onClick={(e)=>{e.stopPropagation(); ptzHeldRef.current = false; void doPtz('stop');}} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-[#FEE4E2] hover:bg-[#F04438]/20 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold text-[#B42318] cursor-pointer">■</button>
+              <button type="button" aria-label="Mover câmera para direita" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('right');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">→</button>
+              <div />
+              <button type="button" aria-label="Mover câmera para baixo" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('down');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">↓</button>
+              <div />
+            </div>
+            <input type="range" min="0.2" max="1" step="0.1" value={ptzSpeed} onChange={(e)=>setPtzSpeed(Number(e.target.value))} aria-label="Velocidade PTZ" className="w-full mt-2.5 accent-[#FF5A36]" />
+            <div className="text-[10px] text-[#4A4A68] text-center mt-1">Segure direção; solte para parar.</div>
+          </div>
 
-      {/* Controles PTZ, LED, Gravações microSD e Detalhes */}
-      <div className="px-3 pb-3 grid grid-cols-1 md:grid-cols-[1fr_180px] gap-3 items-start">
-        <div className="space-y-3 order-2 md:order-1">
           <div className="bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-xl p-3.5 shadow-[2px_2px_0px_#1A1A2E]">
             <div className="text-xs font-black font-title text-[#1A1A2E] mb-2.5 flex items-center gap-2">
               <Lightbulb className="w-4 h-4 text-[#FF5A36]" /> LED / Controles
@@ -577,52 +637,19 @@ const CameraCard: React.FC<{
             <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3.5 text-xs text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
               <div className="font-black font-title text-[#1A1A2E] mb-2">Informações / Configs</div>
               {!details ? <div className="text-[#4A4A68] font-medium">Carregando...</div> : details.error ? <div className="text-[#B42318] font-semibold">{details.error}</div> : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 font-mono text-[11px]">
+                <div className="grid grid-cols-1 gap-1.5 font-mono text-[11px]">
                   <div className="text-[#4A4A68]">Fabricante: <span className="text-[#1A1A2E] font-bold">{details.device?.manufacturer || '—'}</span></div>
                   <div className="text-[#4A4A68]">Modelo: <span className="text-[#1A1A2E] font-bold">{details.device?.model || '—'}</span></div>
                   <div className="text-[#4A4A68]">Firmware: <span className="text-[#1A1A2E] font-bold">{details.device?.firmware || '—'}</span></div>
                   <div className="text-[#4A4A68]">Serial: <span className="text-[#1A1A2E] font-bold">{details.device?.serial || '—'}</span></div>
-                  <div className="md:col-span-2 text-[#4A4A68]">LED: {details.controls?.led?.note}</div>
-                  <div className="md:col-span-2 text-[#4A4A68]">Replay: {details.controls?.recordingPlayback?.note}</div>
+                  <div className="text-[#4A4A68]">LED: {details.controls?.led?.note}</div>
+                  <div className="text-[#4A4A68]">Replay: {details.controls?.recordingPlayback?.note}</div>
                 </div>
               )}
             </div>
           )}
-        </div>
-        <div className="order-1 md:order-2">
-          <div className="bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-black font-title text-[#1A1A2E] flex items-center gap-2"><Gamepad2 className="w-4 h-4 text-[#FF5A36]" /> PTZ</div>
-              <div className="text-[10px] font-mono font-bold text-[#4A4A68]">{ptzSpeed.toFixed(1)}x</div>
-            </div>
-            <div className="grid grid-cols-3 gap-1.5 w-[156px] mx-auto select-none touch-none">
-              <div />
-              <button type="button" onPointerDown={(e)=>{e.preventDefault(); void doPtz('up');}} onPointerUp={()=>void doPtz('stop')} onPointerLeave={()=>void doPtz('stop')} onPointerCancel={()=>void doPtz('stop')} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold">↑</button>
-              <div />
-              <button type="button" onPointerDown={(e)=>{e.preventDefault(); void doPtz('left');}} onPointerUp={()=>void doPtz('stop')} onPointerLeave={()=>void doPtz('stop')} onPointerCancel={()=>void doPtz('stop')} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold">←</button>
-              <button type="button" onClick={()=>void doPtz('stop')} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-[#FEE4E2] shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold text-[#B42318]">■</button>
-              <button type="button" onPointerDown={(e)=>{e.preventDefault(); void doPtz('right');}} onPointerUp={()=>void doPtz('stop')} onPointerLeave={()=>void doPtz('stop')} onPointerCancel={()=>void doPtz('stop')} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold">→</button>
-              <div />
-              <button type="button" onPointerDown={(e)=>{e.preventDefault(); void doPtz('down');}} onPointerUp={()=>void doPtz('stop')} onPointerLeave={()=>void doPtz('stop')} onPointerCancel={()=>void doPtz('stop')} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold">↓</button>
-              <div />
-            </div>
-            <input type="range" min="0.2" max="1" step="0.1" value={ptzSpeed} onChange={(e)=>setPtzSpeed(Number(e.target.value))} className="w-full mt-2 accent-[#FF5A36]" />
-            <div className="text-[10px] text-[#4A4A68] text-center mt-1">Segure direção; solte para parar.</div>
-          </div>
-        </div>
+        </aside>
       </div>
-
-      {(playerError || cam.error) && (
-        <div className="px-4 pb-4">
-          <div className="text-xs text-[#B54708] bg-[#FEF0C7] border-2 border-[#1A1A2E] rounded-lg p-3 flex gap-2 items-start shadow-[2px_2px_0px_#1A1A2E]">
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-[#B54708]" />
-            <div>
-              <div className="font-bold">Aviso</div>
-              <div className="mt-0.5 font-mono text-[11px]">{playerError || cam.error}</div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -635,6 +662,7 @@ export const CamerasTab: React.FC = () => {
   const [showAdd, setShowAdd] = useState(false);
   const [addBusy, setAddBusy] = useState(false);
   const [addMsg, setAddMsg] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [form, setForm] = useState({ name:'', ip:'', username:'admin', password:'', brand:'generic', rtspPort:'554', onvifPort:'5000', mainStream:'/onvif1', subStream:'/onvif2', model:'' });
 
   const refresh = useCallback(async () => {
@@ -669,11 +697,11 @@ export const CamerasTab: React.FC = () => {
   };
 
   const removeCamera = async (id: string) => {
-    if (!confirm(`Remover câmera ${id}?`)) return;
     try {
       const res = await fetch(`/api/cameras/${encodeURIComponent(id)}/config`, { method:'DELETE', headers:getAuthHeaders() });
       const data = await res.json().catch(()=>null);
       if (!res.ok || data?.ok === false) throw new Error(data?.error || `HTTP ${res.status}`);
+      setConfirmDeleteId(null);
       await refresh();
     } catch (e:any) { setError(e?.message || 'Falha ao remover câmera'); }
   };
@@ -745,6 +773,13 @@ export const CamerasTab: React.FC = () => {
         </div>
       )}
 
+      {addMsg && !showAdd && (
+        <div className="p-3 rounded-xl bg-[#D1FADF] border-2 border-[#1A1A2E] text-[#027A48] text-xs font-mono font-bold flex items-center justify-between gap-3 shadow-[3px_3px_0px_#1A1A2E]">
+          <span>{addMsg}</span>
+          <button type="button" onClick={() => setAddMsg(null)} className="px-2 py-0.5 rounded bg-white border border-[#1A1A2E] text-[#1A1A2E] cursor-pointer">Fechar</button>
+        </div>
+      )}
+
       {/* Erro do Serviço de Câmera */}
       {error && (
         <div className="bg-[#FEE4E2] border-2 border-[#1A1A2E] text-[#B42318] rounded-xl p-4 text-sm flex items-start gap-2.5 shadow-[4px_4px_0px_#1A1A2E]">
@@ -773,10 +808,20 @@ export const CamerasTab: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 gap-5">
           {cameras.map((cam) => (
             <div key={cam.id} className="space-y-2">
-              <div className="flex justify-end"><button type="button" onClick={()=>removeCamera(cam.id)} className="text-[11px] font-mono px-2 py-1 rounded border border-[#1A1A2E] bg-white hover:bg-[#FEE4E2] cursor-pointer">Remover</button></div>
+              <div className="flex justify-end items-center gap-2">
+                {confirmDeleteId === cam.id ? (
+                  <>
+                    <span className="text-[11px] font-mono font-bold text-[#B42318]">Confirmar remoção?</span>
+                    <button type="button" onClick={() => removeCamera(cam.id)} className="text-[11px] font-mono font-bold px-2.5 py-1 rounded border-2 border-[#1A1A2E] bg-[#F04438] text-white cursor-pointer">Sim, remover</button>
+                    <button type="button" onClick={() => setConfirmDeleteId(null)} className="text-[11px] font-mono font-bold px-2.5 py-1 rounded border-2 border-[#1A1A2E] bg-white text-[#1A1A2E] cursor-pointer">Cancelar</button>
+                  </>
+                ) : (
+                  <button type="button" onClick={() => setConfirmDeleteId(cam.id)} className="text-[11px] font-mono px-2.5 py-1 rounded border-2 border-[#1A1A2E] bg-white hover:bg-[#FEE4E2] cursor-pointer">Remover</button>
+                )}
+              </div>
               <CameraCard
                 cam={cam}
                 onRefresh={refresh}

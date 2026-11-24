@@ -74,7 +74,7 @@ export const FilesTab: React.FC = () => {
   const [createError, setCreateError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const readSeqRef = useRef<number>(0);
   const previewUrlRef = useRef<string | null>(null);
 
   const clearPreviewUrl = () => {
@@ -130,6 +130,7 @@ export const FilesTab: React.FC = () => {
   };
 
   const handleReadFile = async (item: FileItem) => {
+    const seq = ++readSeqRef.current;
     setSelectedFile(item);
     setReadingFile(true);
     setFileError(null);
@@ -144,6 +145,7 @@ export const FilesTab: React.FC = () => {
       if (item.typeCategory === 'image') {
         try {
           const { blob, mimeType } = await fetchFileRaw(item.path);
+          if (readSeqRef.current !== seq) return;
           const url = URL.createObjectURL(blob);
           previewUrlRef.current = url;
           setFileContent({
@@ -160,17 +162,20 @@ export const FilesTab: React.FC = () => {
           });
           return;
         } catch {
+          if (readSeqRef.current !== seq) return;
           // fallback para leitura padrão (base64/texto) se raw falhar
         }
       }
 
       const contentRes = await fetchFileContent(item.path);
+      if (readSeqRef.current !== seq) return;
       if (contentRes.dataUrl && contentRes.dataUrl.startsWith('blob:')) {
         previewUrlRef.current = contentRes.dataUrl;
       }
       setFileContent(contentRes);
       setEditedText(contentRes.content || '');
     } catch (err: any) {
+      if (readSeqRef.current !== seq) return;
       if (err.message && (err.message.includes('diretório') || err.message.includes('pasta'))) {
         setSelectedFile(null);
         loadFolder(item.path);
@@ -178,7 +183,9 @@ export const FilesTab: React.FC = () => {
       }
       setFileError(err.message || 'Não foi possível ler o arquivo.');
     } finally {
-      setReadingFile(false);
+      if (readSeqRef.current === seq) {
+        setReadingFile(false);
+      }
     }
   };
 

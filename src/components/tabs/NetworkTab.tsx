@@ -286,12 +286,14 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
     if (macsToResolve.length === 0) return;
 
     let isCancelled = false;
+    const seenOuis = new Set<string>();
     const processQueue = async () => {
       for (const mac of macsToResolve) {
         if (isCancelled) break;
         const cleanMac = mac.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
         const oui = cleanMac.slice(0, 6);
-        if (vendorMap[oui]) continue;
+        if (!oui || seenOuis.has(oui) || vendorMap[oui]) continue;
+        seenOuis.add(oui);
 
         try {
           const res = await lookupMacVendor(mac);
@@ -325,6 +327,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
             }));
           }
         } catch {
+          if (isCancelled) break;
           // Erro ou offline
           setVendorMap(prev => ({
             ...prev,
@@ -670,7 +673,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                       {iface.status}
                     </span>
                     <span className="text-xs text-[#4A4A68] font-mono font-semibold">
-                      Link: {iface.speed_mbps ? `${iface.speed_mbps} Mbps` : '1000 Mbps'}
+                      Link: {iface.speed_mbps && iface.speed_mbps > 0 ? `${iface.speed_mbps} Mbps` : (/^wl/i.test(iface.nome) ? 'Wi-Fi' : 'N/D')}
                     </span>
                   </div>
 

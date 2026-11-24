@@ -42,6 +42,131 @@ function parseWpaStatus(out: string): Record<string, string> {
   return obj;
 }
 
+function isWirelessIface(iface: string): boolean {
+  if (!iface) return false;
+  if (/^wl/i.test(iface)) return true;
+  try {
+    return fs.existsSync(`/sys/class/net/${iface}/wireless`) || fs.existsSync(`/sys/class/net/${iface}/phy80211`);
+  } catch {
+    return false;
+  }
+}
+
+function readEthSpeedMbps(iface: string): number | null {
+  try {
+    const raw = fs.readFileSync(`/sys/class/net/${iface}/speed`, 'utf-8').trim();
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {}
+  return null;
+}
+
+function readWifiSignalQuick(iface: string): { signalDbm: number | null; signalPercent: number | null; signalQualityLabel: string | null } {
+  let linkQuality: number | null = null;
+  let signalDbm: number | null = null;
+  try {
+    const w = fs.readFileSync('/proc/net/wireless', 'utf-8');
+    const line = w.split('\n').find(l => l.includes(iface + ':'));
+    if (line) {
+      const after = line.split(':').slice(1).join(':').trim();
+      const parts = after.split(/\s+/).map(p => p.replace(/\.$/, ''));
+      const link = Number(parts[1]);
+      const level = Number(parts[2]);
+      if (Number.isFinite(link)) linkQuality = link;
+      if (Number.isFinite(level) && level < 0) signalDbm = level;
+    }
+  } catch {}
+
+  if (signalDbm == null) {
+    const poll = safeExec(`wpa_cli -i ${iface} signal_poll 2>/dev/null`, 800);
+    if (poll) {
+      const st = parseWpaStatus(poll);
+      const rssi = Number(st.RSSI);
+      if (Number.isFinite(rssi) && rssi < 0) signalDbm = rssi;
+    }
+  }
+
+  const signalPercent = signalDbm != null
+    ? Math.max(0, Math.min(100, 2 * (signalDbm + 100)))
+    : (linkQuality != null ? Math.max(0, Math.min(100, Math.round(linkQuality <= 70 ? (linkQuality / 70) * 100 : linkQuality))) : null);
+
+  return {
+    signalDbm,
+    signalPercent,
+    signalQualityLabel: signalPercent != null ? signalQuality(signalPercent) : null
+  };
+}
+
+export function getFastConnectivityStatus(preferredIface?: string): {
+  connection_type: 'wifi' | 'ethernet' | 'unknown';
+  interface: string;
+  link_speed_mbps: number | null;
+  wifi_signal_dbm: number | null;
+  wifi_signal_percent: number | null;
+  wifi_signal_quality: string | null;
+} {
+  const iface = (preferredIface || '').trim();
+  if (iface && iface !== 'lo') {
+    if (isWirelessIface(iface)) {
+      const sig = readWifiSignalQuick(iface);
+      return {
+        connection_type: 'wifi',
+        interface: iface,
+        link_speed_mbps: null,
+        wifi_signal_dbm: sig.signalDbm,
+        wifi_signal_percent: sig.signalPercent,
+        wifi_signal_quality: sig.signalQualityLabel
+      };
+    }
+    return {
+      connection_type: 'ethernet',
+      interface: iface,
+      link_speed_mbps: readEthSpeedMbps(iface),
+      wifi_signal_dbm: null,
+      wifi_signal_percent: null,
+      wifi_signal_quality: null
+    };
+  }
+
+  // Fallback inspection if preferredIface is empty or 'lo'
+  try {
+    const entries = fs.readdirSync('/sys/class/net').filter(n => n !== 'lo' && !/^(docker|veth|br-|virbr|tun|wg)/i.test(n));
+    for (const candidate of entries) {
+      let oper = '';
+      try { oper = fs.readFileSync(`/sys/class/net/${candidate}/operstate`, 'utf-8').trim().toLowerCase(); } catch {}
+      if (oper !== 'up') continue;
+      if (isWirelessIface(candidate)) {
+        const sig = readWifiSignalQuick(candidate);
+        return {
+          connection_type: 'wifi',
+          interface: candidate,
+          link_speed_mbps: null,
+          wifi_signal_dbm: sig.signalDbm,
+          wifi_signal_percent: sig.signalPercent,
+          wifi_signal_quality: sig.signalQualityLabel
+        };
+      }
+      return {
+        connection_type: 'ethernet',
+        interface: candidate,
+        link_speed_mbps: readEthSpeedMbps(candidate),
+        wifi_signal_dbm: null,
+        wifi_signal_percent: null,
+        wifi_signal_quality: null
+      };
+    }
+  } catch {}
+
+  return {
+    connection_type: 'unknown',
+    interface: iface || '—',
+    link_speed_mbps: null,
+    wifi_signal_dbm: null,
+    wifi_signal_percent: null,
+    wifi_signal_quality: null
+  };
+}
+
 export function getWifiInfo() {
   const iface = 'wlo1';
   const eth = 'enp1s0';

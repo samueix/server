@@ -623,8 +623,7 @@ export default function App() {
     ? `${statusData.uptime.dias}d ${statusData.uptime.horas}h` 
     : '';
 
-  const isExplicitStandardUser = authSession?.role === 'user' && (authSession?.user || '').trim().toLowerCase() === 'user';
-  const currentUserRole: 'admin' | 'user' = isExplicitStandardUser ? 'user' : 'admin';
+  const currentUserRole: 'admin' | 'user' = authSession?.role === 'user' ? 'user' : 'admin';
 
   // Se não houver sessão ativa autenticada, exibe a tela de login
   if (!authSession || !authSession.authenticated) {

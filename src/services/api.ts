@@ -536,7 +536,7 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
       mac,
       gateway,
       mascara: netmask,
-      speed_mbps: item.speed_mbps || (isUp ? 1000 : 0),
+      speed_mbps: Number(item.speed_mbps ?? 0),
       mtu: item.mtu || 1500,
       status,
       bytes_enviados,

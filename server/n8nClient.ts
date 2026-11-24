@@ -193,7 +193,7 @@ export async function toggleN8nWorkflow(workflowId: string, active: boolean): Pr
 
   try {
     const action = active ? 'activate' : 'deactivate';
-    const res = await fetch(`${baseUrl}/api/v1/workflows/${workflowId}/${action}`, {
+    const res = await fetch(`${baseUrl}/api/v1/workflows/${encodeURIComponent(workflowId)}/${action}`, {
       method: 'POST',
       headers: {
         'Accept': 'application/json',

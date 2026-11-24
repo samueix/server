@@ -21,9 +21,9 @@ export const SecurityUnlockModal: React.FC = () => {
     }
   }, [isModalOpen]);
 
-  if (!isModalOpen) return null;
-
   const [loading, setLoading] = useState<boolean>(false);
+
+  if (!isModalOpen) return null;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();

@@ -165,6 +165,7 @@ export async function clearAdGuardHistory(): Promise<{ success: boolean; message
 }
 
 export async function fetchAdGuardStatus() {
+  const { url: activeUrl } = getActiveAdGuardCredentials();
   const result = await makeAdGuardRequest('/control/status');
   if (result.ok && result.data) {
     return {
@@ -174,7 +175,7 @@ export async function fetchAdGuardStatus() {
       protection_enabled: result.data.protection_enabled ?? true,
       version: result.data.version || 'v0.107.x',
       language: result.data.language || 'pt-br',
-      url: currentConfig.url
+      url: activeUrl
     };
   }
 
@@ -185,7 +186,7 @@ export async function fetchAdGuardStatus() {
     protection_enabled: false,
     version: 'Desconectado',
     language: 'pt-br',
-    url: currentConfig.url,
+    url: activeUrl,
     error: 'AdGuard Home offline ou inacessível em :8081'
   };
 }
@@ -262,7 +263,7 @@ export async function fetchAdGuardQueryLog(limit: number = 30) {
   const result = await makeAdGuardRequest(`/control/querylog?limit=${limit}`);
   if (result.ok && result.data && Array.isArray(result.data.data)) {
     lastCapturedQueryLog = result.data.data.map((item: any) => {
-      const isBlocked = item.reason && item.reason !== 'NotFilteredNotFound';
+      const isBlocked = String(item.reason || '').startsWith('Filtered');
       return {
         domain: item.question?.name || item.domain || 'desconhecido',
         client: item.client || '--',

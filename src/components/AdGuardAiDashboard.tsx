@@ -526,7 +526,7 @@ export const AdGuardAiDashboard: React.FC = () => {
           </div>
           <span className="text-xs text-[#00A6FB] mt-1 flex items-center gap-1 font-mono font-bold">
             <Activity className="w-3.5 h-3.5 text-[#00A6FB]" />
-            {stats?.avg_processing_time ? `${(stats.avg_processing_time * 1000).toFixed(1)}ms` : '118.6ms'}
+            {typeof stats?.avg_processing_time === 'number' && stats.avg_processing_time > 0 ? `${(stats.avg_processing_time * 1000).toFixed(1)}ms` : '--'}
           </span>
         </div>
 
@@ -620,37 +620,40 @@ export const AdGuardAiDashboard: React.FC = () => {
           </div>
 
           {/* SVG Visual Bars */}
-          <div className="h-40 flex items-end gap-1.5 pt-4 pb-1 px-2 border-b-2 border-[#1A1A2E] overflow-x-auto bg-[#FFF7E8]/50 rounded-t-lg">
-            {(stats?.dns_queries && stats.dns_queries.length > 0 
-              ? stats.dns_queries 
-              : [48, 18, 10, 11, 1, 1, 14, 9, 23, 0, 127, 81, 10, 222, 177, 83, 135, 124, 34, 64, 34, 38, 116, 44]
-            ).map((val, idx) => {
-              const blockedVal = (stats?.blocked_filtering?.[idx] ?? 0);
-              const maxVal = Math.max(...(stats?.dns_queries || [222]), 50);
-              const heightPct = Math.round((val / maxVal) * 100);
-              const blockedHeightPct = Math.round((blockedVal / maxVal) * 100);
+          {stats?.dns_queries && stats.dns_queries.length > 0 ? (
+            <div className="h-40 flex items-end gap-1.5 pt-4 pb-1 px-2 border-b-2 border-[#1A1A2E] overflow-x-auto bg-[#FFF7E8]/50 rounded-t-lg">
+              {stats.dns_queries.map((val, idx) => {
+                const blockedVal = (stats?.blocked_filtering?.[idx] ?? 0);
+                const maxVal = Math.max(...stats.dns_queries, 1);
+                const heightPct = Math.round((val / maxVal) * 100);
+                const blockedHeightPct = Math.round((blockedVal / maxVal) * 100);
 
-              return (
-                <div key={idx} className="flex-1 min-w-[10px] flex flex-col items-center gap-1 h-full justify-end group relative">
-                  <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 px-2 py-0.5 rounded-md bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-[10px] font-mono font-bold text-[#1A1A2E] whitespace-nowrap z-10 pointer-events-none tabular-nums">
-                    {idx + 1}h: {val} ({blockedVal} bloq)
-                  </div>
+                return (
+                  <div key={idx} className="flex-1 min-w-[10px] flex flex-col items-center gap-1 h-full justify-end group relative">
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity absolute -top-8 px-2 py-0.5 rounded-md bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-[10px] font-mono font-bold text-[#1A1A2E] whitespace-nowrap z-10 pointer-events-none tabular-nums">
+                      {idx + 1}h: {val} ({blockedVal} bloq)
+                    </div>
 
-                  <div className="w-full flex items-end gap-0.5 h-full">
-                    <div 
-                      className="w-1/2 rounded-t-sm bg-[#00A6FB]/50 hover:bg-[#00A6FB] transition-all"
-                      style={{ height: `${Math.max(heightPct, 6)}%` }}
-                    />
-                    <div 
-                      className="w-1/2 rounded-t-sm bg-[#F04438]/70 hover:bg-[#F04438] transition-all"
-                      style={{ height: `${Math.max(blockedHeightPct, 3)}%` }}
-                    />
+                    <div className="w-full flex items-end gap-0.5 h-full">
+                      <div 
+                        className="w-1/2 rounded-t-sm bg-[#00A6FB]/50 hover:bg-[#00A6FB] transition-all"
+                        style={{ height: `${val > 0 ? Math.max(heightPct, 6) : 0}%` }}
+                      />
+                      <div 
+                        className="w-1/2 rounded-t-sm bg-[#F04438]/70 hover:bg-[#F04438] transition-all"
+                        style={{ height: `${blockedVal > 0 ? Math.max(blockedHeightPct, 3) : 0}%` }}
+                      />
+                    </div>
+                    <span className="text-[9px] font-mono font-bold text-[#4A4A68]">{idx + 1}h</span>
                   </div>
-                  <span className="text-[9px] font-mono font-bold text-[#4A4A68]">{idx + 1}h</span>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="h-40 flex items-center justify-center border-b-2 border-[#1A1A2E] bg-[#FFF7E8]/50 rounded-t-lg text-xs font-mono font-bold text-[#4A4A68]">
+              Sem série horária do AdGuard disponível no momento
+            </div>
+          )}
         </div>
 
         {/* Category Breakdown & Top Clients */}
