@@ -19,7 +19,8 @@ import {
   ShieldAlert,
   Key,
   Bot,
-  Monitor
+  Monitor,
+  Camera
 } from 'lucide-react';
 import { NavigationTab, ConnectionStatus } from '../types';
 
@@ -52,6 +53,7 @@ const NAV_ITEMS: NavItemConfig[] = [
   { id: 'ping', label: 'Ping / Latência', icon: Radio },
   { id: 'opencode', label: 'Lux e Opencode', icon: Bot, adminOnly: true },
   { id: 'browser', label: 'Navegador Remoto', icon: Monitor, adminOnly: true },
+  { id: 'cameras', label: 'Câmeras', icon: Camera },
   { id: 'files', label: 'Arquivos', icon: Folder, adminOnly: true },
   { id: 'security', label: 'Segurança & Ataques', icon: ShieldAlert, adminOnly: true },
   { id: 'credentials', label: 'Credenciais & APIs', icon: Key, adminOnly: true },

@@ -14,7 +14,10 @@ import {
   Keyboard,
   MousePointer2,
   ShieldAlert,
-  Loader2
+  Loader2,
+  UserRound,
+  Trash2,
+  Power
 } from 'lucide-react';
 import { getStoredAuth } from '../../services/authService';
 import {
@@ -33,7 +36,8 @@ const EMPTY_STATE: BrowserState = {
   clients: 0,
   paused: false,
   fps: 0,
-  error: null
+  error: null,
+  profilePersistent: true
 };
 
 function statusLabel(state: BrowserState): string {
@@ -329,6 +333,47 @@ export const RemoteBrowserTab: React.FC = () => {
     }
   };
 
+  const handleResetProfile = async () => {
+    if (!window.confirm('Limpar o perfil do navegador? Isso remove cookies, logins salvos e sessões.')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await browserApi.resetProfile();
+      applyState(next);
+      if (next.status === 'running' || next.status === 'paused') {
+        await connectSocket();
+      } else {
+        closeSocket();
+      }
+      await loadHistory();
+    } catch (err: any) {
+      setError(err?.message || 'Falha ao limpar o perfil do navegador.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleForceStop = async () => {
+    if (!window.confirm('Desligar tudo do navegador remoto? Isso encerra o Chromium e libera recursos.')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      closeSocket();
+      const next = await browserApi.forceStop();
+      applyState(next);
+      if (frameUrlRef.current) {
+        URL.revokeObjectURL(frameUrlRef.current);
+        frameUrlRef.current = null;
+      }
+      if (imgRef.current) imgRef.current.removeAttribute('src');
+      await loadHistory();
+    } catch (err: any) {
+      setError(err?.message || 'Falha ao desligar o navegador.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const send = (payload: Record<string, unknown>) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -455,6 +500,9 @@ export const RemoteBrowserTab: React.FC = () => {
             <span>FPS: {state.fps}</span>
             <span>Clientes: {state.clients}</span>
             <span>{state.viewport.width}x{state.viewport.height}</span>
+            <span className={`px-1.5 py-0.5 rounded border border-[#1A1A2E] font-bold ${state.profilePersistent ? 'bg-[#D1FADF] text-[#065F46]' : 'bg-[#FEE4E2] text-[#B42318]'}`}>
+              {state.profilePersistent ? 'Perfil persistente' : 'Perfil temporário'}
+            </span>
           </div>
         </div>
 
@@ -532,6 +580,24 @@ export const RemoteBrowserTab: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-white text-[#1A1A2E] text-xs font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]"
           >
             <RefreshCw className="w-4 h-4" /> Atualizar
+          </button>
+          <button
+            type="button"
+            onClick={handleResetProfile}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-[#FFF7E8] text-[#1A1A2E] text-xs font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-40"
+            title="Limpa cookies, logins e sessões salvas do navegador"
+          >
+            <Trash2 className="w-4 h-4" /> Limpar perfil
+          </button>
+          <button
+            type="button"
+            onClick={handleForceStop}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-[#1A1A2E] text-white text-xs font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-40"
+            title="Encerra o Chromium e libera recursos do servidor"
+          >
+            <Power className="w-4 h-4" /> Desligar tudo
           </button>
         </div>
 
@@ -617,9 +683,41 @@ export const RemoteBrowserTab: React.FC = () => {
           </div>
         </div>
 
-        <div className="p-3 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-1 h-fit">
-          <div className="text-[11px] font-bold font-title text-[#1A1A2E]">Sessão ativa</div>
-          <p className="text-[10px] font-mono text-[#4A4A68] break-all">{state.title || state.url || 'Sem página carregada'}</p>
+        <div className="space-y-3">
+          <div className="p-3 rounded-xl bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2">
+            <div className="flex items-center gap-2 text-[11px] font-bold font-title text-[#1A1A2E]">
+              <UserRound className="w-4 h-4 text-[#FF5A36]" /> Conta e perfil
+            </div>
+            <p className="text-[10px] font-mono text-[#4A4A68] leading-relaxed">
+              {state.profilePersistent
+                ? 'O perfil do navegador é persistente: logins, cookies e sessões ficam salvos entre acessos.'
+                : 'O perfil é temporário e será limpo ao encerrar a sessão do navegador.'}
+            </p>
+            <p className="text-[10px] font-mono text-[#1A1A2E] break-all">
+              <span className="font-bold">Página:</span> {state.title || state.url || 'Sem página carregada'}
+            </p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] space-y-2">
+            <div className="flex items-center gap-2 text-[11px] font-bold font-title text-[#1A1A2E]">
+              <History className="w-4 h-4 text-[#FF5A36]" /> Histórico recente
+            </div>
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              {history.length === 0 ? (
+                <p className="text-[10px] font-mono text-[#4A4A68]">Sem ações registradas.</p>
+              ) : (
+                history.slice(0, 12).map((entry, idx) => (
+                  <div key={`${entry.ts}-${idx}`} className="text-[10px] font-mono text-[#4A4A68] border-b border-[#1A1A2E]/10 pb-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-bold text-[#1A1A2E]">{entry.type}</span>
+                      <span>{formatTime(entry.ts)}</span>
+                    </div>
+                    <div className="break-all">{entry.detail}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

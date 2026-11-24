@@ -13,15 +13,15 @@ def get_config_credentials():
             with open(config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 adg = data.get("adguard", {})
-                url = (adg.get("url") or "http://192.168.100.23:8081").rstrip("/")
-                user = adg.get("username") or "samuel"
-                pwd = adg.get("password") or "REDACTED_PASSWORD"
+                url = (adg.get("url") or os.getenv("ADGUARD_URL") or "http://127.0.0.1:8081").rstrip("/")
+                user = adg.get("username") or os.getenv("ADGUARD_USERNAME") or ""
+                pwd = adg.get("password") or os.getenv("ADGUARD_PASSWORD") or ""
                 return url, user, pwd
         except Exception:
             pass
-    url = os.getenv("ADGUARD_URL", "http://192.168.100.23:8081").rstrip("/")
-    user = os.getenv("ADGUARD_USERNAME", "samuel")
-    pwd = os.getenv("ADGUARD_PASSWORD", "REDACTED_PASSWORD")
+    url = (os.getenv("ADGUARD_URL") or "http://127.0.0.1:8081").rstrip("/")
+    user = os.getenv("ADGUARD_USERNAME") or ""
+    pwd = os.getenv("ADGUARD_PASSWORD") or ""
     return url, user, pwd
 
 # Dados em memória mantidos apenas se recebidos via sync real

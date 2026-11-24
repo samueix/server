@@ -6,6 +6,7 @@ export type NavigationTab =
   | 'monitoring' 
   | 'opencode' 
   | 'browser'
+  | 'cameras'
   | 'files' 
   | 'security'
   | 'credentials'

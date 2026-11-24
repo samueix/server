@@ -225,10 +225,20 @@ export const LogsTab: React.FC = () => {
   }, [logsData]);
 
   // Copia logs para área de transferência
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const handleCopyLogs = () => {
     if (!filteredLogs.length) return;
     const text = filteredLogs.map(l => l.raw).join('\n');
-    navigator.clipboard.writeText(text);
+    void copyTextSafe(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -661,7 +671,7 @@ export const LogsTab: React.FC = () => {
               {isStreaming ? `Tempo real (${streamInterval / 1000}s)` : 'Pausado'}
             </span>
             <span>•</span>
-            <span className="text-[#1A1A2E]">{logsData?.hostname ? `${logsData.hostname}` : 'Servidor Linux'}</span>
+            <span className="text-[#1A1A2E]">Servidor Linux</span>
           </div>
         </div>
       </div>

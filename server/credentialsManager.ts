@@ -110,11 +110,9 @@ export function getServerConfig(): ServerConfigData {
     console.warn('[credentialsManager] Erro ao ler server-config.json, usando padrão:', err);
   }
 
-  // Interpolação prioritária: variáveis de ambiente sobrepõem senhas no disco com fallback seguro
-  const DEFAULT_ADMIN_PASS = 'adminx1';
-  const DEFAULT_USER_PASS = '12345678';
-  const adminPass = fileData.auth?.adminPass || process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASS;
-  const userPass = fileData.auth?.userPass || process.env.USER_PASSWORD || DEFAULT_USER_PASS;
+  // Interpolação prioritária: variáveis de ambiente sobrepõem senhas no disco; sem fallback inseguro
+  const adminPass = fileData.auth?.adminPass || process.env.ADMIN_PASSWORD || '';
+  const userPass = fileData.auth?.userPass || process.env.USER_PASSWORD || '';
   const adguardPass = fileData.adguard?.password || process.env.ADGUARD_PASSWORD || '';
   const adguardUrl = fileData.adguard?.url || process.env.ADGUARD_URL || DEFAULT_CONFIG.adguard.url;
   const adguardUser = fileData.adguard?.username || process.env.ADGUARD_USERNAME || DEFAULT_CONFIG.adguard.username;

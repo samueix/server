@@ -7,9 +7,9 @@ export interface AdGuardConfig {
 }
 
 let currentConfig: AdGuardConfig = {
-  url: 'http://127.0.0.1:8081',
-  username: 'samuel',
-  password: 'REDACTED_PASSWORD'
+  url: process.env.ADGUARD_URL || 'http://127.0.0.1:8081',
+  username: process.env.ADGUARD_USERNAME || '',
+  password: process.env.ADGUARD_PASSWORD || ''
 };
 
 // Telemetria AdGuard Home: inicializada como nula para garantir ZERO dados fake
@@ -35,9 +35,9 @@ export function getActiveAdGuardCredentials() {
   const fileConfig = getServerConfig().adguard;
   const url = (fileConfig?.url || currentConfig.url || 'http://127.0.0.1:8081').replace(/\/$/, '');
   const username = fileConfig?.username || currentConfig.username || 'samuel';
-  const password = fileConfig?.password !== undefined && fileConfig.password !== '' 
-    ? fileConfig.password 
-    : (currentConfig.password || 'REDACTED_PASSWORD');
+  const password = fileConfig?.password !== undefined && fileConfig.password !== ''
+    ? fileConfig.password
+    : (currentConfig.password || process.env.ADGUARD_PASSWORD || '');
   return { url, username, password };
 }
 

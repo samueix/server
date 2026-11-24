@@ -192,6 +192,16 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
 
   const services = localServices.length > 0 ? localServices : initialServices;
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const handleCopyCommand = (serviceName: string, action: 'status' | 'restart', canonicalName?: string) => {
     // Mapeamento para o nome exato da unit systemd
     const unitMap: Record<string, string> = {
@@ -210,7 +220,7 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
     const targetUnit = canonicalName || unitMap[serviceName] || serviceName;
     const clean = targetUnit.endsWith('.service') ? targetUnit : `${targetUnit}.service`;
     const cmd = `sudo systemctl ${action} ${clean}`;
-    navigator.clipboard.writeText(cmd);
+    void copyTextSafe(cmd);
     setCopiedId(`${serviceName}-${action}`);
     setTimeout(() => setCopiedId(null), 2000);
   };

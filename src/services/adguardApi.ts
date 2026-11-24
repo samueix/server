@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { loadConfig, API } from '../config';
 import { apiFetch } from './api';
+import { getAuthHeaders } from './authService';
 
 /**
  * Snapshot vazio padronizado do AdGuard para quando o daemon estiver offline.
@@ -156,7 +157,7 @@ export function processAdGuardStats(raw: AdGuardStatsRaw, isRealtime: boolean = 
 export async function fetchAdGuardStats(targetUrl?: string): Promise<AdGuardProcessedStats> {
   // 1. Tenta primeiro via Reverse Proxy Nginx direto (/adguard-api/stats)
   try {
-    const res = await fetch(targetUrl || '/adguard-api/stats', { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(targetUrl || '/adguard-api/stats', { signal: AbortSignal.timeout(3000), headers: { ...getAuthHeaders() } });
     if (res.ok) {
       const raw = await res.json();
       if (raw && (raw.num_dns_queries !== undefined || raw.dns_queries)) {
@@ -169,7 +170,7 @@ export async function fetchAdGuardStats(targetUrl?: string): Promise<AdGuardProc
 
   // 2. Tenta através do proxy do backend Node.js (/api/adguard/stats)
   try {
-    const backendRes = await fetch('/api/adguard/stats', { signal: AbortSignal.timeout(3000) });
+    const backendRes = await fetch('/api/adguard/stats', { signal: AbortSignal.timeout(3000), headers: { ...getAuthHeaders() } });
     if (backendRes.ok) {
       const bData = await backendRes.json();
       if (bData && (bData.connected === true || Number(bData.num_dns_queries) >= 0)) {

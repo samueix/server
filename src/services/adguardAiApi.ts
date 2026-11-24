@@ -1,5 +1,6 @@
 import { DomainAnalysisResult, AdGuardQueryItem } from '../types';
 import { adguardDirectClient } from './adguardDirectClient';
+import { getAuthHeaders } from './authService';
 
 export interface AdGuardStatusResponse {
   connected: boolean;
@@ -49,7 +50,7 @@ class AdguardAiService {
     }
 
     try {
-      const res = await fetch(`${this.getBaseUrl()}/api/adguard/status`);
+      const res = await fetch(`${this.getBaseUrl()}/api/adguard/status`, { headers: { ...getAuthHeaders() } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err: any) {
@@ -72,7 +73,7 @@ class AdguardAiService {
     }
 
     try {
-      const res = await fetch(`${this.getBaseUrl()}/api/adguard/stats`);
+      const res = await fetch(`${this.getBaseUrl()}/api/adguard/stats`, { headers: { ...getAuthHeaders() } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch {
@@ -82,7 +83,7 @@ class AdguardAiService {
 
   async getDomains(): Promise<DomainAnalysisResult[]> {
     try {
-      const res = await fetch(`${this.getBaseUrl()}/api/adguard/domains`);
+      const res = await fetch(`${this.getBaseUrl()}/api/adguard/domains`, { headers: { ...getAuthHeaders() } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const domains: DomainAnalysisResult[] = await res.json();
       
@@ -102,7 +103,7 @@ class AdguardAiService {
     }
 
     try {
-      const res = await fetch(`${this.getBaseUrl()}/api/adguard/querylog?limit=${limit}`);
+      const res = await fetch(`${this.getBaseUrl()}/api/adguard/querylog?limit=${limit}`, { headers: { ...getAuthHeaders() } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err: any) {
@@ -113,7 +114,7 @@ class AdguardAiService {
   async analyzeDomain(domain: string, force: boolean = false): Promise<{ cached: boolean; analysis: DomainAnalysisResult }> {
     const res = await fetch(`${this.getBaseUrl()}/api/adguard/analyze`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ domain, force })
     });
     if (!res.ok) {
@@ -129,7 +130,7 @@ class AdguardAiService {
   async analyzeBatch(domains?: string[], limit: number = 5): Promise<{ processedCount: number; results: DomainAnalysisResult[] }> {
     const res = await fetch(`${this.getBaseUrl()}/api/adguard/analyze-batch`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify({ domains, limit })
     });
     if (!res.ok) {
@@ -152,7 +153,7 @@ class AdguardAiService {
 
     const res = await fetch(`${this.getBaseUrl()}/api/adguard/config`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
       body: JSON.stringify(cfg)
     });
     return await res.json();

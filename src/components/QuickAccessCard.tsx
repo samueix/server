@@ -71,8 +71,18 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
 
   const isAdguardOnline = Boolean(adguardStatus?.online || adguardStats?.online);
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    void copyTextSafe(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };
@@ -171,7 +181,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
               <a
                 href={adguardUrl}
                 target="_blank"
-                rel="noopener noreferrer"
+                rel="noopener noreferrer nofollow"
                 className="p-1.5 rounded-md bg-[#FFF7E8] hover:bg-[#FFC857] border-2 border-[#1A1A2E] text-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] transition active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
                 title="Abrir AdGuard Home em nova aba"
               >
@@ -211,7 +221,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
                   <a
                     href={adguardUrl}
                     target="_blank"
-                    rel="noopener noreferrer"
+                    rel="noopener noreferrer nofollow"
                     className="text-[#00A6FB] font-bold hover:underline truncate"
                   >
                     {adguardUrl}
@@ -254,7 +264,7 @@ export const QuickAccessCard: React.FC<QuickAccessCardProps> = ({
             <a
               href={adguardUrl}
               target="_blank"
-              rel="noopener noreferrer"
+              rel="noopener noreferrer nofollow"
               className="py-2 px-3 rounded-lg bg-[#FF5A36] hover:bg-[#ff441b] text-white text-xs font-bold transition flex items-center justify-center gap-1.5 border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none"
             >
               <span>Abrir AdGuard</span>

@@ -36,6 +36,7 @@ export interface OpencodeSession {
   updatedAt: string;
   model: string;
   opencodeSessionId?: string;
+  source?: 'panel' | 'telegram' | 'api';
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalTokens: number;
@@ -91,6 +92,11 @@ function loadPersistedData() {
       const data = JSON.parse(raw);
       if (Array.isArray(data.sessions)) {
         for (const s of data.sessions) {
+          if (!s.source) {
+            const id = String(s.id || '');
+            const title = String(s.title || '');
+            s.source = (id.startsWith('tg_') || /telegram/i.test(title)) ? 'telegram' : 'panel';
+          }
           sessionsStore.set(s.id, s);
         }
       }
@@ -609,16 +615,21 @@ export function getOpencodeSession(id: string): { session: OpencodeSession | nul
   return { session, messages };
 }
 
-export function createOpencodeSession(title?: string, model?: string): OpencodeSession {
+export function createOpencodeSession(
+  title?: string,
+  model?: string,
+  source: 'panel' | 'telegram' | 'api' = 'panel'
+): OpencodeSession {
   const id = 'sess_' + crypto.randomUUID().slice(0, 8);
   const now = new Date().toISOString();
   const effectiveModel = sanitizeModel(model) || OPENCODE_MODEL;
   const newSession: OpencodeSession = {
     id,
-    title: title || 'Nova Sessão com Opencode',
+    title: title || (source === 'telegram' ? 'Sessão Telegram' : 'Nova Sessão com Opencode'),
     createdAt: now,
     updatedAt: now,
     model: effectiveModel,
+    source,
     totalPromptTokens: 0,
     totalCompletionTokens: 0,
     totalTokens: 0,
@@ -655,11 +666,14 @@ export function deleteOpencodeSession(id: string): boolean {
 export async function askOpencodeAgent(
   sessionId: string,
   userPrompt: string,
-  model?: string
+  model?: string,
+  source: 'panel' | 'telegram' | 'api' = 'panel'
 ): Promise<{ reply: OpencodeMessage; session: OpencodeSession; metrics: TokenQuotaMetrics }> {
   let session = sessionId ? sessionsStore.get(sessionId) : undefined;
   if (!session) {
-    session = createOpencodeSession(userPrompt.slice(0, 36) + '...', model);
+    session = createOpencodeSession(userPrompt.slice(0, 36) + '...', model, source);
+  } else if (!session.source) {
+    session.source = source;
   }
 
   const effectiveModel = sanitizeModel(model) || session.model || OPENCODE_MODEL;

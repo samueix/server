@@ -199,8 +199,18 @@ export const SecurityTab: React.FC = () => {
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const copyIp = (ip: string) => {
-    navigator.clipboard.writeText(ip);
+    void copyTextSafe(ip);
     setCopiedIp(ip);
     setTimeout(() => setCopiedIp(null), 2000);
   };
@@ -324,7 +334,7 @@ export const SecurityTab: React.FC = () => {
           </code>
           <button
             onClick={() => {
-              navigator.clipboard.writeText('sudo truncate -s 0 /var/log/auth.log && sudo truncate -s 0 /var/log/btmp && sudo systemctl restart ssh');
+              void copyTextSafe('sudo truncate -s 0 /var/log/auth.log && sudo truncate -s 0 /var/log/btmp && sudo systemctl restart ssh');
             }}
             className="px-3 py-1.5 bg-[#FF5A36] hover:bg-[#E04522] text-white text-xs font-mono font-bold rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-0.5 active:translate-y-0.5 active:shadow-none flex items-center justify-center gap-1.5 shrink-0"
           >

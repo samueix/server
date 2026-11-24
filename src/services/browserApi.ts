@@ -14,6 +14,7 @@ export interface BrowserState {
   paused: boolean;
   fps: number;
   error: string | null;
+  profilePersistent?: boolean;
 }
 
 export interface BrowserHistoryEntry {
@@ -111,5 +112,15 @@ export const browserApi = {
       throw new Error('Falha ao capturar o screenshot.');
     }
     return response.blob();
+  },
+
+  resetProfile: async (): Promise<BrowserState> => {
+    const data = await request<BrowserResponse>('/api/browser/reset-profile', { method: 'POST' });
+    return data.state;
+  },
+
+  forceStop: async (): Promise<BrowserState> => {
+    const data = await request<BrowserResponse>('/api/browser/force-stop', { method: 'POST' });
+    return data.state;
   }
 };

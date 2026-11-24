@@ -1,85 +1,53 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Clock, Activity } from 'lucide-react';
+import { getAuthHeaders } from '../services/authService';
 
+interface HistoryPoint { ts: number; deltaQueries: number; deltaBlocked: number; }
 interface DualQueryChartProps {
-  allowedData: number[];
-  blockedData: number[];
-  totalData?: number[];
   height?: number;
-  timeUnits?: string;
-  defaultTimeRange?: '24h' | '48h' | '7d' | 'by_day';
 }
 
-type RangeKey = '24h' | '48h' | '7d' | 'by_day';
+const MIN_MS = 60 * 1000;
+const MAX_WINDOW_MS = 7 * 24 * 3600 * 1000;
 
-export const DualQueryChart: React.FC<DualQueryChartProps> = ({
-  allowedData,
-  blockedData,
-  height = 140,
-  defaultTimeRange = '24h'
-}) => {
-  const [timeRange, setTimeRange] = useState<RangeKey>(defaultTimeRange);
+export const DualQueryChart: React.FC<DualQueryChartProps> = ({ height = 170 }) => {
+  const now0 = Date.now();
+  const [windowStart, setWindowStart] = useState<number>(now0 - MAX_WINDOW_MS);
+  const [windowEnd, setWindowEnd] = useState<number>(now0);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [drag, setDrag] = useState<null | { mode: 'start' | 'end' | 'pan'; originX: number; start0: number; end0: number }>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const sliderRef = useRef<HTMLDivElement | null>(null);
 
-  const rawLength = Math.max(allowedData.length, blockedData.length, 0);
-  const fullAllowed = useMemo(() => {
-    return Array.from({ length: rawLength }, (_, i) => {
-      const v = allowedData[i];
-      return v !== undefined && !isNaN(v) ? Math.max(0, v) : 0;
-    });
-  }, [allowedData, rawLength]);
-
-  const fullBlocked = useMemo(() => {
-    return Array.from({ length: rawLength }, (_, i) => {
-      const v = blockedData[i];
-      return v !== undefined && !isNaN(v) ? Math.max(0, v) : 0;
-    });
-  }, [blockedData, rawLength]);
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/adguard/history?from=${Math.floor(windowStart)}&to=${Math.floor(windowEnd)}`, { headers: { ...getAuthHeaders() } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (mounted && Array.isArray(data.points)) setHistory(data.points);
+      } catch {}
+    };
+    load();
+    const id = setInterval(load, 60000);
+    return () => { mounted = false; clearInterval(id); };
+  }, [windowStart, windowEnd]);
 
   const { normalizedAllowed, normalizedBlocked, length, bucketDates } = useMemo(() => {
-    // data is hourly, oldest -> newest; last element ~ current hour
-    const sliceLast = (arr: number[], n: number) => (n >= arr.length ? arr.slice() : arr.slice(arr.length - n));
-
-    if (timeRange === 'by_day') {
-      // aggregate into daily buckets (oldest->newest), up to 7 days
-      const totalHours = fullAllowed.length;
-      const days: number[][] = [];
-      const bDays: number[][] = [];
-      const dateBuckets: Date[] = [];
-      const now = new Date();
-      const dayCount = Math.max(1, Math.ceil(totalHours / 24));
-      const startIdx = Math.max(0, totalHours - dayCount * 24);
-      for (let d = 0; d < dayCount; d++) {
-        const sIdx = startIdx + d * 24;
-        const eIdx = Math.min(totalHours, sIdx + 24);
-        if (sIdx >= totalHours) break;
-        days.push(fullAllowed.slice(sIdx, eIdx));
-        bDays.push(fullBlocked.slice(sIdx, eIdx));
-        const hoursFromEnd = totalHours - eIdx; // how many hours after this bucket end to now
-        const bucketEnd = new Date(now.getTime() - hoursFromEnd * 3600 * 1000);
-        dateBuckets.push(bucketEnd);
-      }
-      const a = days.map(g => g.reduce((s, v) => s + v, 0));
-      const b = bDays.map(g => g.reduce((s, v) => s + v, 0));
-      // keep last 7 days
-      const trim = 7;
-      const aa = a.length > trim ? a.slice(a.length - trim) : a;
-      const bb = b.length > trim ? b.slice(b.length - trim) : b;
-      const dd = dateBuckets.length > trim ? dateBuckets.slice(dateBuckets.length - trim) : dateBuckets;
-      return { normalizedAllowed: aa, normalizedBlocked: bb, length: aa.length || 1, bucketDates: dd };
-    }
-
-    let n = 24;
-    if (timeRange === '48h') n = 48;
-    if (timeRange === '7d') n = 168;
-    const a = sliceLast(fullAllowed, n);
-    const b = sliceLast(fullBlocked, n);
-    const now = new Date();
-    const dates = a.map((_, i) => new Date(now.getTime() - (a.length - 1 - i) * 3600 * 1000));
+    const smooth = (arr: number[]) => arr.map((_, i) => {
+      const w = 2; let sum=0, c=0;
+      for (let j=Math.max(0,i-w); j<=Math.min(arr.length-1,i+w); j++){ sum+=arr[j]; c++; }
+      return c ? sum/c : arr[i];
+    });
+    const rawA = history.map(p => Math.max(0, Number(p.deltaQueries || 0) - Number(p.deltaBlocked || 0)));
+    const rawB = history.map(p => Math.max(0, Number(p.deltaBlocked || 0)));
+    const a = smooth(rawA);
+    const b = smooth(rawB);
+    const dates = history.map(p => new Date(Number(p.ts) || Date.now()));
     return { normalizedAllowed: a, normalizedBlocked: b, length: a.length || 1, bucketDates: dates };
-  }, [fullAllowed, fullBlocked, timeRange]);
+  }, [history]);
 
   const statsAllowed = useMemo(() => {
     const cur = normalizedAllowed[normalizedAllowed.length - 1] ?? 0;
@@ -101,24 +69,17 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
     const markers: { pct: number; label: string }[] = [];
     if (length <= 0) return markers;
     const steps = [0, 0.25, 0.5, 0.75, 1];
-    const fmtDay = (d: Date) => d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit' }).replace('.', '');
-    const fmtHour = (d: Date) => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const fmtDayHour = (d: Date) => d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + fmtHour(d);
-
+    const sameDay = new Date(windowStart).toDateString() === new Date(windowEnd).toDateString();
+    const fmt = (d: Date) => sameDay
+      ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     steps.forEach((pct) => {
       const idx = Math.min(length - 1, Math.max(0, Math.round(pct * (length - 1))));
       const d = bucketDates[idx];
-      if (!d) { markers.push({ pct, label: '' }); return; }
-      if (timeRange === 'by_day') {
-        markers.push({ pct, label: fmtDay(d) });
-      } else if (timeRange === '24h') {
-        markers.push({ pct, label: fmtHour(d) });
-      } else {
-        markers.push({ pct, label: fmtDayHour(d) });
-      }
+      markers.push({ pct, label: d ? fmt(d) : '' });
     });
     return markers;
-  }, [timeRange, length, bucketDates]);
+  }, [length, bucketDates, windowStart, windowEnd]);
 
   const { allowedPath, blockedPath, allowedCoords, blockedCoords, maxVal, width } = useMemo(() => {
     const svgWidth = 800;
@@ -146,23 +107,18 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
     const bCoords = toCoords(normalizedBlocked);
 
     const generateBezierPath = (coords: [number, number][]): string => {
-      if (coords.length <= 1) {
-        return coords.length === 1 ? `M 0 ${coords[0][1]} L ${svgWidth} ${coords[0][1]}` : '';
-      }
-      if (coords.length === 2) {
-        return `M ${coords[0][0].toFixed(1)} ${coords[0][1].toFixed(1)} L ${coords[1][0].toFixed(1)} ${coords[1][1].toFixed(1)}`;
-      }
+      if (coords.length <= 1) return coords.length === 1 ? `M 0 ${coords[0][1]} L ${svgWidth} ${coords[0][1]}` : '';
+      if (coords.length === 2) return `M ${coords[0][0].toFixed(1)} ${coords[0][1].toFixed(1)} L ${coords[1][0].toFixed(1)} ${coords[1][1].toFixed(1)}`;
       let path = `M ${coords[0][0].toFixed(1)} ${coords[0][1].toFixed(1)}`;
-      const tension = 0.22;
       for (let i = 0; i < coords.length - 1; i++) {
         const p0 = coords[Math.max(0, i - 1)];
         const p1 = coords[i];
         const p2 = coords[i + 1];
         const p3 = coords[Math.min(coords.length - 1, i + 2)];
-        const cp1x = p1[0] + (p2[0] - p0[0]) * tension;
-        const cp1y = p1[1] + (p2[1] - p0[1]) * tension;
-        const cp2x = p2[0] - (p3[0] - p1[0]) * tension;
-        const cp2y = p2[1] - (p3[1] - p1[1]) * tension;
+        const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+        const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+        const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+        const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
         path += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
       }
       return path;
@@ -185,29 +141,22 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
     const xRatio = Math.max(0, Math.min(1, relativeX / rect.width));
     const idx = Math.round(xRatio * (length - 1));
     setHoverIndex(idx);
-    setMousePos({ x: relativeX, y: e.clientY - rect.top });
   };
 
   const handleMouseLeave = () => {
     setHoverIndex(null);
-    setMousePos(null);
   };
 
-  const rangeLabel = timeRange === '24h' ? 'Últimas 24h' : timeRange === '48h' ? 'Últimas 48h' : timeRange === '7d' ? 'Últimos 7 dias (por hora)' : 'Por dia (últimos 7 dias)';
+  const fmtFull = (ts: number) => new Date(ts).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const rangeLabel = `${fmtFull(windowStart)} → ${fmtFull(windowEnd)} (1 min)`;
 
   const hoverTimeInfo = useMemo(() => {
     if (hoverIndex === null) return null;
     const d = bucketDates[hoverIndex];
     if (!d) return null;
-    if (timeRange === 'by_day') {
-      const day = d.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: '2-digit' });
-      return { hourFormatted: day, relativeLabel: hoverIndex === length - 1 ? 'Hoje/último dia' : '' };
-    }
     const hourFormatted = d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-    const hoursAgo = (length - 1) - hoverIndex;
-    const relativeLabel = hoursAgo === 0 ? 'Agora' : (timeRange === '24h' ? `Há ${hoursAgo}h` : `Há ${hoursAgo}h`);
-    return { hourFormatted, relativeLabel };
-  }, [hoverIndex, length, timeRange, bucketDates]);
+    return { hourFormatted, relativeLabel: '' };
+  }, [hoverIndex, bucketDates]);
 
   const hoverAllowed = hoverIndex !== null ? (normalizedAllowed[hoverIndex] ?? 0) : null;
   const hoverBlocked = hoverIndex !== null ? (normalizedBlocked[hoverIndex] ?? 0) : null;
@@ -215,19 +164,51 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
   const hoverBlockedPercent = hoverTotal && hoverTotal > 0 ? ((hoverBlocked! / hoverTotal) * 100).toFixed(1) : '0.0';
   const hoverXPercent = hoverIndex !== null ? (hoverIndex / Math.max(1, length - 1)) * 100 : 0;
 
-  const btn = (key: RangeKey, label: string) => (
-    <button
-      key={key}
-      onClick={() => setTimeRange(key)}
-      className={`px-2.5 py-0.5 rounded font-bold transition whitespace-nowrap ${
-        timeRange === key
-          ? 'bg-[#FF5A36] text-white shadow-[1px_1px_0px_#1A1A2E]'
-          : 'text-[#1A1A2E] hover:bg-white'
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const clampWindow = (sMs: number, eMs: number) => {
+    const now = Date.now();
+    let e = Math.min(now, eMs);
+    let s = Math.max(now - MAX_WINDOW_MS, sMs);
+    if (e - s < MIN_MS) {
+      if (eMs !== windowEnd) e = s + MIN_MS;
+      else s = e - MIN_MS;
+    }
+    if (e > now) { s -= e - now; e = now; }
+    if (s < now - MAX_WINDOW_MS) { e += (now - MAX_WINDOW_MS - s); s = now - MAX_WINDOW_MS; }
+    s = Math.max(now - MAX_WINDOW_MS, Math.min(s, e - MIN_MS));
+    e = Math.min(now, Math.max(e, s + MIN_MS));
+    return { s, e };
+  };
+
+  const onSliderPointerDown = (mode: 'start' | 'end' | 'pan') => (ev: React.PointerEvent<HTMLDivElement>) => {
+    ev.preventDefault();
+    (ev.currentTarget as HTMLElement).setPointerCapture?.(ev.pointerId);
+    setDrag({ mode, originX: ev.clientX, start0: windowStart, end0: windowEnd });
+  };
+
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (ev: PointerEvent) => {
+      const rect = sliderRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return;
+      const total = MAX_WINDOW_MS;
+      const dxMs = ((ev.clientX - drag.originX) / rect.width) * total;
+      let s = drag.start0; let e = drag.end0;
+      if (drag.mode === 'pan') { s = drag.start0 + dxMs; e = drag.end0 + dxMs; }
+      if (drag.mode === 'start') s = drag.start0 + dxMs;
+      if (drag.mode === 'end') e = drag.end0 + dxMs;
+      const c = clampWindow(s, e);
+      setWindowStart(c.s); setWindowEnd(c.e);
+    };
+    const onUp = () => setDrag(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+  }, [drag, windowStart, windowEnd]);
+
+  const nowTs = Date.now();
+  const sliderMin = nowTs - MAX_WINDOW_MS;
+  const leftPct = ((windowStart - sliderMin) / MAX_WINDOW_MS) * 100;
+  const rightPct = ((windowEnd - sliderMin) / MAX_WINDOW_MS) * 100;
 
   return (
     <div className="w-full flex flex-col font-sans select-none">
@@ -250,12 +231,6 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <div className="flex items-center bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-md p-0.5 text-[11px] font-mono shadow-[1.5px_1.5px_0px_#1A1A2E] flex-wrap">
-            {btn('24h', '24h')}
-            {btn('48h', '48h')}
-            {btn('7d', '7d/hora')}
-            {btn('by_day', 'Por dia')}
-          </div>
           {hoverTimeInfo ? (
             <span className="text-[#1A1A2E] bg-white px-2.5 py-1 rounded-md border-2 border-[#1A1A2E] text-[11px] font-mono font-bold flex items-center gap-1 shadow-[1.5px_1.5px_0px_#1A1A2E] max-w-[260px] truncate">
               <Clock className="w-3.5 h-3.5 text-[#FF5A36] shrink-0" />
@@ -264,7 +239,7 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
           ) : (
             <span className="flex items-center gap-1 text-[#4A4A68] text-[11px] font-mono font-semibold">
               <Activity className="w-3.5 h-3.5 text-[#12B76A]" />
-              <span>{rangeLabel}</span>
+              <span className="truncate max-w-[360px]">{rangeLabel}</span>
             </span>
           )}
         </div>
@@ -282,6 +257,8 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
           <line x1="0" y1={height * 0.50} x2={width} y2={height * 0.50} stroke="#1A1A2E" strokeOpacity="0.1" strokeDasharray="3 3" strokeWidth="1" />
           <line x1="0" y1={height * 0.75} x2={width} y2={height * 0.75} stroke="#1A1A2E" strokeOpacity="0.1" strokeDasharray="3 3" strokeWidth="1" />
 
+          {allowedPath && <path d={`${allowedPath} L ${width} ${height} L 0 ${height} Z`} fill="#12B76A" fillOpacity="0.12" stroke="none" />}
+          {blockedPath && <path d={`${blockedPath} L ${width} ${height} L 0 ${height} Z`} fill="#F04438" fillOpacity="0.10" stroke="none" />}
           {allowedPath && <path d={allowedPath} fill="none" stroke="#12B76A" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
           {blockedPath && <path d={blockedPath} fill="none" stroke="#F04438" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />}
 
@@ -324,6 +301,24 @@ export const DualQueryChart: React.FC<DualQueryChartProps> = ({
         {timeLabels.map((tl, i) => (
           <span key={i} className={hoverIndex !== null && Math.abs(hoverXPercent / 100 - tl.pct) < 0.12 ? 'text-[#1A1A2E] font-bold' : ''}>{tl.label}</span>
         ))}
+      </div>
+
+      <div className="mt-3 pt-3 border-t-2 border-[#1A1A2E]/10">
+        <div className="flex items-center justify-between text-[11px] font-mono font-bold text-[#4A4A68] mb-1.5">
+          <span>Janela de tempo (1 min)</span>
+          <span className="text-[#1A1A2E]">{fmtFull(windowStart)} — {fmtFull(windowEnd)}</span>
+        </div>
+        <div ref={sliderRef} className="relative h-8 rounded-md border-2 border-[#1A1A2E] bg-[#FFF7E8] shadow-[1px_1px_0px_#1A1A2E] overflow-hidden touch-none">
+          <div className="absolute inset-y-0 bg-[#1A1A2E]/5" style={{ left: 0, width: `${leftPct}%` }} />
+          <div className="absolute inset-y-0 bg-[#1A1A2E]/5" style={{ left: `${rightPct}%`, right: 0 }} />
+          <div className="absolute top-1/2 h-2 -mt-1 rounded-full bg-[#FF5A36]/25 border border-[#FF5A36]/60" style={{ left: `${leftPct}%`, width: `${Math.max(0.5, rightPct-leftPct)}%` }} onPointerDown={onSliderPointerDown('pan')} title="Arraste para mover a janela" />
+          <div className="absolute top-1/2 w-4 h-4 -ml-2 -mt-2 rounded-full cursor-ew-resize bg-[#FF5A36] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]" style={{ left: `${leftPct}%` }} onPointerDown={onSliderPointerDown('start')} title="Início" />
+          <div className="absolute top-1/2 w-4 h-4 -ml-2 -mt-2 rounded-full cursor-ew-resize bg-[#FF5A36] border-2 border-[#1A1A2E] shadow-[1px_1px_0px_#1A1A2E]" style={{ left: `${rightPct}%` }} onPointerDown={onSliderPointerDown('end')} title="Fim" />
+        </div>
+        <div className="flex justify-between text-[10px] font-mono text-[#4A4A68] mt-1">
+          <span>{fmtFull(sliderMin)}</span>
+          <span>{fmtFull(nowTs)}</span>
+        </div>
       </div>
     </div>
   );

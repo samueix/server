@@ -12,18 +12,23 @@ import {
   type InlineKeyboardButton,
   type InlineKeyboardMarkup,
 } from './telegramNotifier.js';
-import { takeScreenshot, getBrowserState, startBrowser, navigateBrowser, browserClickSelector, browserTypeText, browserPressKey, browserWait, browserGetInfo } from './browserSession.js';
+import { takeScreenshot, getBrowserState, startBrowser, navigateBrowser, browserClickSelector, browserTypeText, browserPressKey, browserWait, browserGetInfo, browserEval } from './browserSession.js';
+import { getCameraStatus } from './cameras.js';
 import { askOpencodeAgent, listOpencodeModels } from './opencode.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
 import { getAllMonitoredServices } from './servicesMonitor.js';
 import { getSecurityAttackStatus } from './securityMonitor.js';
+import { execFile, spawn } from 'child_process';
+import dns from 'dns';
 
 type BotMode = 'menu' | 'ai';
 
+type NetTool = 'ping' | 'trace';
 interface ChatState {
   mode: BotMode;
   opencodeSessionId?: string;
   aiModel?: string;
+  pendingNetTool?: NetTool;
 }
 
 interface BotPersisted {
@@ -79,7 +84,9 @@ function getState(chatId: string): ChatState {
   if (!chatStates.has(chatId)) {
     chatStates.set(chatId, { mode: 'menu' });
   }
-  return chatStates.get(chatId)!;
+  const st = chatStates.get(chatId)!;
+  if (st.pendingNetTool !== 'ping' && st.pendingNetTool !== 'trace') st.pendingNetTool = undefined;
+  return st;
 }
 
 function getEffectiveAiModel(chatId: string): string {
@@ -155,7 +162,14 @@ function mainMenuKeyboard(): InlineKeyboardMarkup {
         { text: '🔗 Acesso & SSH', callback_data: 'act:acesso' },
       ],
       [
+        { text: '📡 Ping', callback_data: 'act:ping' },
+        { text: '🧭 Traceroute', callback_data: 'act:trace' },
+      ],
+      [
         { text: '📸 Print Browser', callback_data: 'act:print' },
+        { text: '📷 Foto Câmera', callback_data: 'act:camera' },
+      ],
+      [
         { text: '🔄 Atualizar Menu', callback_data: 'act:menu' },
       ],
     ],
@@ -189,6 +203,193 @@ function aiModeKeyboard(): InlineKeyboardMarkup {
   };
 }
 
+
+const NET_DEFAULTS = [
+  { label: 'Gateway', host: '192.168.100.1' },
+  { label: 'Google DNS', host: '8.8.8.8' },
+  { label: 'Cloudflare', host: '1.1.1.1' },
+];
+
+function isValidHostInput(host: string): boolean {
+  const h = String(host || '').trim();
+  if (!h || h.length > 253) return false;
+  return /^[a-zA-Z0-9._:-]+$/.test(h);
+}
+
+function netToolKeyboard(tool: NetTool): InlineKeyboardMarkup {
+  const prefix = tool === 'ping' ? 'net:ping:' : 'net:trace:';
+  return {
+    inline_keyboard: [
+      ...NET_DEFAULTS.map(d => [{ text: `${tool === 'ping' ? '📡' : '🧭'} ${d.label} (${d.host})`, callback_data: `${prefix}${d.host}` }]),
+      [{ text: '✍️ Digitar IP/host', callback_data: `net:custom:${tool}` }],
+      [{ text: '⬅️ Voltar ao Menu', callback_data: 'act:menu' }],
+    ],
+  };
+}
+
+
+function runSystemPing(host: string): Promise<{ ok: boolean; output: string; avgMs?: number }> {
+  return new Promise((resolve) => {
+    execFile('ping', ['-c', '4', '-W', '1', '-n', host], { timeout: 12000, maxBuffer: 1024 * 256 }, (err: any, stdout: string, stderr: string) => {
+      const out = String(stdout || stderr || err?.message || '').trim();
+      const avg = out.match(/(?:rtt|round-trip).*?=\s*[\d.]+\/([\d.]+)\/[\d.]+/i) || out.match(/avg[^0-9]*([\d.]+)/i);
+      resolve({ ok: !err || /bytes from/i.test(out), output: out, avgMs: avg ? Number(avg[1]) : undefined });
+    });
+  });
+}
+
+async function runTelegramPing(chatId: string, host: string, editMessageId?: number): Promise<void> {
+  if (!isValidHostInput(host)) {
+    await sendTelegramMessage('❌ Host inválido.', { chatId, replyMarkup: netToolKeyboard('ping') });
+    return;
+  }
+  const waiting = `📡 <b>Ping em ${escapeHtml(host)}</b>\nEnviando 4 pacotes...`;
+  const markup = netToolKeyboard('ping');
+  let msgId = editMessageId;
+  if (msgId) {
+    await editTelegramMessageText(chatId, msgId, waiting, { parseMode: 'HTML', replyMarkup: markup });
+  } else {
+    const sent = await sendTelegramMessage(waiting, { chatId, parseMode: 'HTML', replyMarkup: markup });
+    msgId = sent?.data?.message_id;
+  }
+  const r = await runSystemPing(host);
+  const lines = r.output.split('\n').filter(Boolean);
+  const summary = lines.filter(l => /packets transmitted|rtt|round-trip|bytes from|from .*icmp_seq|unreachable|timed out/i.test(l)).slice(-8);
+  const body = summary.length ? summary : lines.slice(-8);
+  const text = [
+    `${r.ok ? '📡' : '⚠️'} <b>Ping: ${escapeHtml(host)}</b>`,
+    r.avgMs != null ? `Latência média: <b>${fmtNum(r.avgMs, 1)} ms</b>` : null,
+    '',
+    '<pre>' + escapeHtml(body.join('\n').slice(0, 3200) || r.output.slice(0, 3200) || 'Sem saída') + '</pre>',
+  ].filter(Boolean).join('\n');
+  if (msgId) {
+    const edited = await editTelegramMessageText(chatId, msgId, text, { parseMode: 'HTML', replyMarkup: markup });
+    if (edited.ok) return;
+  }
+  await sendTelegramMessage(text, { chatId, parseMode: 'HTML', replyMarkup: markup });
+}
+
+function runSystemTrace(host: string): Promise<{ ok: boolean; lines: string[]; error?: string }> {
+  return new Promise((resolve) => {
+    const candidates: Array<{ cmd: string; args: string[] }> = [
+      { cmd: 'mtr', args: ['-n', '-r', '-c', '1', '-w', '-z', host] },
+      { cmd: 'tracepath', args: ['-n', host] },
+      { cmd: 'traceroute', args: ['-n', '-q', '1', '-w', '1', host] },
+    ];
+    let idx = 0;
+    const tryNext = () => {
+      if (idx >= candidates.length) return resolve({ ok: false, lines: [], error: 'Nenhum comando de traceroute disponível (mtr/tracepath/traceroute).' });
+      const c = candidates[idx++];
+      const p = spawn(c.cmd, c.args, { timeout: 25000 });
+      let out = '';
+      let err = '';
+      p.stdout.on('data', (d: Buffer) => out += d.toString('utf-8'));
+      p.stderr.on('data', (d: Buffer) => err += d.toString('utf-8'));
+      p.on('error', () => tryNext());
+      p.on('close', (code: number) => {
+        const text = (out || err).trim();
+        if (code === 0 || /HOST:|^\s*\d+[:| ]/m.test(text)) {
+          resolve({ ok: true, lines: text.split('\n').map(l => l.trimEnd()).filter(Boolean) });
+        } else if (idx < candidates.length) tryNext();
+        else resolve({ ok: false, lines: text ? text.split('\n').filter(Boolean) : [], error: err || `exit ${code}` });
+      });
+    };
+    tryNext();
+  });
+}
+
+async function resolveTraceMeta(ip: string): Promise<{ rdns?: string; asn?: string; org?: string; country?: string }> {
+  const meta: { rdns?: string; asn?: string; org?: string; country?: string } = {};
+  if (!ip || ip === '*' || ip === '???') return meta;
+  try { const names = await Promise.race([dns.promises.reverse(ip), new Promise<string[]>((_,rej)=>setTimeout(()=>rej(new Error('t')),1200))]) as string[]; if (names?.[0]) meta.rdns = names[0]; } catch {}
+  // ISP/AS via ip-api (free, non-commercial; best-effort)
+  try {
+    const r = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country,as,org,isp,query`, { signal: AbortSignal.timeout(1800) });
+    if (r.ok) {
+      const j:any = await r.json().catch(()=>null);
+      if (j?.status === 'success') {
+        if (j.as) meta.asn = String(j.as).split(' ')[0];
+        meta.org = String(j.isp || j.org || '').trim() || undefined;
+        meta.country = String(j.country || '').trim() || undefined;
+      }
+    }
+  } catch {}
+  return meta;
+}
+
+function parseTraceHops(rawLines: string[]): Array<{ hop: string; ip: string; ms: string }> {
+  const hops: Array<{ hop: string; ip: string; ms: string }> = [];
+  for (const raw of rawLines) {
+    const line = raw.replace(/\s+/g, ' ').trim();
+    if (!line || /^HOST:/i.test(line) || /^Start:/i.test(line)) continue;
+    let m = line.match(/^(\d+)\.\|\-\-\s+(\S+)\s+([\d.]+)%\s+\d+\s+[\d.]+\s+([\d.]+)/);
+    if (m) { hops.push({ hop: m[1], ip: m[2], ms: m[3] }); continue; }
+    m = line.match(/^(\d+)[?:]?:\s+(\S+)(?:\s+.*?([\d.]+)\s*ms)?/i);
+    if (m) { const ip=m[2]; if (ip==='no') continue; hops.push({ hop:m[1], ip, ms: m[3] || '*' }); continue; }
+    m = line.match(/^(\d+)\s+(\S+)\s+([\d.]+)\s*ms/i);
+    if (m) { hops.push({ hop:m[1], ip:m[2], ms:m[3] }); continue; }
+    m = line.match(/^(\d+)\s+\*\s+\*\s+\*/);
+    if (m) { hops.push({ hop:m[1], ip:'*', ms:'*' }); continue; }
+  }
+  return hops;
+}
+
+async function formatTraceForTelegram(host: string, rawLines: string[]): Promise<string> {
+  const hops = parseTraceHops(rawLines);
+  const ips = [...new Set(hops.map(h => h.ip).filter(ip => ip && ip !== '*' && ip !== '???'))].slice(0, 30);
+  const metaEntries = await Promise.all(ips.map(async ip => [ip, await resolveTraceMeta(ip)] as const));
+  const meta = new Map(metaEntries);
+  const lines = hops.map(h => {
+    if (h.ip === '*') return `${h.hop.padStart(2,' ')}. *`;
+    const m = meta.get(h.ip) || {};
+    const who = [m.asn, m.org].filter(Boolean).join(' ');
+    const name = m.rdns ? ` ${m.rdns}` : '';
+    const extra = who ? ` [${who}]` : '';
+    return `${h.hop.padStart(2,' ')}. ${h.ip}${name}${extra}  ${h.ms} ms`;
+  });
+  const body = lines.length ? lines.join('\n') : rawLines.slice(0, 30).join('\n');
+  return [
+    `🧭 <b>Traceroute: ${escapeHtml(host)}</b>`,
+    '<i>IP, nome reverso (quando existe), AS/ISP e latência</i>',
+    '',
+    '<pre>' + escapeHtml(body.slice(0, 3400)) + '</pre>',
+  ].join('\n');
+}
+
+async function runTelegramTrace(chatId: string, host: string, editMessageId?: number): Promise<void> {
+  if (!isValidHostInput(host)) {
+    await sendTelegramMessage('❌ Host inválido.', { chatId, replyMarkup: netToolKeyboard('trace') });
+    return;
+  }
+  const waiting = `🧭 <b>Traceroute em ${escapeHtml(host)}</b>\nRastreando rota...`;
+  const markup = netToolKeyboard('trace');
+  let msgId = editMessageId;
+  if (msgId) await editTelegramMessageText(chatId, msgId, waiting, { parseMode: 'HTML', replyMarkup: markup });
+  else { const sent = await sendTelegramMessage(waiting, { chatId, parseMode: 'HTML', replyMarkup: markup }); msgId = sent?.data?.message_id; }
+  const r = await runSystemTrace(host);
+  const text = r.ok || r.lines.length ? await formatTraceForTelegram(host, r.lines) : `⚠️ <b>Traceroute: ${escapeHtml(host)}</b>\n\n<pre>${escapeHtml((r.error||'Falha').slice(0,1000))}</pre>`;
+  if (msgId) { const edited = await editTelegramMessageText(chatId, msgId, text, { parseMode: 'HTML', replyMarkup: markup }); if (edited.ok) return; }
+  await sendTelegramMessage(text, { chatId, parseMode: 'HTML', replyMarkup: markup });
+}
+async function sendNetToolPrompt(chatId: string, tool: NetTool, editMessageId?: number): Promise<void> {
+  const st = getState(chatId);
+  st.pendingNetTool = tool;
+  st.mode = 'menu';
+  persistState();
+  const title = tool === 'ping' ? '📡 <b>Ping</b>' : '🧭 <b>Traceroute</b>';
+  const text = [
+    title,
+    tool === 'ping'
+      ? 'Escolha um alvo padrão ou toque em <b>Digitar IP/host</b> para informar outro.'
+      : 'Escolha um alvo padrão ou toque em <b>Digitar IP/host</b> para informar outro. O resultado vai mostrar cada salto com IP e latência.',
+  ].join('\n');
+  const markup = netToolKeyboard(tool);
+  if (editMessageId) {
+    const edited = await editTelegramMessageText(chatId, editMessageId, text, { parseMode: 'HTML', replyMarkup: markup });
+    if (edited.ok) return;
+  }
+  await sendTelegramMessage(text, { chatId, parseMode: 'HTML', replyMarkup: markup });
+}
 function buildMainMenuText(receivedMessage?: string): string {
   const lines: string[] = [];
   if (receivedMessage) {
@@ -615,6 +816,34 @@ async function trySendBrowserScreenshot(
   }
 }
 
+async function handleCameraSnapshot(chatId: string, camId?: string, editMessageId?: number): Promise<void> {
+  try {
+    const st = await getCameraStatus();
+    const cams = Array.isArray(st?.cameras) ? st.cameras : [];
+    if (!cams.length) {
+      await sendTelegramMessage('📷 Nenhuma câmera configurada.', { chatId, replyMarkup: reportFooterKeyboard('act:camera') });
+      return;
+    }
+    const cam = camId ? cams.find((c:any)=>String(c.id)===String(camId)) : cams[0];
+    if (!cam) {
+      await sendTelegramMessage('📷 Câmera não encontrada.', { chatId, replyMarkup: reportFooterKeyboard('act:camera') });
+      return;
+    }
+    const url = `http://127.0.0.1:${process.env.PORT || 3000}/api/cameras/${cam.id}/stream/sub/frame.jpeg?t=${Date.now()}`;
+    const cfg = getServerConfig() as any;
+    const auth = Buffer.from(`${cfg.auth?.adminUser || 'admin'}:${cfg.auth?.adminPass || ''}`).toString('base64');
+    const res = await fetch(url, { headers: { Authorization: `Basic ${auth}` }, signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const cap = `📷 ${cam.name} (${cam.ip}) - ${new Date().toLocaleString('pt-BR')}`;
+    const rows: InlineKeyboardButton[][] = cams.slice(0,6).map((c:any)=>[{ text: `📷 ${c.name}`, callback_data: `cam:snap:${c.id}` }]);
+    rows.push([{ text: '⬅️ Voltar ao Menu', callback_data: 'act:menu' }]);
+    await sendTelegramPhoto(buf, cap, { chatId, replyMarkup: { inline_keyboard: rows } });
+  } catch (e:any) {
+    await sendTelegramMessage(`❌ Erro ao capturar câmera: ${escapeHtml(e?.message || e)}`, { chatId, parseMode:'HTML', replyMarkup: reportFooterKeyboard('act:camera') });
+  }
+}
+
 async function sendMainMenu(chatId: string, receivedMessage?: string, editMessageId?: number): Promise<void> {
   const st = getState(chatId);
   st.mode = 'menu';
@@ -716,7 +945,6 @@ async function performYouTubePlay(requestText: string): Promise<{ ok: boolean; m
   let query = qMatch ? qMatch[1] : requestText;
   query = query.replace(/\b(no youtube|youtube|manda|uma foto|print|screenshot|abre|abrir|toca|tocar|coloca|p[õo]e)\b/gi, ' ')
                .replace(/\s+/g, ' ').trim();
-  // specific common case in conversation
   if (/sal\b.*matu[eê]/i.test(requestText)) query = 'Sal Matuê';
   if (!query) query = requestText.trim().slice(0, 80);
 
@@ -725,25 +953,24 @@ async function performYouTubePlay(requestText: string): Promise<{ ok: boolean; m
     if (!st || (st.status !== 'running' && st.status !== 'paused')) {
       await startBrowser();
     }
-    // go to youtube search directly
     const searchUrl = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query);
     await navigateBrowser(searchUrl);
-    await browserWait(3500);
+    await browserWait(3000);
 
-    // click first video renderer
     const clicked = await browserEval(`() => {
+      const isVisible = (el) => !!el && (el.offsetParent !== null || el.getClientRects().length > 0);
       const selectors = [
         'ytd-video-renderer a#video-title',
         'ytd-video-renderer a#thumbnail',
         'a#video-title.yt-simple-endpoint',
-        'ytd-rich-item-renderer a#thumbnail'
+        'ytd-rich-item-renderer a#thumbnail',
+        'ytd-playlist-renderer a#video-title'
       ];
       for (const sel of selectors) {
-        const el = document.querySelector(sel);
+        const el = Array.from(document.querySelectorAll(sel)).find(isVisible);
         if (el) { el.scrollIntoView({block:'center'}); el.click(); return sel; }
       }
-      // fallback: first /watch link
-      const a = Array.from(document.querySelectorAll('a[href*="/watch"]')).find(x=>x.offsetParent !== null);
+      const a = Array.from(document.querySelectorAll('a[href*="/watch"]')).find(isVisible);
       if (a) { a.click(); return 'a[href*=/watch]'; }
       return null;
     }`);
@@ -751,19 +978,22 @@ async function performYouTubePlay(requestText: string): Promise<{ ok: boolean; m
       const info = await browserGetInfo().catch(()=>({url:'',title:''}));
       return { ok:false, message:`Não encontrei resultado clicável para "${query}" no YouTube.`, finalUrl: info.url, title: info.title };
     }
-    await browserWait(5000);
-    // try to accept consent / play if needed
+    await browserWait(4500);
     await browserEval(`() => {
-      const btns = Array.from(document.querySelectorAll('button, tp-yt-paper-button, yt-button-shape button'));
-      const accept = btns.find(b => /accept|aceitar|agree|concordo/i.test(b.textContent||''));
-      if (accept) { accept.click(); }
+      const clickText = (re) => {
+        const nodes = Array.from(document.querySelectorAll('button, tp-yt-paper-button, yt-button-shape button, [role="button"]'));
+        const el = nodes.find(b => re.test((b.textContent||'').trim()));
+        if (el) { el.click(); return true; }
+        return false;
+      };
+      clickText(/accept|aceitar|agree|concordo|i agree/i);
       const play = document.querySelector('button.ytp-play-button');
-      if (play && play.getAttribute('aria-label')?.toLower().includes('play')) play.click();
+      if (play) { const label = (play.getAttribute('aria-label')||'').toLowerCase(); if (label.includes('play') || label.includes('reproduzir')) play.click(); }
       const video = document.querySelector('video');
-      if (video && video.paused) { video.play().catch(()=>{}); }
+      if (video && video.paused) { video.muted = true; video.play().catch(()=>{}); }
       return true;
     }`).catch(()=>{});
-    await browserWait(2500);
+    await browserWait(1500);
     const info = await browserGetInfo().catch(()=>({url:'',title:''}));
     return { ok:true, message:`Abri o YouTube e tentei tocar "${query}".`, finalUrl: info.url, title: info.title };
   } catch (e:any) {
@@ -807,13 +1037,13 @@ async function handleAiMessage(chatId: string, text: string): Promise<void> {
     });
     placeholderMsgId = pending?.data?.message_id;
 
-    let res = await askOpencodeAgent(st.opencodeSessionId || '', text, model);
+    let res = await askOpencodeAgent(st.opencodeSessionId || '', text, model, 'telegram');
     let reply = res?.reply?.content || 'Sem resposta.';
     const failed = /\[Opencode\]\s*Não foi possível obter resposta|temporariamente indisponível/i.test(reply);
     if (failed && model.startsWith('google/')) {
       const fallback = 'opencode/big-pickle';
       try {
-        const res2 = await askOpencodeAgent(st.opencodeSessionId || res?.session?.id || '', text, fallback);
+        const res2 = await askOpencodeAgent(st.opencodeSessionId || res?.session?.id || '', text, fallback, 'telegram');
         if (res2?.reply?.content && !/\[Opencode\]\s*Não foi possível obter resposta/i.test(res2.reply.content)) {
           res = res2;
           reply = res2.reply.content + `\n\n(fallback automático: ${fallback} pois ${model} estava indisponível)`;
@@ -964,23 +1194,50 @@ async function handleAction(
     const updated = await sendOrEditReport(chatId, 'act:acesso', buildAccessText, editMessageId);
     return updated ? {} : { toast: 'Links de acesso já estão atualizados.' };
   }
-  if (action === 'act:print') {
-    const markup: InlineKeyboardMarkup = {
-      inline_keyboard: [
-        [
-          { text: '📸 Nova Captura', callback_data: 'act:print' },
-          { text: '⬅️ Voltar ao Menu', callback_data: 'act:menu' },
-        ],
-      ],
-    };
-    const shot = await trySendBrowserScreenshot(chatId, undefined, markup);
-    if (!shot.ok) {
-      await sendTelegramMessage(`📷 ${escapeHtml(shot.message || 'Navegador remoto indisponível.')}`, {
-        chatId,
-        parseMode: 'HTML',
-        replyMarkup: reportFooterKeyboard('act:print'),
-      });
+  if (action === 'act:ping') {
+    await sendNetToolPrompt(chatId, 'ping', editMessageId);
+    return {};
+  }
+  if (action === 'act:trace') {
+    await sendNetToolPrompt(chatId, 'trace', editMessageId);
+    return {};
+  }
+  if (action.startsWith('net:custom:')) {
+    const tool = action.split(':')[2] as NetTool;
+    if (tool === 'ping' || tool === 'trace') {
+      st.pendingNetTool = tool;
+      st.mode = 'menu';
+      persistState();
+      const txt = tool === 'ping'
+        ? '✍️ <b>Ping</b>\nEnvie o IP ou hostname que deseja testar. Ex: <code>8.8.8.8</code>, <code>192.168.100.1</code>, <code>google.com</code>'
+        : '✍️ <b>Traceroute</b>\nEnvie o IP ou hostname para rastrear a rota. Ex: <code>1.1.1.1</code>, <code>192.168.100.1</code>, <code>google.com</code>';
+      if (editMessageId) {
+        const edited = await editTelegramMessageText(chatId, editMessageId, txt, { parseMode: 'HTML', replyMarkup: netToolKeyboard(tool) });
+        if (edited.ok) return { toast: 'Digite o IP/host no chat' };
+      }
+      await sendTelegramMessage(txt, { chatId, parseMode: 'HTML', replyMarkup: netToolKeyboard(tool) });
+      return { toast: 'Digite o IP/host no chat' };
     }
+  }
+  if (action.startsWith('net:ping:') || action.startsWith('net:trace:')) {
+    const tool: NetTool = action.startsWith('net:ping:') ? 'ping' : 'trace';
+    const host = action.slice(tool === 'ping' ? 'net:ping:'.length : 'net:trace:'.length).trim();
+    st.pendingNetTool = undefined;
+    persistState();
+    if (tool === 'ping') await runTelegramPing(chatId, host, editMessageId);
+    else await runTelegramTrace(chatId, host, editMessageId);
+    return {};
+  }
+
+  if (action === 'act:print') {
+    const markup: InlineKeyboardMarkup = { inline_keyboard: [[{ text: '📸 Nova Captura', callback_data: 'act:print' }, { text: '⬅️ Voltar ao Menu', callback_data: 'act:menu' }]] };
+    const shot = await trySendBrowserScreenshot(chatId, undefined, markup);
+    if (!shot.ok) await sendTelegramMessage(`📷 ${escapeHtml(shot.message || 'Navegador remoto indisponível.')}`, { chatId, parseMode: 'HTML', replyMarkup: reportFooterKeyboard('act:print') });
+    return {};
+  }
+  if (action === 'act:camera' || action.startsWith('cam:snap:')) {
+    const camId = action.startsWith('cam:snap:') ? action.slice('cam:snap:'.length) : undefined;
+    await handleCameraSnapshot(chatId, camId, editMessageId);
     return {};
   }
 
@@ -1002,6 +1259,10 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
     await sendModelPicker(chatId);
     return;
   }
+  if (lower === '/ping' || lower === 'ping') { await sendNetToolPrompt(chatId, 'ping'); return; }
+  if (lower.startsWith('/ping ')) { const h=text.split(/\s+/)[1]; if(h&&isValidHostInput(h)) return runTelegramPing(chatId,h); }
+  if (lower === '/trace' || lower === '/traceroute' || lower === 'traceroute' || lower === 'trace') { await sendNetToolPrompt(chatId, 'trace'); return; }
+  if (lower.startsWith('/trace ') || lower.startsWith('/traceroute ')) { const h=text.split(/\s+/)[1]; if(h&&isValidHostInput(h)) return runTelegramTrace(chatId,h); }
 
   if (st.mode === 'ai') {
     if (
@@ -1071,6 +1332,43 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
   }
   if (lower === '/print' || lower === 'print') {
     await handleAction(chatId, 'act:print');
+    return;
+  }
+  if (lower === '/camera' || lower === 'camera' || lower === 'câmera' || lower === 'foto camera' || lower === 'foto câmera') {
+    await handleAction(chatId, 'act:camera');
+    return;
+  }
+
+  // Intenções rápidas no modo menu (evita ecoar mensagem sem ação)
+  if (/\b(desliga|desligar|encerra|encerrar|parar|fechar)\b.*\b(navegador|browser|chromium)\b/i.test(text)) {
+    const r = await (await import('./browserSession.js')).forceStopBrowser();
+    await sendTelegramMessage(`✅ Navegador remoto desligado. Status: <b>${escapeHtml(r.status)}</b>`, {
+      chatId, parseMode: 'HTML', replyMarkup: reportFooterKeyboard('act:print')
+    });
+    return;
+  }
+  if (wantsScreenshot(text)) {
+    const shot = await trySendBrowserScreenshot(chatId, undefined, reportFooterKeyboard('act:print'), text);
+    if (!shot.ok) {
+      await sendTelegramMessage(`📷 ${escapeHtml(shot.message || 'Não consegui capturar a tela.')}`, {
+        chatId, parseMode: 'HTML', replyMarkup: reportFooterKeyboard('act:print')
+      });
+    }
+    return;
+  }
+
+  // Se usuário escolheu digitar IP/host para ping/trace
+  if (st.pendingNetTool) {
+    const host = text.trim().split(/\s+/)[0];
+    const tool = st.pendingNetTool;
+    st.pendingNetTool = undefined;
+    persistState();
+    if (!isValidHostInput(host)) {
+      await sendTelegramMessage('❌ IP/host inválido. Use apenas letras, números, ponto, hífen, dois-pontos. Ex: <code>8.8.8.8</code> ou <code>google.com</code>', { chatId, parseMode: 'HTML', replyMarkup: netToolKeyboard(tool) });
+      return;
+    }
+    if (tool === 'ping') await runTelegramPing(chatId, host);
+    else await runTelegramTrace(chatId, host);
     return;
   }
 

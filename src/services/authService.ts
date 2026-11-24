@@ -173,6 +173,28 @@ export function getAuthHeaders(): Record<string, string> {
 }
 
 /**
+ * Fetch autenticado que retorna blob URL para uso em <img src> / <video src>
+ */
+export async function getAuthenticatedBlobUrl(url: string): Promise<string> {
+  const res = await fetch(url, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function getAuthenticatedDataUrl(url: string): Promise<string> {
+  const res = await fetch(url, { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Executa verificação de credenciais no endpoint GET /api/auth/verify
  */
 export async function verifyCredentialsWithServer(

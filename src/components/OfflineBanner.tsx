@@ -71,7 +71,7 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({
           <a
             href={window.location.href}
             target="_blank"
-            rel="noopener noreferrer"
+            rel="noopener noreferrer nofollow"
             className="px-4 py-2 rounded-md bg-[#FF5A36] hover:bg-[#E04522] text-white font-bold text-xs transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
           >
             <ExternalLink className="w-3.5 h-3.5" />

@@ -991,9 +991,19 @@ export const ArchitectureDiagram: React.FC = () => {
     return fromNode?.layer === activeLayer || toNode?.layer === activeLayer;
   };
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const handleCopyMermaid = async () => {
     try {
-      await navigator.clipboard.writeText(MERMAID_SOURCE);
+      await void copyTextSafe(MERMAID_SOURCE);
       setCopiedMermaid(true);
       setTimeout(() => setCopiedMermaid(false), 1800);
     } catch {

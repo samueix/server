@@ -25,6 +25,7 @@ const SecurityTab = React.lazy(() => import('./components/tabs/SecurityTab').the
 const CredentialsTab = React.lazy(() => import('./components/tabs/CredentialsTab').then(m => ({ default: m.CredentialsTab })));
 const OpencodeTab = React.lazy(() => import('./components/tabs/OpencodeTab').then(m => ({ default: m.OpencodeTab })));
 const RemoteBrowserTab = React.lazy(() => import('./components/tabs/RemoteBrowserTab').then(m => ({ default: m.RemoteBrowserTab })));
+const CamerasTab = React.lazy(() => import('./components/tabs/CamerasTab').then(m => ({ default: m.CamerasTab })));
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -95,6 +96,7 @@ const TAB_PATHS: Record<NavigationTab, string> = {
   monitoring: '/monitoramento',
   opencode: '/opencode',
   browser: '/navegador',
+  cameras: '/cameras',
   files: '/arquivos',
   security: '/seguranca',
   credentials: '/credenciais',
@@ -704,6 +706,7 @@ export default function App() {
              activeTab !== 'files' &&
              activeTab !== 'logs' &&
              activeTab !== 'n8n' &&
+             activeTab !== 'cameras' &&
              activeTab !== 'commands' && 
              activeTab !== 'documentation' && (
               <OfflineBanner
@@ -776,6 +779,14 @@ export default function App() {
               <Suspense fallback={<TabLoadingFallback />}>
                 <TabErrorBoundary tabName="Navegador Remoto">
                   <RemoteBrowserTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'cameras' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="Câmeras">
+                  <CamerasTab />
                 </TabErrorBoundary>
               </Suspense>
             )}

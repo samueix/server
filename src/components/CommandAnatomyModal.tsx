@@ -159,8 +159,18 @@ export const CommandAnatomyModal: React.FC<CommandAnatomyModalProps> = ({
 
   const tokens = parseTokens(command);
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const handleCopy = () => {
-    navigator.clipboard.writeText(command);
+    void copyTextSafe(command);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

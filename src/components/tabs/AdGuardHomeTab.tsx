@@ -93,9 +93,19 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
     }
   };
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const copyClearCmd = () => {
     if (!clearShellCmd) return;
-    navigator.clipboard.writeText(clearShellCmd);
+    void copyTextSafe(clearShellCmd);
     setCopiedCmd(true);
     setTimeout(() => setCopiedCmd(false), 2000);
   };
@@ -318,7 +328,7 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b-2 border-[#1A1A2E] bg-[#ECFDF3]">
             <span className="text-xs font-mono font-black text-[#1A1A2E]">Painel nativo do AdGuard Home integrado — edite filtros, listas, clientes, DNS e todas as rotas aqui</span>
-            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+            <a href={adguardPanelUrl} target="_blank" rel="noopener noreferrer nofollow" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
           </div>
           <iframe src={adguardPanelUrl} title="AdGuard Home" className="w-full bg-white" style={{ height: '75vh', minHeight: '680px', border: '0' }} />
         </div>
@@ -433,28 +443,19 @@ export const AdGuardHomeTab: React.FC<AdGuardHomeTabProps> = ({ userRole }) => {
       </div>
 
       {/* Histórico Temporal de Consultas & Bloqueios */}
-      {isOnline && stats && (stats.dns_queries.length > 0 || stats.blocked_filtering.length > 0) && (
+      {isOnline && stats && (
         <div className="bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] rounded-xl p-5 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b-2 border-[#1A1A2E]">
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-[#12B76A]" />
               <h3 className="text-sm font-black text-[#1A1A2E] font-title">Histórico de consultas DNS</h3>
-              <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-[#FFF7E8] text-[#1A1A2E] border border-[#1A1A2E]">
-                Padrão: últimas 24h (filtro: hora/dia/7d)
-              </span>
             </div>
             <div className="text-xs font-mono font-medium text-[#717188]">
-              Dados por hora (retenção 7 dias) — altere o filtro no gráfico
+              Janela ajustável • resolução 1 min
             </div>
           </div>
 
-          <DualQueryChart 
-            allowedData={chartQueriesData.allowed} 
-            blockedData={chartQueriesData.blocked}
-            totalData={chartQueriesData.total}
-            height={130}
-            defaultTimeRange="24h"
-          />
+          <DualQueryChart height={170} />
         </div>
       )}
 

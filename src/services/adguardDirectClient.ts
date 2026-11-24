@@ -12,6 +12,7 @@ import {
   parseRule, 
   isAdGuardPayloadValidLive 
 } from './adguardClassifier';
+import { getAuthHeaders } from './authService';
 
 export type DirectClientListener = (status: AdGuardDirectStatus) => void;
 export type StatsListener = (stats: AdGuardStatsResponse) => void;
@@ -128,7 +129,7 @@ class AdGuardDirectClient {
       try {
         const res = await fetch(url, {
           method: 'GET',
-          headers: { 'Accept': 'application/json' },
+          headers: { 'Accept': 'application/json', ...getAuthHeaders() },
           signal: controller.signal
         });
 

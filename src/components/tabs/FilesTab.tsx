@@ -182,10 +182,20 @@ export const FilesTab: React.FC = () => {
     }
   };
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const handleCopyFileContent = () => {
     const textToCopy = isEditing ? editedText : fileContent?.content;
     if (textToCopy) {
-      navigator.clipboard.writeText(textToCopy);
+      void copyTextSafe(textToCopy);
       setCopiedContent(true);
       setTimeout(() => setCopiedContent(false), 2000);
     }
@@ -838,7 +848,7 @@ export const FilesTab: React.FC = () => {
                       href={fileContent.dataUrl}
                       download={selectedFile.name}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer nofollow"
                       className="flex items-center gap-1 px-3 py-1 bg-[#FF5A36] hover:bg-[#E04522] rounded text-white text-xs font-mono font-bold ml-2 shadow-[2px_2px_0px_#000]"
                       title="Abrir/baixar imagem original"
                     >

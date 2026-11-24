@@ -189,8 +189,18 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
   const sshIpv4Command = `ssh ${SSH_USER}@${serverIpv4}`;
   const sshIpv6Command = getDynamicSshCommand(serverIpv6);
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const copyToClipboard = (text: string, key: string) => {
-    navigator.clipboard.writeText(text);
+    void copyTextSafe(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
   };

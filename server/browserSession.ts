@@ -10,13 +10,13 @@ import { chromium, type Browser, type BrowserContext, type Page, type CDPSession
 import { WebSocketServer, WebSocket } from 'ws';
 
 /**
- * Sessão única de navegador remoto, leve e efêmera.
+ * Sessão única de navegador remoto com perfil persistente opcional.
  *
  * - Chromium é iniciado como processo filho SEM privilégios (usuário samuel).
  * - CDP fica exposto apenas em 127.0.0.1:9222.
  * - Frames são transmitidos por WebSocket (JPEG) direto para o painel.
  * - Histórico fica em memória (ring buffer). Nada de screenshots em disco.
- * - Perfil é apagado ao parar; cache do Chromium limitado a ~60 MB.
+ * - Perfil pode ser persistido para manter contas/logins entre sessões.
  */
 
 const BROWSERS_PATH =
@@ -36,6 +36,7 @@ const IDLE_MS = parseInt(process.env.BROWSER_IDLE_MS || String(5 * 60 * 1000), 1
 const MAX_HISTORY = 200;
 const ALLOW_PRIVATE = process.env.BROWSER_ALLOW_PRIVATE === 'true';
 const NO_SANDBOX = process.env.BROWSER_NO_SANDBOX === 'true';
+const PERSIST_PROFILE = process.env.BROWSER_PERSIST_PROFILE !== 'false';
 const TICKET_TTL_MS = 60_000;
 const FRAME_MIN_INTERVAL_MS = 120;
 const MAX_WS_BUFFER = 1_500_000;
@@ -53,6 +54,7 @@ export interface BrowserState {
   paused: boolean;
   fps: number;
   error: string | null;
+  profilePersistent: boolean;
 }
 
 export interface BrowserHistoryEntry {
@@ -137,11 +139,13 @@ function getExecutablePath(): string {
   throw new Error('Chromium do Playwright não encontrado. Execute o bloco sudo de instalação.');
 }
 
-function ensureProfileDir(): void {
+function ensureProfileDir(reset = !PERSIST_PROFILE): void {
   const ids = getRunIds();
   const parent = path.dirname(PROFILE_DIR);
   fs.mkdirSync(parent, { recursive: true, mode: 0o755 });
-  fs.rmSync(PROFILE_DIR, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+  if (reset) {
+    fs.rmSync(PROFILE_DIR, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 });
+  }
   fs.mkdirSync(PROFILE_DIR, { recursive: true, mode: 0o700 });
   if (typeof ids.uid === 'number' && typeof ids.gid === 'number') {
     try {
@@ -153,7 +157,8 @@ function ensureProfileDir(): void {
   }
 }
 
-function removeProfile(): void {
+function removeProfile(force = false): void {
+  if (PERSIST_PROFILE && !force) return;
   try {
     fs.rmSync(PROFILE_DIR, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
   } catch {
@@ -237,12 +242,17 @@ export function getBrowserState(): BrowserState {
     clients: clients.size,
     paused,
     fps: currentFps,
-    error: lastError
+    error: lastError,
+    profilePersistent: PERSIST_PROFILE
   };
 }
 
 export function getBrowserHistory(): BrowserHistoryEntry[] {
   return history.slice();
+}
+
+export function isProfilePersistent(): boolean {
+  return PERSIST_PROFILE;
 }
 
 export function issueWsTicket(): { ticket: string; expiresAt: string } {
@@ -721,6 +731,53 @@ export async function stopBrowser(): Promise<void> {
   lastActionAt = null;
   pushHistory('stop', 'Sessão encerrada');
   await cleanupAfterExit();
+}
+
+export async function resetBrowserProfile(): Promise<BrowserState> {
+  const wasRunning = status === 'running' || status === 'paused' || status === 'starting';
+  if (wasRunning) {
+    await stopBrowser();
+  }
+  removeProfile(true);
+  pushHistory('profile', 'Perfil do navegador limpo');
+  if (wasRunning) {
+    return startBrowser();
+  }
+  return getBrowserState();
+}
+
+export async function forceStopBrowser(): Promise<BrowserState> {
+  try {
+    await stopBrowser();
+  } catch {
+    // continua com limpeza forçada
+  }
+  status = 'stopped';
+  paused = false;
+  lastError = null;
+  startedAt = null;
+  lastActionAt = null;
+  currentTitle = '';
+  try { await stopScreencast(); } catch {}
+  try { if (browser) await browser.close(); } catch {}
+  browser = null;
+  context = null;
+  activePage = null;
+  const proc = child;
+  child = null;
+  if (proc && proc.exitCode === null) {
+    try { proc.kill('SIGKILL'); } catch {}
+  }
+  try {
+    execFileSync('pkill', ['-9', '-f', 'chrome-linux64/chrome.*remote-debugging-port=9222'], { stdio: 'ignore' });
+  } catch {}
+  try {
+    execFileSync('pkill', ['-9', '-f', `chrome-linux64/chrome.*${PROFILE_DIR.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`], { stdio: 'ignore' });
+  } catch {}
+  removeProfile(false);
+  pushHistory('stop', 'Sessão forçada a encerrar');
+  broadcastJson({ type: 'state', state: getBrowserState() });
+  return getBrowserState();
 }
 
 export function pauseBrowser(): BrowserState {

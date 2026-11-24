@@ -267,7 +267,7 @@ export const adguardService = {
   },
 
   async getClearCommand(): Promise<string> {
-    const res = await fetch('/api/adguard/clear-command');
+    const res = await fetch('/api/adguard/clear-command', { headers: { ...getAuthHeaders() } });
     if (res.ok) {
       const data = await res.json();
       return data.shellCommand;

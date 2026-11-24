@@ -243,7 +243,7 @@ export const N8nTab: React.FC = () => {
           <a
             href={n8nPanelUrl}
             target="_blank"
-            rel="noopener noreferrer"
+            rel="noopener noreferrer nofollow"
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#00A6FB] hover:bg-[#0095e0] text-white rounded-lg text-xs font-mono font-bold transition border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
             title="Abrir n8n Web UI em nova aba"
           >
@@ -369,7 +369,7 @@ export const N8nTab: React.FC = () => {
               <GitBranch className="w-4 h-4 text-[#FF5A36]" />
               <span className="font-title font-bold text-sm text-[#1A1A2E]">Interface do n8n (porta 5678)</span>
             </div>
-            <a href={n8nPanelUrl} target="_blank" rel="noopener noreferrer" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
+            <a href={n8nPanelUrl} target="_blank" rel="noopener noreferrer nofollow" className="text-[11px] font-mono font-bold text-[#FF5A36] hover:underline">Abrir em nova aba</a>
           </div>
           <iframe src={n8nPanelUrl} title="n8n" className="w-full bg-white" style={{ height: '75vh', minHeight: '680px', border: '0' }} />
         </div>
@@ -475,7 +475,7 @@ export const N8nTab: React.FC = () => {
                 <a
                   href={`${n8nUrl}/workflow/${wf.id}`}
                   target="_blank"
-                  rel="noopener noreferrer"
+                  rel="noopener noreferrer nofollow"
                   className="px-3.5 py-2 rounded-lg bg-white hover:bg-[#FFEECB] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-xs font-mono font-bold text-[#1A1A2E] transition flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
                 >
                   <span>Abrir Fluxo</span>

@@ -26,6 +26,7 @@ import {
   fetchAdGuardStats, 
   fetchAdGuardQueryLog, 
   getAdGuardConfig, 
+  getActiveAdGuardCredentials,
   updateAdGuardConfig,
   updateAdGuardRawStats,
   clearAdGuardHistory,
@@ -57,6 +58,7 @@ import {
 } from './server/opencode.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { runShellCommand } from './server/terminalRunner.js';
+import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed } from './server/cameras.js';
 import { 
   getSecurityAttackStatus, 
   recordPanelFailedLogin, 
@@ -68,6 +70,7 @@ import { logAudit, getAuditLog, clearAuditLog } from './server/auditLog.js';
 import { testTelegramConnection, getTelegramUpdates, sendTelegramTestMessage, notifyTelegramLoginFailure, notifyTelegramLoginSuccess, notifyTelegramIpBlock } from './server/telegramNotifier.js';
 import { startTelegramBotPolling, getDetectedTelegramChats } from './server/telegramBot.js';
 import { loadMetricsHistory, getMetricsHistory, addMetricPoint } from './server/metricsHistory.js';
+import { loadAdGuardHistory, addAdGuardSample, getAdGuardHistory, getAdGuardHistoryMeta } from './server/adguardHistory.js';
 import { 
   fetchN8nStatus as fetchN8nFallback, 
   setN8nConfig as setN8nConfigFallback,
@@ -94,6 +97,8 @@ import {
   navigateBrowser,
   pauseBrowser,
   resumeBrowser,
+  resetBrowserProfile,
+  forceStopBrowser,
   startBrowser,
   stopBrowser,
   takeScreenshot
@@ -113,18 +118,15 @@ function timingSafeCompare(a?: string, b?: string): boolean {
   }
 }
 
-const DEFAULT_ADMIN_PASS = 'adminx1';
-const DEFAULT_USER_PASS = '12345678';
-
 function getExpectedAdminPass(): string | null {
   const config = getServerConfig();
-  const pass = (config.auth?.adminPass || process.env.ADMIN_PASSWORD || DEFAULT_ADMIN_PASS).trim();
+  const pass = (process.env.ADMIN_PASSWORD || config.auth?.adminPass || '').trim();
   return pass.length > 0 ? pass : null;
 }
 
 function getExpectedUserPass(): string | null {
   const config = getServerConfig();
-  const pass = (config.auth?.userPass || process.env.USER_PASSWORD || DEFAULT_USER_PASS).trim();
+  const pass = (process.env.USER_PASSWORD || config.auth?.userPass || '').trim();
   return pass.length > 0 ? pass : null;
 }
 
@@ -287,6 +289,7 @@ function requireUserOrAdminAuth(req: express.Request, res: express.Response, nex
 export function createApp() {
   const app = express();
   loadMetricsHistory();
+  loadAdGuardHistory();
 
   // Persist metrics history (best-effort, every 60s)
   setInterval(() => {
@@ -309,7 +312,7 @@ export function createApp() {
     } catch {}
   }, 60000).unref?.();
 
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
 
   // Middleware de Cabeçalhos de Segurança e Validação Estrita de CORS
   app.use((req, res, next) => {
@@ -423,8 +426,8 @@ export function createApp() {
     res.status(200).send('OK');
   });
 
-  // AdGuard Configuration (GET é informativo, POST exige privilégio administrativo)
-  app.get('/api/adguard/config', (req, res) => {
+  // AdGuard Configuration (GET/POST exigem privilégio administrativo - pode conter credenciais)
+  app.get('/api/adguard/config', requireAdminAuth, (req, res) => {
     res.json(getAdGuardConfig());
   });
 
@@ -433,8 +436,51 @@ export function createApp() {
     res.json({ success: true, config: updated });
   });
 
+  // Câmeras (ao vivo, sem gravação no servidor)
+  app.get('/api/cameras', requireUserOrAdminAuth, async (_req, res) => {
+    try { res.json(await getCameraStatus()); } catch (e:any) { res.status(500).json({ ok:false, error: e?.message || String(e) }); }
+  });
+  app.get('/api/cameras/config', requireAdminAuth, (_req, res) => {
+    try { res.json({ ok:true, cameras: getPublicCameras().map(c=>({...c})) }); } catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.post('/api/cameras/start', requireAdminAuth, async (_req, res) => {
+    res.json(await ensureGo2rtcRunning());
+  });
+  app.get('/api/cameras/:id/details', requireUserOrAdminAuth, async (req, res) => {
+    try { res.json(await getCameraDetails(req.params.id)); }
+    catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.post('/api/cameras/:id/ptz', requireAdminAuth, async (req, res) => {
+    try { const action = String(req.body?.action || ''); res.json(await cameraPtz(req.params.id, action)); }
+    catch (e:any) { res.status(400).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.get('/api/cameras/:id/recordings', requireUserOrAdminAuth, async (req, res) => {
+    try { res.json(await cameraProbeRecordings(req.params.id)); }
+    catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.post('/api/cameras/:id/led', requireAdminAuth, async (req, res) => {
+    try { const mode = String(req.body?.mode || 'auto'); res.json(await cameraLed(req.params.id, mode as any)); }
+    catch (e:any) { res.status(400).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.get('/api/cameras/:id/audio.wav', requireUserOrAdminAuth, async (req,res) => {
+    await serveLiveAudio(req, res, req.params.id);
+  });
+  // Proxy de mídia: somente leitura, autenticado
+  app.get('/api/cameras/:id/stream/:kind/frame.jpeg', requireUserOrAdminAuth, async (req,res) => {
+    await proxyCameraRequest(req, res, req.params.id, req.params.kind === 'sub' ? 'sub' : 'main', 'frame.jpeg');
+  });
+  app.get('/api/cameras/:id/stream/:kind/stream.mjpeg', requireUserOrAdminAuth, async (req,res) => {
+    await serveLiveMjpeg(req, res, req.params.id, req.params.kind === 'sub' ? 'sub' : 'main');
+  });
+  app.post('/api/cameras/:id/webrtc/:kind', requireUserOrAdminAuth, async (req,res) => {
+    await proxyWebrtcOffer(req, res, req.params.id, req.params.kind === 'sub' ? 'sub' : 'main');
+  });
+  app.get('/api/cameras/:id/stream/:kind/stream.mp4', requireUserOrAdminAuth, async (req,res) => {
+    await proxyCameraRequest(req, res, req.params.id, req.params.kind === 'sub' ? 'sub' : 'main', 'stream.mp4');
+  });
+
   // AdGuard Status
-  app.get('/api/adguard/status', async (req, res) => {
+  app.get('/api/adguard/status', requireUserOrAdminAuth, async (req, res) => {
     try {
       const status = await fetchAdGuardStatus();
       res.json(status);
@@ -444,13 +490,80 @@ export function createApp() {
   });
 
   // AdGuard Statistics
-  app.get('/api/adguard/stats', async (req, res) => {
+  app.get('/api/adguard/stats', requireUserOrAdminAuth, async (req, res) => {
     try {
       const stats = await fetchAdGuardStats();
+      if (stats && (stats.connected || stats.online) && !stats.stale) {
+        addAdGuardSample(Number(stats.num_dns_queries || 0), Number(stats.num_blocked_filtering || 0));
+      }
       res.json(stats);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  app.get('/api/adguard/history', requireUserOrAdminAuth, async (req, res) => {
+    const now = Date.now();
+    const maxWindowMs = 7 * 24 * 3600 * 1000;
+    const fromQ = Number(req.query.from);
+    const toQ = Number(req.query.to);
+    const end = Number.isFinite(toQ) ? Math.min(now, toQ) : now;
+    const defaultStart = end - 24 * 3600 * 1000;
+    let start = Number.isFinite(fromQ) ? fromQ : defaultStart;
+    start = Math.max(end - maxWindowMs, Math.min(start, end - 60 * 1000));
+    const bucketMs = 60 * 1000; // fixed 1 min
+
+    let rawPoints = getAdGuardHistory(maxWindowMs);
+    if (rawPoints.length === 0) {
+      try {
+        const stats = await fetchAdGuardStats();
+        const dq = Array.isArray(stats?.dns_queries) ? stats.dns_queries : [];
+        const db = Array.isArray(stats?.blocked_filtering) ? stats.blocked_filtering : [];
+        const n = Math.min(dq.length, db.length);
+        if (n > 0) {
+          const hourMs = 3600 * 1000;
+          for (let i = 0; i < n; i++) {
+            const q = Math.max(0, Number(dq[i]) || 0);
+            const b = Math.max(0, Number(db[i]) || 0);
+            const hourEnd = now - (n - 1 - i) * hourMs;
+            for (let k = 1; k <= 60; k++) {
+              const ts = hourEnd - (60 - k) * 60 * 1000;
+              const dq1 = q / 60; const db1 = b / 60;
+              rawPoints.push({ ts, totalQueries: 0, totalBlocked: 0, deltaQueries: dq1, deltaBlocked: Math.min(db1, dq1) });
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const buckets = Math.max(1, Math.ceil((end - start) / bucketMs));
+    const agg = Array.from({ length: buckets }, (_, i) => ({ ts: start + (i + 1) * bucketMs, deltaQueries: 0, deltaBlocked: 0 }));
+    for (const p of rawPoints) {
+      const ts = Number(p.ts);
+      if (!Number.isFinite(ts) || ts <= start || ts > end) continue;
+      const idx = Math.min(buckets - 1, Math.max(0, Math.floor((ts - start - 1) / bucketMs)));
+      const dq = Math.max(0, Number(p.deltaQueries) || 0);
+      const db = Math.max(0, Number(p.deltaBlocked) || 0);
+      agg[idx].deltaQueries += dq;
+      agg[idx].deltaBlocked += Math.min(db, dq);
+    }
+    // Downsample for transport/render safety
+    const maxPoints = 2000;
+    let points = agg;
+    if (agg.length > maxPoints) {
+      const step = Math.ceil(agg.length / maxPoints);
+      const ds = [];
+      for (let i = 0; i < agg.length; i += step) {
+        const chunk = agg.slice(i, i + step);
+        ds.push({
+          ts: chunk[chunk.length - 1].ts,
+          deltaQueries: chunk.reduce((s, c) => s + c.deltaQueries, 0),
+          deltaBlocked: chunk.reduce((s, c) => s + c.deltaBlocked, 0),
+        });
+      }
+      points = ds;
+    }
+    res.json({ success: true, from: start, to: end, bucket: '1m', intervalMs: bucketMs, points, meta: getAdGuardHistoryMeta() });
   });
 
   // Sincronização direta de dados reais do AdGuard (/control/stats) - administrativo
@@ -475,7 +588,7 @@ export function createApp() {
   });
 
   // Retornar o comando de shell para limpar histórico no Ubuntu
-  app.get('/api/adguard/clear-command', (req, res) => {
+  app.get('/api/adguard/clear-command', requireAdminAuth, (req, res) => {
     res.json({ shellCommand: getAdGuardClearCommand() });
   });
 
@@ -1697,6 +1810,24 @@ export function createApp() {
     res.json({ success: true, ...issueWsTicket() });
   });
 
+  app.post('/api/browser/reset-profile', requireAdminAuth, async (_req, res) => {
+    try {
+      const state = await resetBrowserProfile();
+      res.json({ success: true, state });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Falha ao limpar perfil do navegador.' });
+    }
+  });
+
+  app.post('/api/browser/force-stop', requireAdminAuth, async (_req, res) => {
+    try {
+      const state = await forceStopBrowser();
+      res.json({ success: true, state });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || 'Falha ao forçar desligamento do navegador.' });
+    }
+  });
+
   // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/system, /api/cpu, /api/network, etc.)
   app.all('/api/*', async (req, res, next) => {
     // Rotas tratadas internamente pelo server.ts
@@ -1719,7 +1850,8 @@ export function createApp() {
       '/api/credentials',
       '/api/security',
       '/api/telegram',
-      '/api/terminal'
+      '/api/terminal',
+      '/api/browser'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();
@@ -1933,13 +2065,24 @@ export function createApp() {
   });
 
   // Rota Nginx-compatible /adguard-api/* (Injeta autenticação automaticamente e libera CORS)
-  app.all('/adguard-api/*', async (req, res) => {
+  app.all('/adguard-api/*', requireUserOrAdminAuth, async (req, res) => {
     applyCors(res);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept');
 
     if (req.method === 'OPTIONS') {
       return res.status(204).end();
+    }
+
+    const method = req.method.toUpperCase();
+    const isReadMethod = method === 'GET' || method === 'HEAD';
+    if (!isReadMethod) {
+      const caller = (req as any).user;
+      if (caller?.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Acesso negado: privilégios de administrador necessários para operações de escrita no AdGuard.'
+        });
+      }
     }
 
     const rawSub = (req.params as any)[0] || '';
@@ -1953,9 +2096,9 @@ export function createApp() {
       `http://localhost:8081/control/${cleanSub}${queryStr}`
     ];
 
-    const adgCfg = getAdGuardConfig();
-    const adgUser = process.env.ADGUARD_USERNAME || adgCfg.username || '';
-    const adgPass = process.env.ADGUARD_PASSWORD || adgCfg.password || '';
+    const adgCfg = getActiveAdGuardCredentials();
+    const adgUser = adgCfg.username || '';
+    const adgPass = adgCfg.password || '';
     const adgAuthHeader = (adgUser && adgPass) ? `Basic ${Buffer.from(`${adgUser}:${adgPass}`).toString('base64')}` : undefined;
 
     let responded = false;
@@ -1996,7 +2139,7 @@ export function createApp() {
   });
 
   // AdGuard Query Log
-  app.get('/api/adguard/querylog', async (req, res) => {
+  app.get('/api/adguard/querylog', requireUserOrAdminAuth, async (req, res) => {
     try {
       const limit = Number(req.query.limit) || 30;
       const logs = await fetchAdGuardQueryLog(limit);
@@ -2017,7 +2160,7 @@ export function createApp() {
   });
 
   // All Analyzed Domains from Cache / SQLite
-  app.get('/api/adguard/domains', async (req, res) => {
+  app.get('/api/adguard/domains', requireUserOrAdminAuth, async (req, res) => {
     try {
       // 1. Get all stored analyses
       const stored = getAllAnalyzedDomains();
@@ -2072,7 +2215,7 @@ export function createApp() {
   });
 
   // Analyze a single domain with AI (Checks Cache first!)
-  app.post('/api/adguard/analyze', async (req, res) => {
+  app.post('/api/adguard/analyze', requireAdminAuth, async (req, res) => {
     try {
       const { domain, force } = req.body;
       if (!domain || typeof domain !== 'string') {
@@ -2109,7 +2252,7 @@ export function createApp() {
   });
 
   // Batch analyze unanalyzed domains
-  app.post('/api/adguard/analyze-batch', async (req, res) => {
+  app.post('/api/adguard/analyze-batch', requireAdminAuth, async (req, res) => {
     try {
       const { domains, limit = 5 } = req.body;
       let targetDomains: string[] = [];
@@ -2188,7 +2331,7 @@ export function createApp() {
     '00E04C': 'Realtek Semiconductor Corp.'
   };
 
-  app.get('/api/mac-vendor/:mac?', async (req, res) => {
+  app.get('/api/mac-vendor/:mac?', requireUserOrAdminAuth, async (req, res) => {
     try {
       const rawMac = (req.params.mac || (req.query.mac as string) || '').trim();
       if (!rawMac) {

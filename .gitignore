@@ -43,3 +43,10 @@ public/assets/aistudio/
 *.mkv
 *.mov
 
+
+# Camera secrets
+.camera-secrets.json
+
+# Camera runtime
+bin/go2rtc
+data/go2rtc.yaml

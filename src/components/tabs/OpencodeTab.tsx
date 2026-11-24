@@ -42,6 +42,7 @@ interface OpencodeSession {
   createdAt: string;
   updatedAt: string;
   model: string;
+  source?: 'panel' | 'telegram' | 'api';
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalTokens: number;
@@ -125,9 +126,14 @@ export const OpencodeTab: React.FC = () => {
       });
       if (res.ok) {
         const json: OpencodeSession[] = await res.json();
-        setSessions(json);
-        if (!currentSessionId && json.length > 0) {
-          loadSessionMessages(json[0].id, json[0].model);
+        const panelSessions = json.filter(s => s.source !== 'telegram');
+        setSessions(panelSessions);
+        if (!currentSessionId && panelSessions.length > 0) {
+          loadSessionMessages(panelSessions[0].id, panelSessions[0].model);
+        } else if (currentSessionId && !panelSessions.some(s => s.id === currentSessionId)) {
+          setMessages([]);
+          setCurrentSessionId('');
+          if (panelSessions.length > 0) loadSessionMessages(panelSessions[0].id, panelSessions[0].model);
         }
       }
     } catch {}
@@ -277,8 +283,18 @@ export const OpencodeTab: React.FC = () => {
     }
   }, [messages, sending]);
 
+  const copyTextSafe = async (text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true; }
+    } catch {}
+    try {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select(); const ok = document.execCommand('copy'); document.body.removeChild(ta); return ok;
+    } catch { return false; }
+  };
+
   const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
+    void copyTextSafe(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
   };
@@ -311,7 +327,7 @@ export const OpencodeTab: React.FC = () => {
             </div>
             <p className="text-xs text-[#4A4A68] font-medium mt-0.5">
               Assistente inteligente Lux integrado ao Opencode CLI no host samuelserver para diagnóstico de rede, AdGuard DNS, UFW e automações.
-              Console interativo do Agente Opencode, monitoramento de tokens consumidos, limites de quota e histórico de sessões.
+              Console interativo do Agente Opencode (sessões do Telegram ficam separadas no bot, sem espelhamento aqui).
             </p>
           </div>
         </div>
@@ -330,6 +346,11 @@ export const OpencodeTab: React.FC = () => {
                 <span className="text-xs font-bold font-title text-[#1A1A2E]">
                   Sessão Ativa: {sessions.find(s => s.id === currentSessionId)?.title || 'Nova Conversa'}
                 </span>
+                {sessions.find(s => s.id === currentSessionId)?.source === 'telegram' && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#0088cc]/10 text-[#0088cc] border border-[#0088cc]/30">
+                    Telegram
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {/* Seletor de Modelo de IA */}
@@ -400,7 +421,9 @@ export const OpencodeTab: React.FC = () => {
                       className={`max-w-[85%] rounded-xl p-3.5 border-2 border-[#1A1A2E] shadow-[3px_3px_0px_#1A1A2E] ${
                         msg.role === 'user'
                           ? 'bg-[#FF5A36] text-white font-mono text-xs'
-                          : 'bg-white text-[#1A1A2E] space-y-2'
+                          : (sessions.find(s => s.id === currentSessionId)?.source === 'telegram'
+                              ? 'bg-[#F0F9FF] text-[#1A1A2E] space-y-2 border-[#0088cc]'
+                              : 'bg-white text-[#1A1A2E] space-y-2')
                       }`}
                     >
                       {/* Assistant Header com Badge de Tokens e Raciocínio */}
