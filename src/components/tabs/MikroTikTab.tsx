@@ -18,6 +18,9 @@ export const MikroTikTab: React.FC = () => {
   const [busyMac, setBusyMac] = useState<string|null>(null);
   const [pingTarget, setPingTarget] = useState('1.1.1.1');
   const [pingResult, setPingResult] = useState<any>(null);
+  const [traceResult, setTraceResult] = useState<any>(null);
+  const [dnsName, setDnsName] = useState('google.com');
+  const [dnsResult, setDnsResult] = useState<any>(null);
   const refresh = useCallback(async () => {
     try { setError(null); const res = await fetch('/api/mikrotik/status', { headers: getAuthHeaders() }); const j = await res.json(); if (!res.ok || j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setData(j); }
     catch (e:any) { setError(e?.message||'Falha ao consultar MikroTik'); }
@@ -34,7 +37,23 @@ export const MikroTikTab: React.FC = () => {
     try { const res = await fetch('/api/mikrotik/ping', { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ target: pingTarget, count:4 }) }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setPingResult(j); }
     catch(e:any){ setPingResult({ ok:false, error:e?.message||'Falha' }); } finally { setBusyMac(null); }
   };
-  useEffect(()=>{ refresh(); const id=setInterval(refresh,15000); return ()=>clearInterval(id); },[refresh]);
+  const runTrace = async () => {
+    setBusyMac('trace');
+    try { const res = await fetch('/api/mikrotik/traceroute', { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ target: pingTarget }) }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setTraceResult(j); }
+    catch(e:any){ setTraceResult({ ok:false, error:e?.message||'Falha' }); } finally { setBusyMac(null); }
+  };
+  const runDns = async () => {
+    setBusyMac('dns');
+    try { const res = await fetch('/api/mikrotik/dns', { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ name: dnsName }) }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setDnsResult(j); }
+    catch(e:any){ setDnsResult({ ok:false, error:e?.message||'Falha' }); } finally { setBusyMac(null); }
+  };
+  const makeStatic = async (mac:string, ip?:string) => {
+    if (!confirm(`Tornar DHCP estático para ${mac}?`)) return;
+    setBusyMac(mac+'static');
+    try { const res = await fetch(`/api/mikrotik/devices/${encodeURIComponent(mac)}/make-static`, { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ address: ip||'', comment: 'server-panel static' }) }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); await refresh(); }
+    catch(e:any){ alert(e?.message||'Falha'); } finally { setBusyMac(null); }
+  };
+  useEffect(()=>{ refresh(); const id=setInterval(refresh,3000); return ()=>clearInterval(id); },[refresh]);
 
   const r=data?.resource||{}; const devices=data?.devices||[]; const events=data?.events||[]; const wifi=data?.wifi||[]; const leases=data?.leases||[]; const interfaces=data?.interfaces||[]; const firewall=data?.firewall||[]; const routes=data?.routes||[]; const nat=data?.nat||[];
   const memUsed=(Number(r['total-memory']||0)-Number(r['free-memory']||0)); const memPct=r['total-memory']?Math.round((memUsed/Number(r['total-memory']))*100):0;
@@ -42,7 +61,7 @@ export const MikroTikTab: React.FC = () => {
 
   return <div className="space-y-4 font-sans text-[#1A1A2E]">
     <div className="p-4 sm:p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] flex flex-col md:flex-row md:items-center justify-between gap-4">
-      <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center"><Router className="w-5 h-5 text-[#FF5A36]"/></div><div><h2 className="text-lg sm:text-xl font-black font-title tracking-tight">Network Center / MikroTik</h2><p className="text-xs sm:text-sm text-[#4A4A68] font-medium mt-0.5">Read-only RouterOS 8728 • inventário/histórico local. {data?.identity?.name||''}</p></div></div>
+      <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center"><Router className="w-5 h-5 text-[#FF5A36]"/></div><div><h2 className="text-lg sm:text-xl font-black font-title tracking-tight">Network Center / MikroTik</h2><p className="text-xs sm:text-sm text-[#4A4A68] font-medium mt-0.5">RouterOS 8728 • inventário/histórico local • auto 3s. {data?.identity?.name||''}</p></div></div>
       <button type="button" onClick={refresh} className="min-h-[40px] px-3.5 py-2 rounded-lg bg-[#FF5A36] hover:bg-[#E04522] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-white font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"><RefreshCw className="w-4 h-4"/>Atualizar</button>
     </div>
     {error && <div className="bg-[#FEE4E2] border-2 border-[#1A1A2E] text-[#B42318] rounded-xl p-4 text-sm flex gap-2"><AlertTriangle className="w-4 h-4 mt-0.5"/><div><div className="font-bold">Erro MikroTik</div><div className="font-mono text-xs mt-1">{error}</div></div></div>}
@@ -60,7 +79,7 @@ export const MikroTikTab: React.FC = () => {
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Users className="w-4 h-4 text-[#FF5A36]"/>Inventário de dispositivos</div>
         <Table cols={['Nome/Host','IP','MAC','Tipo/Fabricante','Conexão','Sinal','Último visto','Status','Ações']} rows={devices.map((d:any)=>[
           <div><div className="font-bold">{d.nickname||d.hostname||'—'}</div><div className="text-[#4A4A68]">{d.hostname||''}</div></div>, d.ip||d.last_ip||'—', d.mac, <div><div>{d.device_type||'unknown'}</div><div className="text-[#4A4A68]">{d.vendor||''}</div></div>, `${d.connection||'—'}${d.interface?` (${d.interface})`:''}`, d.signal_dbm?`${d.signal_dbm} dBm`:'—', d.last_seen?new Date(d.last_seen).toLocaleString():'—', <span className={Number(d.online)?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{Number(d.online)?'online':'offline'}</span>,
-          <div className="flex gap-1">{Number(d.blocked)?<button disabled={busyMac===d.mac+'unblock'} onClick={()=>act(d.mac,'unblock')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#ECFDF3] text-[11px] font-bold">Desbloquear</button>:<button disabled={busyMac===d.mac+'block'} onClick={()=>act(d.mac,'block')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FEE4E2] text-[11px] font-bold">Bloquear</button>}</div>
+          <div className="flex gap-1 flex-wrap">{Number(d.blocked)?<button disabled={busyMac===d.mac+'unblock'} onClick={()=>act(d.mac,'unblock')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#ECFDF3] text-[11px] font-bold">Desbloquear</button>:<button disabled={busyMac===d.mac+'block'} onClick={()=>act(d.mac,'block')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FEE4E2] text-[11px] font-bold">Bloquear</button>}<button disabled={busyMac===d.mac+'static'} onClick={()=>makeStatic(d.mac,d.ip||d.last_ip)} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FFF7E8] text-[11px] font-bold">DHCP fixo</button></div>
         ])} />
       </div>
 
@@ -82,11 +101,20 @@ export const MikroTikTab: React.FC = () => {
         <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Network className="w-4 h-4 text-[#FF5A36]"/>Rotas / NAT</div><Table cols={['Tipo','Destino','Saída/GW','Ativo']} rows={[...routes.map((r:any)=>['route',r['dst-address'],r.gateway||r['immediate-gw']||'—',r.active==='true'?'sim':'não']), ...nat.map((n:any)=>['nat',n.chain,n['out-interface']||n.action||'—',n.disabled==='true'?'não':'sim'])]} /></div>
       </div>
 
-      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Activity className="w-4 h-4 text-[#FF5A36]"/>Diagnóstico (ping via MikroTik)</div>
-        <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E] flex flex-col sm:flex-row gap-2 items-start sm:items-center">
-          <input value={pingTarget} onChange={e=>setPingTarget(e.target.value)} className="px-3 py-2 border-2 border-[#1A1A2E] rounded-lg font-mono text-sm w-full sm:w-64" placeholder="IP ou host" />
-          <button disabled={busyMac==='ping'} onClick={runPing} className="px-3 py-2 bg-[#1A1A2E] text-white rounded-lg font-bold text-sm border-2 border-[#1A1A2E]">Ping</button>
-          {pingResult && <div className="text-xs font-mono break-all">{pingResult.ok ? `ok: ${JSON.stringify(pingResult.results?.slice?.(0,4)||pingResult.results)}` : `erro: ${pingResult.error}`}</div>}
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Activity className="w-4 h-4 text-[#FF5A36]"/>Diagnóstico (via MikroTik)</div>
+        <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E] space-y-2">
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+            <input value={pingTarget} onChange={e=>setPingTarget(e.target.value)} className="px-3 py-2 border-2 border-[#1A1A2E] rounded-lg font-mono text-sm w-full sm:w-64" placeholder="IP ou host" />
+            <button disabled={busyMac==='ping'} onClick={runPing} className="px-3 py-2 bg-[#1A1A2E] text-white rounded-lg font-bold text-sm border-2 border-[#1A1A2E]">Ping</button>
+            <button disabled={busyMac==='trace'} onClick={runTrace} className="px-3 py-2 bg-[#FFF7E8] text-[#1A1A2E] rounded-lg font-bold text-sm border-2 border-[#1A1A2E]">Traceroute</button>
+          </div>
+          {pingResult && <div className="text-xs font-mono break-all"><b>Ping:</b> {pingResult.ok ? JSON.stringify(pingResult.results?.slice?.(0,4)||pingResult.results) : `erro: ${pingResult.error}`}</div>}
+          {traceResult && <div className="text-xs font-mono break-all"><b>Trace:</b> {traceResult.ok ? JSON.stringify(traceResult.results?.slice?.(0,8)||traceResult.results) : `erro: ${traceResult.error}`}</div>}
+          <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+            <input value={dnsName} onChange={e=>setDnsName(e.target.value)} className="px-3 py-2 border-2 border-[#1A1A2E] rounded-lg font-mono text-sm w-full sm:w-64" placeholder="nome DNS" />
+            <button disabled={busyMac==='dns'} onClick={runDns} className="px-3 py-2 bg-[#FFF7E8] text-[#1A1A2E] rounded-lg font-bold text-sm border-2 border-[#1A1A2E]">DNS</button>
+          </div>
+          {dnsResult && <div className="text-xs font-mono break-all"><b>DNS:</b> {dnsResult.ok ? JSON.stringify(dnsResult.results||dnsResult) : `erro: ${dnsResult.error}`}</div>}
         </div>
       </div>
 

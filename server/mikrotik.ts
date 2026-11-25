@@ -169,3 +169,36 @@ export async function mikrotikRunPing(target: string, count = 4) {
     return { ok: true, target: safeTarget, results: r };
   });
 }
+
+export async function mikrotikMakeLeaseStatic(mac: string, address?: string, comment?: string) {
+  const m = mac.toUpperCase();
+  return await withMikrotik(async (c) => {
+    const leases = rosRows(await c.talk(['/ip/dhcp-server/lease/print']));
+    const lease = leases.find(l => String(l['mac-address']||'').toUpperCase()===m);
+    if (!lease) throw new Error('Lease não encontrado para MAC');
+    const id = lease['.id'];
+    const words = ['/ip/dhcp-server/lease/make-static', `=.id=${id}`];
+    await c.talk(words);
+    const setWords = ['/ip/dhcp-server/lease/set', `=.id=${id}`];
+    if (address) setWords.push(`=address=${address}`);
+    if (comment) setWords.push(`=comment=${comment}`);
+    if (setWords.length>2) await c.talk(setWords);
+    return { ok:true, mac:m, id };
+  });
+}
+
+export async function mikrotikTraceroute(target: string) {
+  const safeTarget = String(target||'').trim(); if (!/^[a-zA-Z0-9.\-:]+$/.test(safeTarget)) throw new Error('target inválido');
+  return await withMikrotik(async (c) => {
+    const r = rosRows(await c.talk(['/tool/traceroute', `=address=${safeTarget}`, '=count=1', '=duration=5']));
+    return { ok:true, target:safeTarget, results:r };
+  });
+}
+
+export async function mikrotikDnsLookup(name: string) {
+  const safe = String(name||'').trim(); if (!/^[a-zA-Z0-9.\-:]+$/.test(safe)) throw new Error('name inválido');
+  return await withMikrotik(async (c) => {
+    const r = rosRows(await c.talk(['/resolve', `=name=${safe}`]));
+    return { ok:true, name:safe, results:r };
+  });
+}

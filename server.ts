@@ -59,7 +59,7 @@ import {
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { runShellCommand } from './server/terminalRunner.js';
 import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities } from './server/cameras.js';
-import { mikrotikGetStatus, mikrotikTestConnection, mikrotikBlockDevice, mikrotikUnblockDevice, mikrotikRunPing } from './server/mikrotik.js';
+import { mikrotikGetStatus, mikrotikTestConnection, mikrotikBlockDevice, mikrotikUnblockDevice, mikrotikRunPing, mikrotikMakeLeaseStatic, mikrotikTraceroute, mikrotikDnsLookup } from './server/mikrotik.js';
 import { startMikrotikMonitor, getMikrotikCached, pollMikrotikOnce } from './server/mikrotikMonitor.js';
 import { listMikrotikDevices, listMikrotikEvents, listMikrotikSnapshots, setMikrotikDeviceNickname, addMikrotikEvent } from './server/db.js';
 import { 
@@ -485,6 +485,9 @@ export function createApp() {
   app.post('/api/mikrotik/devices/:mac/block', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikBlockDevice(req.params.mac); addMikrotikEvent({ event_type:'block', mac:req.params.mac, details:'Bloqueado via painel' }); logAudit({ actor:(req as any).user||'admin', action:'mikrotik.block', target:req.params.mac, details:'block', status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
   app.post('/api/mikrotik/devices/:mac/unblock', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikUnblockDevice(req.params.mac); addMikrotikEvent({ event_type:'unblock', mac:req.params.mac, details:'Desbloqueado via painel' }); logAudit({ actor:(req as any).user||'admin', action:'mikrotik.unblock', target:req.params.mac, details:'unblock', status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
   app.post('/api/mikrotik/ping', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikRunPing(String(req.body?.target||''), Number(req.body?.count||4)); res.json(r); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/traceroute', requireAdminAuth, async (req,res)=>{ try { res.json(await mikrotikTraceroute(String(req.body?.target||''))); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/dns', requireAdminAuth, async (req,res)=>{ try { res.json(await mikrotikDnsLookup(String(req.body?.name||''))); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/devices/:mac/make-static', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikMakeLeaseStatic(req.params.mac, String(req.body?.address||''), String(req.body?.comment||'')); addMikrotikEvent({ event_type:'dhcp_static', mac:req.params.mac, ip:req.body?.address, details:'Lease tornado estático' }); logAudit({ actor:(req as any).user||'admin', action:'mikrotik.dhcp_static', target:req.params.mac, details:String(req.body?.address||''), status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
 
   // Câmeras (ao vivo, sem gravação no servidor)
   app.get('/api/cameras', requireUserOrAdminAuth, async (_req, res) => {
