@@ -18,6 +18,7 @@ import {
   Cpu, 
   FileText, 
   Radio, 
+  Globe,
   ArrowDownCircle, 
   SlidersHorizontal 
 } from 'lucide-react';
@@ -74,6 +75,13 @@ const SOURCES: SourceOption[] = [
     sublabel: 'Kernel & Hardware',
     icon: Radio,
     color: 'rose'
+  },
+  {
+    id: 'mikrotik',
+    label: 'MikroTik RouterOS',
+    sublabel: 'Logs do roteador via API 8728',
+    icon: Globe,
+    color: 'sky'
   }
 ];
 
@@ -341,7 +349,7 @@ export const LogsTab: React.FC = () => {
       </div>
 
       {/* Sources Selector Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
         {SOURCES.map((src) => {
           const Icon = src.icon;
           const isSelected = selectedSource === src.id;

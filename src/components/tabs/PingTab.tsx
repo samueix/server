@@ -14,9 +14,23 @@ import {
   Globe
 } from 'lucide-react';
 import { fetchPingTelemetry, fetchTrace } from '../../services/api';
+import { getAuthHeaders } from '../../services/authService';
 import { PingResponse, TraceHop } from '../../types';
 
 type TraceStatus = 'idle' | 'running' | 'done' | 'error';
+
+function parseRosTime(v: any): number {
+  const str = String(v || '');
+  if (!str) return 0;
+  let ms = 0;
+  const mMatch = str.match(/([\d.]+)ms/);
+  const uMatch = str.match(/([\d.]+)us/);
+  const sMatch = str.match(/([\d.]+)s(?!\w)/);
+  if (sMatch) ms += Number(sMatch[1]) * 1000;
+  if (mMatch) ms += Number(mMatch[1]);
+  if (uMatch) ms += Number(uMatch[1]) / 1000;
+  return Math.round(ms * 1000) / 1000;
+}
 
 function isValidHostInput(v: string) {
   return /^[a-zA-Z0-9._:-]{1,253}$/.test(v.trim());
@@ -24,6 +38,9 @@ function isValidHostInput(v: string) {
 
 export const PingTab: React.FC = () => {
   const [data, setData] = useState<PingResponse | null>(null);
+  const [pingSource, setPingSource] = useState<'server' | 'router'>('server');
+  const sourceRef = useRef<'server' | 'router'>('server');
+  sourceRef.current = pingSource;
   const [history, setHistory] = useState<{ time: string; avgMs: number }[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -54,6 +71,36 @@ export const PingTab: React.FC = () => {
     abortControllerRef.current = new AbortController();
 
     try {
+      if (sourceRef.current === 'router') {
+        const target = (customHost.trim() || selectedHost || '1.1.1.1').trim();
+        const r = await fetch('/api/mikrotik/ping', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target, count: 4 }),
+          signal: abortControllerRef.current.signal,
+        });
+        const j = await r.json();
+        if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
+        const rs = j.results || [];
+        const last = rs[rs.length - 1] || {};
+        const avgMs = parseRosTime(last['avg-rtt']);
+        const received = Number(last.received ?? rs.filter((x: any) => x.time).length);
+        const online = received > 0;
+        const quality: PingResponse['overall_status'] = online ? (avgMs < 40 ? 'EXCELENTE' : avgMs < 80 ? 'BOM' : 'ALTO') : 'DESCONECTADO';
+        const mapped: PingResponse = {
+          success: true,
+          timestamp: new Date().toISOString(),
+          average_ms: avgMs || null,
+          overall_status: quality,
+          targets: [{ id: 'router-target', name: 'Roteador MikroTik', host: target, port: 0, type: 'external', pingMs: online ? avgMs : null, status: online ? 'ONLINE' : 'OFFLINE', quality: online ? (avgMs < 40 ? 'EXCELENTE' : avgMs < 80 ? 'BOM' : 'MEDIO') : 'FALHA' }],
+          notice: `Ping executado no roteador MikroTik (API 8728) · ${received}/${last.sent ?? rs.length} respostas · perda ${last['packet-loss'] ?? '—'}%.`,
+        };
+        setData(mapped);
+        setErrorMsg(null);
+        setLastCheck(new Date().toLocaleTimeString('pt-BR'));
+        setHistory(prev => [...prev, { time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), avgMs: avgMs || 0 }].slice(-25));
+        return;
+      }
       const res = await fetchPingTelemetry(abortControllerRef.current.signal);
       setData(res);
       setErrorMsg(null);
@@ -132,6 +179,45 @@ export const PingTab: React.FC = () => {
       setTraceStatus(status);
       setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
     };
+
+    if (sourceRef.current === 'router') {
+      try {
+        const r = await fetch('/api/mikrotik/traceroute', {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target }),
+          signal: traceAbortRef.current.signal,
+        });
+        const j = await r.json();
+        if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
+        const mapped: TraceHop[] = (j.results || []).map((h: any, i: number) => ({
+          count: i + 1,
+          host: h.address || '???',
+          loss: Number(h.loss ?? 0),
+          sent: Number(h.sent ?? 1),
+          last: Number(h.last ?? 0),
+          avg: Number(h.avg ?? 0),
+          best: Number(h.best ?? 0),
+          wrst: Number(h.worst ?? 0),
+          stdev: Number(h['std-dev'] ?? 0),
+          timeout: !h.address,
+          reached: false,
+        }));
+        if (traceRunIdRef.current === runId) {
+          setHops(mapped);
+          setTraceSource('MikroTik RouterOS (API 8728)');
+          setTraceReached(null);
+          setTraceError(mapped.length ? null : 'Roteador não retornou saltos');
+          setTraceUpdated(new Date().toLocaleTimeString('pt-BR'));
+        }
+        finish(mapped.length ? 'done' : 'error');
+      } catch (err: any) {
+        if (traceRunIdRef.current !== runId || err?.name === 'AbortError') return;
+        if (traceRunIdRef.current === runId) setTraceError(err?.message || 'Falha no traceroute via roteador');
+        finish('error');
+      }
+      return;
+    }
 
     try {
       const resp = await fetch(`/api/trace/stream?host=${encodeURIComponent(target)}&maxHops=30&probes=3`, {
@@ -222,6 +308,12 @@ export const PingTab: React.FC = () => {
     };
   }, []);
 
+  const firstSourceRef = useRef(true);
+  useEffect(() => {
+    if (firstSourceRef.current) { firstSourceRef.current = false; return; }
+    loadPing(true);
+  }, [pingSource]);
+
   const effectiveHost = (customHost.trim() || selectedHost || '').trim();
 
   const handleRunTrace = () => {
@@ -288,6 +380,10 @@ export const PingTab: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          <div className="flex items-center gap-1 bg-[#FFF7E8] p-1 rounded-lg border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]" title="Executar no servidor ou no roteador MikroTik">
+            <button onClick={()=>setPingSource('server')} className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold ${pingSource==='server'?'bg-[#1A1A2E] text-white':'text-[#4A4A68]'}`}>Servidor</button>
+            <button onClick={()=>setPingSource('router')} className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold ${pingSource==='router'?'bg-[#FF5A36] text-white':'text-[#4A4A68]'}`}>Roteador</button>
+          </div>
           <div className="text-right hidden sm:block bg-[#FFF7E8] px-3 py-1.5 rounded-lg border-2 border-[#1A1A2E]">
             <span className="text-[10px] text-[#4A4A68] block font-mono font-bold uppercase tracking-wider">Último ping</span>
             <span className="text-xs text-[#1A1A2E] font-mono font-bold tabular-nums">{lastCheck}</span>

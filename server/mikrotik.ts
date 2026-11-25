@@ -204,3 +204,88 @@ export async function mikrotikDnsLookup(name: string) {
     return { ok:true, name:safe, results: rows.length?rows:ret, raw: sentences };
   });
 }
+
+function isIpLike(v: string) { return /^[0-9a-fA-F:.]+$/.test(v) && (v.includes('.') || v.includes(':')); }
+
+export async function mikrotikGetDnsSettings() {
+  return await withMikrotik(async (c) => {
+    const dns = rosOne(await rosSafe(c, ['/ip/dns/print']));
+    const networks = rosRows(await rosSafe(c, ['/ip/dhcp-server/network/print']));
+    return { ok: true, dns, dhcpNetworks: networks };
+  });
+}
+
+export async function mikrotikSetDnsServers(servers: string[], opts?: { dhcpDns?: string; applyDhcp?: boolean }) {
+  const list = (servers || []).map(s => String(s || '').trim()).filter(Boolean);
+  if (!list.length) throw new Error('informe ao menos um servidor DNS');
+  if (!list.every(isIpLike)) throw new Error('servidor DNS inválido');
+  const dhcpDns = String(opts?.dhcpDns || '').trim();
+  if (dhcpDns && !isIpLike(dhcpDns)) throw new Error('DNS DHCP inválido');
+  const applyDhcp = opts?.applyDhcp !== false && Boolean(dhcpDns);
+  return await withMikrotik(async (c) => {
+    const prevDns = rosOne(await rosSafe(c, ['/ip/dns/print']));
+    const networks = rosRows(await rosSafe(c, ['/ip/dhcp-server/network/print']));
+    const previous = {
+      servers: prevDns?.servers || '',
+      allowRemoteRequests: prevDns?.['allow-remote-requests'] || '',
+      dhcpNetworks: networks.map(n => ({ id: n['.id'], address: n.address, dnsServer: n['dns-server'] || '' })),
+    };
+    await c.talk(['/ip/dns/set', `=servers=${list.join(',')}`, '=allow-remote-requests=yes']);
+    if (applyDhcp) {
+      for (const n of networks) {
+        const addr = String(n.address || '');
+        if (addr.startsWith('192.168.88.') || addr.startsWith('192.168.88/')) {
+          await c.talk(['/ip/dhcp-server/network/set', `=.id=${n['.id']}`, `=dns-server=${dhcpDns}`]);
+        }
+      }
+    }
+    const afterDns = rosOne(await rosSafe(c, ['/ip/dns/print']));
+    const afterNetworks = rosRows(await rosSafe(c, ['/ip/dhcp-server/network/print']));
+    return {
+      ok: true,
+      previous,
+      dns: afterDns,
+      dhcpNetworks: afterNetworks,
+      applied: { servers: list.join(','), dhcpDns: applyDhcp ? dhcpDns : null },
+    };
+  });
+}
+
+export async function mikrotikGetLogs(linesCount = 100, filterTerm = '') {
+  const count = Math.min(Math.max(Number(linesCount) || 100, 10), 500);
+  return await withMikrotik(async (c) => {
+    const rows = rosRows(await rosSafe(c, ['/log/print']));
+    const rawAll = rows.map(r => `${r.time || ''} ${r.topics || ''} ${r.message || ''}`.replace(/\s+/g, ' ').trim());
+    const term = String(filterTerm || '').trim().toLowerCase();
+    const filtered = term ? rawAll.filter(l => l.toLowerCase().includes(term)) : rawAll;
+    const sliced = filtered.slice(-count);
+    const levelOf = (r: Record<string, string>) => {
+      const t = `${r.topics || ''} ${r.message || ''}`.toLowerCase();
+      if (t.includes('error') || t.includes('critical') || t.includes('fail')) return 'error';
+      if (t.includes('warning') || t.includes('drop')) return 'warn';
+      if (t.includes('debug')) return 'debug';
+      return 'info';
+    };
+    const logs = sliced.map((line, idx) => {
+      const row = rows[rows.length - sliced.length + idx] || {};
+      return {
+        id: `mt-${Date.now()}-${idx}`,
+        timestamp: row.time || '',
+        process: String(row.topics || 'routeros').split(',')[0],
+        message: row.message || line,
+        raw: line,
+        level: levelOf(row as Record<string, string>),
+      };
+    });
+    return {
+      source: 'mikrotik',
+      source_path: 'RouterOS /log',
+      file_exists: true,
+      total_lines: rawAll.length,
+      returned_lines: logs.length,
+      last_updated: new Date().toLocaleTimeString('pt-BR'),
+      logs,
+      raw_lines: sliced,
+    };
+  });
+}

@@ -212,17 +212,18 @@ const TABS_DOCUMENTATION: DocTab[] = [
     id: 'services',
     name: '11. Serviços',
     icon: ShieldCheck,
-    summary: 'Status dos serviços/daemons realmente monitorados neste servidor.',
+    summary: 'Status dos serviços/daemons do servidor + card do roteador MikroTik.',
     purpose: 'Exibir estado operacional dos serviços relevantes instalados no samuelserver.',
     whatYouCanDo: [
       'Ver status (online/offline/erro), boot, porta e infos básicas.',
+      'Acompanhar o card do roteador MikroTik (uptime, CPU/RAM, dispositivos e DNS).',
       'Copiar comandos systemctl de status/restart para uso no terminal.'
     ],
     indicators: [
       { label: 'ONLINE / OFFLINE', desc: 'Estado atual detectado via systemd/porta/processo conforme heurística do monitor.' },
       { label: 'Habilitado no boot', desc: 'Se a unidade está configurada para iniciar automaticamente.' }
     ],
-    apis: 'GET de status de serviços via backend (services monitor). Monitorados: OpenSSH (22), AdGuardHome (53,8081), Server Panel (3000), Nginx (80,443), Cron, systemd-resolved (53), UFW, Docker, Tailscale, n8n (5678, container Docker).',
+    apis: 'GET de status de serviços via backend (services monitor) + GET /api/mikrotik/status para o card do roteador. Monitorados: OpenSSH (22), AdGuardHome (53,8081), Server Panel (3000), Nginx (80,443), Cron, systemd-resolved (53), UFW, Docker, Tailscale, n8n (5678, container Docker).',
     permissions: 'Restrito a administrador (conforme sidebar/UI).',
     troubleshooting: 'Para investigar: sudo systemctl status <unidade> --no-pager e sudo journalctl -u <unidade> -n 80. n8n roda em Docker (container "n8n").'
   },
@@ -251,14 +252,14 @@ const TABS_DOCUMENTATION: DocTab[] = [
     summary: 'Visualização de logs/journal de componentes do servidor.',
     purpose: 'Apoiar diagnóstico de falhas e auditoria operacional.',
     whatYouCanDo: [
-      'Consultar registros recentes por origem/serviço (conforme filtros da UI).',
+      'Consultar registros recentes por origem/serviço (inclui logs do RouterOS via API 8728).',
       'Buscar mensagens e acompanhar eventos em tempo de atualização.'
     ],
     indicators: [
       { label: 'Severidade', desc: 'Nível do evento (info/warn/error) quando fornecido pela fonte.' },
       { label: 'Origem', desc: 'Unidade/serviço que gerou o registro (systemd, nginx, etc.).' }
     ],
-    apis: 'Consulta de logs via backend do painel (leitura de journal/fontes configuradas).',
+    apis: 'GET /api/logs (journal/fontes locais) e GET /api/mikrotik/logs (RouterOS /log).',
     permissions: 'Restrito a administrador.',
     troubleshooting: 'Se vazio, verifique permissões de leitura do journal e se o serviço/arquivo de log existe.'
   },
@@ -317,8 +318,49 @@ const TABS_DOCUMENTATION: DocTab[] = [
     troubleshooting: 'Dados inconsistentes: reinicie o painel (sudo systemctl restart server-panel) e verifique coletores.'
   },
   {
+    id: 'cameras',
+    name: '17. Câmeras IP',
+    icon: Radio,
+    summary: 'Câmeras RTSP/ONVIF com visualização ao vivo sob demanda, PTZ e áudio.',
+    purpose: 'Gerenciar câmeras IP genéricas (ex.: Yoosee) sem depender do app do fabricante, mantendo gravação apenas na câmera/NVR.',
+    whatYouCanDo: [
+      'Adicionar/remover câmeras e ver capacidades por marca (RTSP/ONVIF/PTZ).',
+      'Assistir ao vivo via MJPEG sob demanda (inicia com viewer, para após desconexão).',
+      'Usar PTZ ONVIF, áudio WAV sob demanda e sondagem de gravações SD.',
+      'Enviar snapshot para o Telegram pelo bot.'
+    ],
+    indicators: [
+      { label: 'Ao vivo', desc: 'Stream MJPEG SD 10fps/q7 gerado por ffmpeg a partir do RTSP.' },
+      { label: 'PTZ/LED/SD', desc: 'PTZ e detalhes via ONVIF; LED/SD proprietários podem não ser suportados pelo fabricante.' }
+    ],
+    apis: 'GET /api/cameras, GET/POST/DELETE /api/cameras/config (admin), /api/cameras/live, /api/cameras/ptz, /api/cameras/audio, /api/cameras/led, /api/cameras/recordings/probe.',
+    permissions: 'Visualização para autenticados; configuração e controles administrativos exigem admin.',
+    troubleshooting: 'Sem imagem: valide RTSP/ONVIF, credenciais e firewall. Gravação no servidor é intencionalmente desabilitada.'
+  },
+  {
+    id: 'mikrotik',
+    name: '18. MikroTik / Network Center',
+    icon: Network,
+    summary: 'Inventário, topologia, histórico, bloqueio, DHCP fixo e diagnóstico executado no roteador.',
+    purpose: 'Centralizar a operação da rede no RB951G-2HnD via RouterOS API 8728, reduzindo o processamento no servidor.',
+    whatYouCanDo: [
+      'Ver árvore da rede (WAN/LAN/portas/dispositivos), inventário, Wi‑Fi e eventos.',
+      'Bloquear/desbloquear por MAC e tornar leases DHCP estáticos com confirmação e auditoria.',
+      'Executar ping, traceroute e consulta DNS no próprio roteador (offload do servidor).',
+      'Configurar o DNS do roteador/DHCP para usar o AdGuard e ver o histórico local de snapshots.'
+    ],
+    indicators: [
+      { label: 'Árvore da rede', desc: 'Montada de bridge ports/hosts, ARP, DHCP, Wi‑Fi e rotas.' },
+      { label: 'DNS do roteador', desc: 'Servidores atuais, allow-remote-requests e DNS entregue via DHCP LAN.' },
+      { label: 'Alertas', desc: 'Eventos de CPU/RAM alta, novo dispositivo e online/offline.' }
+    ],
+    apis: 'GET /api/mikrotik/status|devices|events|snapshots|dns-settings|logs; POST /api/mikrotik/ping|traceroute|dns|dns-settings|devices/:mac/block|unblock|make-static (admin para escrita).',
+    permissions: 'Leitura para autenticados; ações de escrita/DNS exigem admin e são auditadas.',
+    troubleshooting: 'Sem resposta: valide API 8728, regras de firewall TEMP e credenciais. REST /rest não é confiável no RouterOS 7.5 deste modelo.'
+  },
+  {
     id: 'documentation',
-    name: '17. Documentação',
+    name: '19. Documentação',
     icon: BookOpen,
     summary: 'Manual técnico-operacional do painel e do servidor.',
     purpose: 'Centralizar referência confiável de abas, APIs, acessos, serviços e procedimentos.',
@@ -378,7 +420,7 @@ export const DocumentationTab: React.FC = () => {
           {[
             { id: 'all', label: 'Tudo' },
             { id: 'overview', label: 'Visão Geral' },
-            { id: 'tabs', label: 'Abas (1-17)' },
+            { id: 'tabs', label: 'Abas (1-19)' },
             { id: 'ops', label: 'Operação & Recuperação' },
             { id: 'update', label: 'Atualização' }
           ].map(s => (

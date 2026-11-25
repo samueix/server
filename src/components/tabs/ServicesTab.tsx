@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { ServiceItem } from '../../types';
 import { getServices } from '../../services/api';
+import { getAuthHeaders } from '../../services/authService';
 
 interface ServicesTabProps {
   services: ServiceItem[];
@@ -125,6 +126,8 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
   const [localServices, setLocalServices] = useState<ServiceItem[]>(initialServices);
   const [isStale, setIsStale] = useState<boolean>(initialStale);
   const [secondsAgo, setSecondsAgo] = useState<number>(0);
+  const [router, setRouter] = useState<any>(null);
+  const [routerError, setRouterError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -162,6 +165,22 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
       setSecondsAgo(s => s + 1);
     }, 1000);
     return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const loadRouter = async () => {
+      try {
+        const res = await fetch('/api/mikrotik/status', { headers: getAuthHeaders() });
+        const j = await res.json();
+        if (!alive) return;
+        if (!res.ok || j?.ok === false) { setRouterError(j?.error || `HTTP ${res.status}`); setRouter(null); }
+        else { setRouter(j); setRouterError(null); }
+      } catch (e:any) { if (alive) { setRouterError(e?.message || 'Falha ao consultar roteador'); setRouter(null); } }
+    };
+    loadRouter();
+    const id = setInterval(() => { if (!document.hidden) loadRouter(); }, 10000);
+    return () => { alive = false; clearInterval(id); };
   }, []);
 
   useEffect(() => {
@@ -426,6 +445,30 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
           <div className="text-2xl font-black text-[#1A1A2E] mt-0.5 font-mono tabular-nums">{counts.enabled}</div>
           <span className="text-[11px] text-[#717188] block">Iniciam com o sistema</span>
         </div>
+      </div>
+
+      {/* Roteador MikroTik (fonte externa) */}
+      <div className="p-4 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className={`w-2.5 h-2.5 rounded-full ${router ? 'bg-[#12B76A]' : 'bg-[#F04438]'}`} />
+            <span className="font-black font-title text-sm">MikroTik RouterOS</span>
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-[#FFF7E8] border border-[#1A1A2E]">{router?.identity?.name || 'roteador'}</span>
+            {router?.resource?.['board-name'] && <span className="text-[11px] font-mono text-[#4A4A68]">{router.resource['board-name']} · {router.resource.version}</span>}
+          </div>
+          <span className={`text-[11px] font-mono font-bold ${router ? 'text-[#027A48]' : 'text-[#B42318]'}`}>{router ? 'online via API 8728' : 'offline'}</span>
+        </div>
+        {router ? (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-3 text-xs font-mono">
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg p-2"><div className="text-[10px] uppercase text-[#4A4A68] font-bold">Uptime</div><div className="font-black">{router.resource?.uptime || '—'}</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg p-2"><div className="text-[10px] uppercase text-[#4A4A68] font-bold">CPU</div><div className="font-black">{router.resource?.['cpu-load'] || 0}%</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg p-2"><div className="text-[10px] uppercase text-[#4A4A68] font-bold">RAM</div><div className="font-black">{(()=>{const t=Number(router.resource?.['total-memory']||0),f=Number(router.resource?.['free-memory']||0);return t?Math.round(((t-f)/t)*100):0;})()}%</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg p-2"><div className="text-[10px] uppercase text-[#4A4A68] font-bold">Dispositivos</div><div className="font-black">{Array.isArray(router.devices) ? router.devices.length : 0}</div></div>
+            <div className="bg-[#FFF7E8] border border-[#1A1A2E] rounded-lg p-2"><div className="text-[10px] uppercase text-[#4A4A68] font-bold">DNS</div><div className="font-black truncate" title={router.dns?.servers || ''}>{router.dns?.servers || '—'}</div></div>
+          </div>
+        ) : (
+          <div className="mt-2 text-xs font-mono text-[#B42318]">{routerError || 'Sem resposta do roteador.'}</div>
+        )}
       </div>
 
       {/* 2. Barra de busca e filtros */}

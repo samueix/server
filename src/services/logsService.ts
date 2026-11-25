@@ -1,7 +1,7 @@
 import { getAuthHeaders } from './authService';
 import { SystemLogsResponse, SystemLogEntry } from '../types';
 
-export type LogSource = 'syslog' | 'agent' | 'panel' | 'adguard' | 'auth' | 'dmesg';
+export type LogSource = 'syslog' | 'agent' | 'panel' | 'adguard' | 'auth' | 'dmesg' | 'mikrotik';
 
 export async function fetchSystemLogs(
   source: LogSource = 'syslog',
@@ -15,7 +15,8 @@ export async function fetchSystemLogs(
     filter: filter.trim()
   });
 
-  const response = await fetch(`/api/logs?${params.toString()}`, {
+  const endpoint = source === 'mikrotik' ? `/api/mikrotik/logs?${params.toString()}` : `/api/logs?${params.toString()}`;
+  const response = await fetch(endpoint, {
     method: 'GET',
     headers: {
       'Accept': 'application/json',
