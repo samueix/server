@@ -135,3 +135,37 @@ export async function mikrotikTestConnection() {
   try { const s = await mikrotikGetStatus(); return { ok: true, identity: s.identity?.name, version: s.resource?.version, board: s.resource?.['board-name'] }; }
   catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
 }
+
+export async function mikrotikBlockDevice(mac: string, comment = 'blocked by server-panel') {
+  const m = mac.toUpperCase();
+  return await withMikrotik(async (c) => {
+    const exists = rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', `?address=${m}`, '?list=NC_BLOCKED'])).length > 0
+      || rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', `?comment=${comment}`, '?list=NC_BLOCKED'])).some(r => String(r.address).toUpperCase()===m || String(r.comment||'').includes(m));
+    if (!exists) await c.talk(['/ip/firewall/address-list/add', '=list=NC_BLOCKED', `=address=${m}`, `=comment=${comment} ${m}`]);
+    const fw = rosRows(await rosSafe(c, ['/ip/firewall/filter/print', '?comment=NC_BLOCKED_DROP']));
+    if (!fw.length) await c.talk(['/ip/firewall/filter/add', '=chain=forward', '=action=drop', '=src-address-list=NC_BLOCKED', '=comment=NC_BLOCKED_DROP', '=place-before=0']);
+    return { ok: true, mac: m };
+  });
+}
+
+export async function mikrotikUnblockDevice(mac: string) {
+  const m = mac.toUpperCase();
+  return await withMikrotik(async (c) => {
+    const items = rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', '?list=NC_BLOCKED']));
+    for (const it of items) if (String(it.address||'').toUpperCase()===m || String(it.comment||'').includes(m)) await c.talk(['/ip/firewall/address-list/remove', `=.id=${it['.id']}`]);
+    const left = rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', '?list=NC_BLOCKED']));
+    if (!left.length) {
+      const fw = rosRows(await rosSafe(c, ['/ip/firewall/filter/print', '?comment=NC_BLOCKED_DROP']));
+      for (const f of fw) await c.talk(['/ip/firewall/filter/remove', `=.id=${f['.id']}`]);
+    }
+    return { ok: true, mac: m };
+  });
+}
+
+export async function mikrotikRunPing(target: string, count = 4) {
+  const safeTarget = String(target||'').trim(); if (!/^[a-zA-Z0-9.\-:]+$/.test(safeTarget)) throw new Error('target inválido');
+  return await withMikrotik(async (c) => {
+    const r = rosRows(await c.talk(['/ping', `=address=${safeTarget}`, `=count=${Math.max(1,Math.min(10,count))}`]));
+    return { ok: true, target: safeTarget, results: r };
+  });
+}

@@ -15,11 +15,25 @@ export const MikroTikTab: React.FC = () => {
   const [data, setData] = useState<MikrotikStatus|null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string|null>(null);
+  const [busyMac, setBusyMac] = useState<string|null>(null);
+  const [pingTarget, setPingTarget] = useState('1.1.1.1');
+  const [pingResult, setPingResult] = useState<any>(null);
   const refresh = useCallback(async () => {
     try { setError(null); const res = await fetch('/api/mikrotik/status', { headers: getAuthHeaders() }); const j = await res.json(); if (!res.ok || j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setData(j); }
     catch (e:any) { setError(e?.message||'Falha ao consultar MikroTik'); }
     finally { setLoading(false); }
   }, []);
+  const act = async (mac:string, action:'block'|'unblock') => {
+    if (!confirm(`${action==='block'?'Bloquear':'Desbloquear'} ${mac}?`)) return;
+    setBusyMac(mac+action);
+    try { const res = await fetch(`/api/mikrotik/devices/${encodeURIComponent(mac)}/${action}`, { method:'POST', headers: getAuthHeaders() }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); await refresh(); }
+    catch(e:any){ alert(e?.message||'Falha'); } finally { setBusyMac(null); }
+  };
+  const runPing = async () => {
+    setBusyMac('ping');
+    try { const res = await fetch('/api/mikrotik/ping', { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ target: pingTarget, count:4 }) }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setPingResult(j); }
+    catch(e:any){ setPingResult({ ok:false, error:e?.message||'Falha' }); } finally { setBusyMac(null); }
+  };
   useEffect(()=>{ refresh(); const id=setInterval(refresh,15000); return ()=>clearInterval(id); },[refresh]);
 
   const r=data?.resource||{}; const devices=data?.devices||[]; const events=data?.events||[]; const wifi=data?.wifi||[]; const leases=data?.leases||[]; const interfaces=data?.interfaces||[]; const firewall=data?.firewall||[]; const routes=data?.routes||[]; const nat=data?.nat||[];
@@ -44,8 +58,9 @@ export const MikroTikTab: React.FC = () => {
       </div>
 
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Users className="w-4 h-4 text-[#FF5A36]"/>Inventário de dispositivos</div>
-        <Table cols={['Nome/Host','IP','MAC','Tipo/Fabricante','Conexão','Sinal','Último visto','Status']} rows={devices.map((d:any)=>[
-          <div><div className="font-bold">{d.nickname||d.hostname||'—'}</div><div className="text-[#4A4A68]">{d.hostname||''}</div></div>, d.ip||d.last_ip||'—', d.mac, <div><div>{d.device_type||'unknown'}</div><div className="text-[#4A4A68]">{d.vendor||''}</div></div>, `${d.connection||'—'}${d.interface?` (${d.interface})`:''}`, d.signal_dbm?`${d.signal_dbm} dBm`:'—', d.last_seen?new Date(d.last_seen).toLocaleString():'—', <span className={Number(d.online)?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{Number(d.online)?'online':'offline'}</span>
+        <Table cols={['Nome/Host','IP','MAC','Tipo/Fabricante','Conexão','Sinal','Último visto','Status','Ações']} rows={devices.map((d:any)=>[
+          <div><div className="font-bold">{d.nickname||d.hostname||'—'}</div><div className="text-[#4A4A68]">{d.hostname||''}</div></div>, d.ip||d.last_ip||'—', d.mac, <div><div>{d.device_type||'unknown'}</div><div className="text-[#4A4A68]">{d.vendor||''}</div></div>, `${d.connection||'—'}${d.interface?` (${d.interface})`:''}`, d.signal_dbm?`${d.signal_dbm} dBm`:'—', d.last_seen?new Date(d.last_seen).toLocaleString():'—', <span className={Number(d.online)?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{Number(d.online)?'online':'offline'}</span>,
+          <div className="flex gap-1">{Number(d.blocked)?<button disabled={busyMac===d.mac+'unblock'} onClick={()=>act(d.mac,'unblock')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#ECFDF3] text-[11px] font-bold">Desbloquear</button>:<button disabled={busyMac===d.mac+'block'} onClick={()=>act(d.mac,'block')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FEE4E2] text-[11px] font-bold">Bloquear</button>}</div>
         ])} />
       </div>
 
@@ -67,8 +82,16 @@ export const MikroTikTab: React.FC = () => {
         <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Network className="w-4 h-4 text-[#FF5A36]"/>Rotas / NAT</div><Table cols={['Tipo','Destino','Saída/GW','Ativo']} rows={[...routes.map((r:any)=>['route',r['dst-address'],r.gateway||r['immediate-gw']||'—',r.active==='true'?'sim':'não']), ...nat.map((n:any)=>['nat',n.chain,n['out-interface']||n.action||'—',n.disabled==='true'?'não':'sim'])]} /></div>
       </div>
 
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Activity className="w-4 h-4 text-[#FF5A36]"/>Diagnóstico (ping via MikroTik)</div>
+        <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E] flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+          <input value={pingTarget} onChange={e=>setPingTarget(e.target.value)} className="px-3 py-2 border-2 border-[#1A1A2E] rounded-lg font-mono text-sm w-full sm:w-64" placeholder="IP ou host" />
+          <button disabled={busyMac==='ping'} onClick={runPing} className="px-3 py-2 bg-[#1A1A2E] text-white rounded-lg font-bold text-sm border-2 border-[#1A1A2E]">Ping</button>
+          {pingResult && <div className="text-xs font-mono break-all">{pingResult.ok ? `ok: ${JSON.stringify(pingResult.results?.slice?.(0,4)||pingResult.results)}` : `erro: ${pingResult.error}`}</div>}
+        </div>
+      </div>
+
       <div className="text-xs text-[#4A4A68] border-2 border-[#1A1A2E] rounded-xl p-3.5 bg-[#FFF7E8] shadow-[2px_2px_0px_#1A1A2E]">
-        <span className="font-bold text-[#1A1A2E]">Escopo real:</span> read-only via RouterOS 8728, inventário/histórico local no SQLite, RSSI Wi‑Fi só para clientes no rádio MikroTik. Bloqueio/limite/automação profunda serão adicionados com ações admin explícitas e audit log.
+        <span className="font-bold text-[#1A1A2E]">Escopo real:</span> RouterOS 8728 read-mostly. Bloqueio usa address-list/firewall `NC_BLOCKED` com confirmação; RSSI só no rádio MikroTik; topologia física completa/banda por app exigem sensores/probes adicionais.
       </div>
     </>}
   </div>;
