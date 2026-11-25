@@ -309,11 +309,13 @@ export const MikroTikTab: React.FC = () => {
                 <div className="bg-[#E0F4FE] px-3 py-2 text-[11px] font-mono"><b>DNS {dnsResult.name}</b> · {rs.length} registro(s)</div>
                 <div className="divide-y divide-[#1A1A2E]/10 max-h-40 overflow-auto">
                   {rs.map((r:any, i:number) => (
-                    <div key={i} className="px-3 py-1 text-[11px] font-mono">
-                      {r.address || r.value || r.name || Object.values(r).filter(Boolean).join(' ')}
+                    <div key={i} className="px-3 py-1 text-[11px] font-mono flex justify-between gap-3">
+                      <span className="font-bold">{r.address || r.value || r.name || Object.values(r).filter(Boolean).join(' ')}</span>
+                      {r.source && <span className="text-[#4A4A68]">{r.source}</span>}
                     </div>
                   ))}
                 </div>
+                {dnsResult.note && <div className="px-3 py-1 text-[10px] font-mono text-[#4A4A68] border-t border-[#1A1A2E]/10">{dnsResult.note}</div>}
               </div>
             );
           })() : <div className="text-xs font-mono text-[#B42318]">Erro no DNS: {dnsResult.error}</div>)}
@@ -350,7 +352,7 @@ export const MikroTikTab: React.FC = () => {
       </div>
 
       <div className="text-xs text-[#4A4A68] border-2 border-[#1A1A2E] rounded-xl p-3.5 bg-[#FFF7E8] shadow-[2px_2px_0px_#1A1A2E]">
-        <span className="font-bold text-[#1A1A2E]">Escopo real:</span> RouterOS 8728 read-mostly. Bloqueio usa address-list/firewall `NC_BLOCKED` com confirmação; RSSI só no rádio MikroTik; topologia física completa/banda por app exigem sensores/probes adicionais.
+        <span className="font-bold text-[#1A1A2E]">Escopo real:</span> RouterOS 8728. Árvore montada de bridge/ARP/DHCP/Wi‑Fi; DNS do roteador/DHCP configurável para o AdGuard; ping/traceroute/DNS executados no roteador. Bloqueio usa address-list/firewall `NC_BLOCKED` com confirmação. Topologia física completa, banda por app e RSSI de clientes fora do rádio MikroTik exigem probes/SNMP/accounting adicionais. Logs do roteador aparecem na aba Logs (fonte MikroTik).
       </div>
     </>}
   </div>;

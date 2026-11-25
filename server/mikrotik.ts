@@ -199,9 +199,22 @@ export async function mikrotikDnsLookup(name: string) {
   const safe = String(name||'').trim(); if (!/^[a-zA-Z0-9.\-:]+$/.test(safe)) throw new Error('name inválido');
   return await withMikrotik(async (c) => {
     const sentences = await c.talk(['/resolve', `=name=${safe}`]);
-    const rows = rosRows(sentences);
-    const ret = sentences.filter(s=>s._type==='!done').flatMap(s => Object.entries(s).filter(([k])=>k!=='_type').map(([k,v])=>({[k]:v})));
-    return { ok:true, name:safe, results: rows.length?rows:ret, raw: sentences };
+    const trap = sentences.find(s => s._type === '!trap');
+    if (!trap) {
+      const rows = rosRows(sentences);
+      const ret = sentences.filter(s=>s._type==='!done').flatMap(s => Object.entries(s).filter(([k])=>k!=='_type').map(([k,v])=>({[k]:v})));
+      return { ok:true, name:safe, results: rows.length?rows:ret, raw: sentences, method:'resolve' };
+    }
+    const ping = rosRows(await rosSafe(c, ['/ping', `=address=${safe}`, '=count=1']));
+    const ips = Array.from(new Set(ping.map(p => String(p.host || '')).filter(h => h && h !== safe)));
+    return {
+      ok: true,
+      name: safe,
+      results: ips.map(ip => ({ address: ip, source: 'ping/roteador' })),
+      raw: sentences,
+      method: 'ping-fallback',
+      note: 'RouterOS 7.5 não aceitou /resolve via API; a resolução foi validada pelo ping do roteador.',
+    };
   });
 }
 
