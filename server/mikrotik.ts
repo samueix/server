@@ -3,7 +3,7 @@ import net from 'net';
 export interface MikrotikConfig { host: string; port: number; user: string; password: string; timeoutMs?: number; }
 export interface RosSentence { [k: string]: string; _type: string; }
 
-function cfgFromEnv(): MikrotikConfig {
+export function mikrotikCfgFromEnv(): MikrotikConfig {
   return {
     host: process.env.MIKROTIK_HOST || '192.168.100.39',
     port: Number(process.env.MIKROTIK_PORT || 8728),
@@ -20,7 +20,6 @@ class RosClient {
   private queue: Array<{ words: string[]; resolve: (v: RosSentence[]) => void; reject: (e: any) => void }> = [];
   private cfg: MikrotikConfig;
   constructor(cfg: MikrotikConfig) { this.cfg = cfg; }
-
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const s = net.createConnection({ host: this.cfg.host, port: this.cfg.port });
@@ -86,42 +85,46 @@ class RosClient {
   close() { try { this.s?.destroy(); } catch {} this.s = null; this.failAll(new Error('closed')); }
 }
 
-async function withClient<T>(fn: (c: RosClient) => Promise<T>, cfg = cfgFromEnv()): Promise<T> {
+export async function withMikrotik<T>(fn: (c: RosClient) => Promise<T>, cfg = mikrotikCfgFromEnv()): Promise<T> {
   const c = new RosClient(cfg);
   await c.connect();
   try {
     const login = await c.talk(['/login', `=name=${cfg.user}`, `=password=${cfg.password}`]);
-    if (login.some(s => s._type === '!trap')) throw new Error(login.map(s => s.message || s._type).join('; '));
+    if (login.some(s => s._type === '!trap')) throw new Error(login.map(s => (s as any).message || s._type).join('; '));
     return await fn(c);
   } finally { c.close(); }
 }
 
-function rows(sentences: RosSentence[]) { return sentences.filter(s => s._type === '!re').map(({ _type, ...r }) => r); }
-function one(sentences: RosSentence[]) { return rows(sentences)[0] || null; }
-async function safe(c: RosClient, cmd: string[]) { try { return await c.talk(cmd); } catch { return []; } }
+export function rosRows(sentences: RosSentence[]) { return sentences.filter(s => s._type === '!re').map(({ _type, ...r }) => r); }
+export function rosOne(sentences: RosSentence[]) { return rosRows(sentences)[0] || null; }
+export async function rosSafe(c: RosClient, cmd: string[]) { try { return await c.talk(cmd); } catch { return []; } }
 
 export async function mikrotikGetStatus() {
-  const cfg = cfgFromEnv();
-  return await withClient(async (c) => {
-    const identity = await safe(c, ['/system/identity/print']);
-    const resource = await safe(c, ['/system/resource/print']);
-    const routerboard = await safe(c, ['/system/routerboard/print']);
-    const addresses = await safe(c, ['/ip/address/print']);
-    const interfaces = await safe(c, ['/interface/print']);
-    const leases = await safe(c, ['/ip/dhcp-server/lease/print']);
-    const wifi = await safe(c, ['/interface/wireless/registration-table/print']);
-    const arp = await safe(c, ['/ip/arp/print']);
-    const dns = await safe(c, ['/ip/dns/print']);
-    const routes = await safe(c, ['/ip/route/print']);
-    const nat = await safe(c, ['/ip/firewall/nat/print']);
-    const firewall = await safe(c, ['/ip/firewall/filter/print']);
-    const dhcpServers = await safe(c, ['/ip/dhcp-server/print']);
+  const cfg = mikrotikCfgFromEnv();
+  return await withMikrotik(async (c) => {
+    const identity = await rosSafe(c, ['/system/identity/print']);
+    const resource = await rosSafe(c, ['/system/resource/print']);
+    const routerboard = await rosSafe(c, ['/system/routerboard/print']);
+    const addresses = await rosSafe(c, ['/ip/address/print']);
+    const interfaces = await rosSafe(c, ['/interface/print']);
+    const leases = await rosSafe(c, ['/ip/dhcp-server/lease/print']);
+    const wifi = await rosSafe(c, ['/interface/wireless/registration-table/print']);
+    const arp = await rosSafe(c, ['/ip/arp/print']);
+    const dns = await rosSafe(c, ['/ip/dns/print']);
+    const routes = await rosSafe(c, ['/ip/route/print']);
+    const nat = await rosSafe(c, ['/ip/firewall/nat/print']);
+    const firewall = await rosSafe(c, ['/ip/firewall/filter/print']);
+    const dhcpServers = await rosSafe(c, ['/ip/dhcp-server/print']);
+    const bridgePorts = await rosSafe(c, ['/interface/bridge/port/print']);
+    const bridgeHosts = await rosSafe(c, ['/interface/bridge/host/print']);
+    const capsman = await rosSafe(c, ['/caps-man/registration-table/print']);
     return {
       ok: true, host: cfg.host, port: cfg.port,
-      identity: one(identity), resource: one(resource), routerboard: one(routerboard),
-      addresses: rows(addresses), interfaces: rows(interfaces), leases: rows(leases),
-      wifi: rows(wifi), arp: rows(arp), dns: one(dns), routes: rows(routes),
-      nat: rows(nat), firewall: rows(firewall), dhcpServers: rows(dhcpServers),
+      identity: rosOne(identity), resource: rosOne(resource), routerboard: rosOne(routerboard),
+      addresses: rosRows(addresses), interfaces: rosRows(interfaces), leases: rosRows(leases),
+      wifi: [...rosRows(wifi), ...rosRows(capsman)], arp: rosRows(arp), dns: rosOne(dns), routes: rosRows(routes),
+      nat: rosRows(nat), firewall: rosRows(firewall), dhcpServers: rosRows(dhcpServers),
+      bridgePorts: rosRows(bridgePorts), bridgeHosts: rosRows(bridgeHosts),
       fetchedAt: new Date().toISOString(),
     };
   }, cfg);
