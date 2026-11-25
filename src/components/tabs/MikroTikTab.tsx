@@ -39,19 +39,29 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
     sub: `${d.ip || d.last_ip || 'sem IP'} · ${d.mac}${d.signal_dbm ? ` · ${d.signal_dbm} dBm` : ''}`,
     kind: 'device', online: Boolean(Number(d.online)),
   });
-  const wanDevices = devices.filter(d => ifaceOf(d) === 'ether1');
-  const lanDevices = devices.filter(d => ifaceOf(d) !== 'ether1');
+  const lanPrefix = String(lanAddr).split('/')[0].split('.').slice(0, 3).join('.') + '.';
+  const wanPrefix = String(wanAddr).split('/')[0].split('.').slice(0, 3).join('.') + '.';
+  const ipOf = (d: any) => String(d.ip || d.last_ip || '');
+  const wanDevices = devices.filter(d => {
+    const ip = ipOf(d);
+    if (ip && ip === String(gw)) return false;
+    if (ip.startsWith(lanPrefix)) return false;
+    if (ip.startsWith(wanPrefix)) return true;
+    return ifaceOf(d) === 'ether1';
+  });
+  const lanDevices = devices.filter(d => !wanDevices.includes(d));
+  const portOf = (d: any) => { const p = ifaceOf(d); return p === 'ether1' ? '' : p; };
   const portNames = Array.from(new Set([
     ...bridgePorts.filter(p => p.disabled !== 'true').map(p => p.interface).filter(Boolean),
     'wlan1',
   ]));
   const lanChildren: TopoNode[] = portNames.map(port => {
-    const onPort = lanDevices.filter(d => ifaceOf(d) === port);
+    const onPort = lanDevices.filter(d => portOf(d) === port);
     return { label: port, sub: `${onPort.length} dispositivo(s)`, kind: 'port', children: onPort.map(devNode) };
   });
-  const mapped = new Set(portNames.flatMap(p => lanDevices.filter(d => ifaceOf(d) === p).map(d => d.mac)));
+  const mapped = new Set(portNames.flatMap(p => lanDevices.filter(d => portOf(d) === p).map(d => d.mac)));
   const otherLan = lanDevices.filter(d => !mapped.has(d.mac));
-  if (otherLan.length) lanChildren.push({ label: 'Outros / DHCP / ARP', sub: `${otherLan.length} dispositivo(s)`, kind: 'port', children: otherLan.map(devNode) });
+  if (otherLan.length) lanChildren.push({ label: 'DHCP / ARP (sem porta física)', sub: `${otherLan.length} dispositivo(s)`, kind: 'port', children: otherLan.map(devNode) });
   return {
     label: data.identity?.name || 'MikroTik',
     sub: `${data.resource?.['board-name'] || ''} · ${data.resource?.version || ''}`,

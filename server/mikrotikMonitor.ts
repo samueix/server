@@ -27,7 +27,7 @@ export async function pollMikrotikOnce() {
   for (const a of arp as any[]) {
     const mac = String(a['mac-address']||'').toUpperCase(); if (!mac) continue;
     const prev: any = byMac.get(mac) || ({} as any); prev.mac=mac;
-    byMac.set(mac, { ...prev, ip: prev.ip || a.address, interface: a.interface, online: (prev as any).online ?? (a.complete==='true' || a['complete']==='true') });
+    byMac.set(mac, { ...prev, ip: prev.ip || a.address, interface: prev.interface || (prev.connection ? undefined : a.interface), online: (prev as any).online ?? (a.complete==='true' || a['complete']==='true') });
   }
   const devices = [...byMac.values()].map(d => { const v=vendor(d.mac); return { ...d, vendor:v, device_type:typeGuess(d.hostname, v), nickname:null, trusted:false, notes:null, first_seen: now, last_ip:d.ip }; });
   const prevList = listMikrotikDevices();
