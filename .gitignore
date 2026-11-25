@@ -50,3 +50,5 @@ public/assets/aistudio/
 # Camera runtime
 bin/go2rtc
 data/go2rtc.yaml
+
+dist.backup.*/
