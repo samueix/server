@@ -60,6 +60,8 @@ import { getServerConfig, saveServerConfig } from './server/credentialsManager.j
 import { runShellCommand } from './server/terminalRunner.js';
 import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities } from './server/cameras.js';
 import { mikrotikGetStatus, mikrotikTestConnection } from './server/mikrotik.js';
+import { startMikrotikMonitor, getMikrotikCached, pollMikrotikOnce } from './server/mikrotikMonitor.js';
+import { listMikrotikDevices, listMikrotikEvents, listMikrotikSnapshots, setMikrotikDeviceNickname } from './server/db.js';
 import { 
   getSecurityAttackStatus, 
   recordPanelFailedLogin, 
@@ -470,15 +472,16 @@ export function createApp() {
     res.json({ success: true, config: updated });
   });
 
-  // MikroTik (read-only)
+  // MikroTik (read-only + inventário)
   app.get('/api/mikrotik/status', requireUserOrAdminAuth, async (_req, res) => {
-    try { res.json(await mikrotikGetStatus()); }
-    catch (e:any) { res.status(500).json({ ok:false, error: e?.message || String(e) }); }
+    try { const live = await mikrotikGetStatus(); res.json({ ...live, devices: listMikrotikDevices(), events: listMikrotikEvents(50), snapshots: listMikrotikSnapshots(60) }); }
+    catch (e:any) { const cached = getMikrotikCached(); if (cached) return res.json({ ...cached, stale:true, error:e?.message }); res.status(500).json({ ok:false, error: e?.message || String(e) }); }
   });
-  app.get('/api/mikrotik/test', requireAdminAuth, async (_req, res) => {
-    try { res.json(await mikrotikTestConnection()); }
-    catch (e:any) { res.status(500).json({ ok:false, error: e?.message || String(e) }); }
-  });
+  app.get('/api/mikrotik/test', requireAdminAuth, async (_req, res) => { try { res.json(await mikrotikTestConnection()); } catch (e:any) { res.status(500).json({ ok:false, error: e?.message || String(e) }); } });
+  app.post('/api/mikrotik/poll', requireAdminAuth, async (_req,res)=>{ try { res.json({ ok:true, data: await pollMikrotikOnce() }); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
+  app.get('/api/mikrotik/devices', requireUserOrAdminAuth, (_req,res)=> res.json({ ok:true, devices:listMikrotikDevices() }));
+  app.get('/api/mikrotik/events', requireUserOrAdminAuth, (req,res)=> res.json({ ok:true, events:listMikrotikEvents(Math.min(500, Number(req.query.limit)||100)) }));
+  app.post('/api/mikrotik/devices/:mac/nickname', requireAdminAuth, (req,res)=>{ try { setMikrotikDeviceNickname(req.params.mac, String(req.body?.nickname||'')); res.json({ok:true}); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
 
   // Câmeras (ao vivo, sem gravação no servidor)
   app.get('/api/cameras', requireUserOrAdminAuth, async (_req, res) => {
@@ -2578,6 +2581,7 @@ export async function startServer() {
       console.log(`[AdGuard AI NOC] Servidor iniciado na porta ${PORT} (0.0.0.0:${PORT})`);
       attachBrowserWebSocket(server);
       try { startTelegramBotPolling(); } catch (e) { console.warn('[telegram] falha ao iniciar polling:', e); }
+      try { startMikrotikMonitor(15000); } catch (e) { console.warn('[mikrotik] falha ao iniciar monitor:', e); }
       resolve(server);
     });
   });

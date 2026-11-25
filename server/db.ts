@@ -36,6 +36,7 @@ try {
 
 let sqliteDb: any = null;
 let memoryCache: Map<string, DomainAnalysis> = new Map();
+export function getSqliteDb() { return sqliteDb; }
 
 // Initialize native SQLite or JSON backup
 try {
@@ -74,6 +75,7 @@ try {
     CREATE INDEX IF NOT EXISTS idx_category ON domain_analyses(category);
     CREATE INDEX IF NOT EXISTS idx_risk ON domain_analyses(risk);
   `);
+    initMikrotikTables(sqliteDb);
     console.log('[SQLite] Conectado com sucesso ao banco adguard_ai.sqlite');
   } else {
     loadJsonCache();
@@ -539,4 +541,68 @@ for (const seed of INITIAL_VERIFIED_SEEDS) {
   if (!getAnalyzedDomain(seed.domain)) {
     saveAnalyzedDomain(seed);
   }
+}
+
+function initMikrotikTables(db: any) {
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mikrotik_devices (
+        mac TEXT PRIMARY KEY, ip TEXT, hostname TEXT, vendor TEXT, device_type TEXT,
+        nickname TEXT, interface TEXT, connection TEXT, ssid TEXT, signal_dbm REAL,
+        tx_rate TEXT, rx_rate TEXT, first_seen TEXT, last_seen TEXT, last_ip TEXT,
+        online INTEGER DEFAULT 0, blocked INTEGER DEFAULT 0, trusted INTEGER DEFAULT 0,
+        total_uptime_seconds INTEGER DEFAULT 0, notes TEXT
+      );
+      CREATE TABLE IF NOT EXISTS mikrotik_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, event_type TEXT, mac TEXT, ip TEXT, hostname TEXT, details TEXT
+      );
+      CREATE TABLE IF NOT EXISTS mikrotik_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, resource_json TEXT, interfaces_json TEXT, leases_json TEXT, wifi_json TEXT, arp_json TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_mt_events_ts ON mikrotik_events(ts);
+      CREATE INDEX IF NOT EXISTS idx_mt_snap_ts ON mikrotik_snapshots(ts);
+    `);
+  } catch (e) { console.warn('[MikroTik DB] init failed', e); }
+}
+
+export function upsertMikrotikDevices(devices: any[]) {
+  if (!sqliteDb) return;
+  const now = new Date().toISOString();
+  const stmt = sqliteDb.prepare(`
+    INSERT INTO mikrotik_devices (mac,ip,hostname,vendor,device_type,nickname,interface,connection,ssid,signal_dbm,tx_rate,rx_rate,first_seen,last_seen,last_ip,online,blocked,trusted,notes)
+    VALUES (@mac,@ip,@hostname,@vendor,@device_type,@nickname,@interface,@connection,@ssid,@signal_dbm,@tx_rate,@rx_rate,@first_seen,@last_seen,@last_ip,@online,@blocked,@trusted,@notes)
+    ON CONFLICT(mac) DO UPDATE SET ip=excluded.ip, hostname=COALESCE(excluded.hostname,mikrotik_devices.hostname), vendor=COALESCE(excluded.vendor,mikrotik_devices.vendor),
+      device_type=COALESCE(excluded.device_type,mikrotik_devices.device_type), interface=excluded.interface, connection=excluded.connection, ssid=excluded.ssid,
+      signal_dbm=excluded.signal_dbm, tx_rate=excluded.tx_rate, rx_rate=excluded.rx_rate, last_seen=excluded.last_seen, last_ip=excluded.ip, online=excluded.online,
+      blocked=excluded.blocked
+  `);
+  for (const d of devices) stmt.run({ ...d, first_seen: d.first_seen || now, last_seen: now, online: d.online?1:0, blocked: d.blocked?1:0, trusted: d.trusted?1:0 });
+}
+export function listMikrotikDevices() {
+  if (!sqliteDb) return [];
+  return sqliteDb.prepare('SELECT * FROM mikrotik_devices ORDER BY online DESC, last_seen DESC').all();
+}
+export function addMikrotikEvent(ev: any) {
+  if (!sqliteDb) return;
+  sqliteDb.prepare('INSERT INTO mikrotik_events (ts,event_type,mac,ip,hostname,details) VALUES (?,?,?,?,?,?)')
+    .run(ev.ts || new Date().toISOString(), ev.event_type, ev.mac||null, ev.ip||null, ev.hostname||null, ev.details||null);
+}
+export function listMikrotikEvents(limit=100) {
+  if (!sqliteDb) return [];
+  return sqliteDb.prepare('SELECT * FROM mikrotik_events ORDER BY id DESC LIMIT ?').all(limit);
+}
+export function saveMikrotikSnapshot(s: any) {
+  if (!sqliteDb) return;
+  sqliteDb.prepare('INSERT INTO mikrotik_snapshots (ts,resource_json,interfaces_json,leases_json,wifi_json,arp_json) VALUES (?,?,?,?,?,?)')
+    .run(s.ts || new Date().toISOString(), JSON.stringify(s.resource||{}), JSON.stringify(s.interfaces||[]), JSON.stringify(s.leases||[]), JSON.stringify(s.wifi||[]), JSON.stringify(s.arp||[]));
+  sqliteDb.prepare("DELETE FROM mikrotik_snapshots WHERE ts < datetime('now','-7 days')").run();
+}
+export function listMikrotikSnapshots(limit=200) {
+  if (!sqliteDb) return [];
+  return sqliteDb.prepare('SELECT * FROM mikrotik_snapshots ORDER BY id DESC LIMIT ?').all(limit).map((r:any)=>({ ...r, resource: safeJson(r.resource_json), interfaces: safeJson(r.interfaces_json), leases: safeJson(r.leases_json), wifi: safeJson(r.wifi_json), arp: safeJson(r.arp_json) }));
+}
+function safeJson(v:string){ try{return JSON.parse(v||'null')}catch{return null} }
+export function setMikrotikDeviceNickname(mac:string, nickname:string) {
+  if (!sqliteDb) return;
+  sqliteDb.prepare('UPDATE mikrotik_devices SET nickname=? WHERE mac=?').run(nickname, mac.toUpperCase());
 }

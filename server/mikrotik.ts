@@ -118,13 +118,14 @@ export async function mikrotikGetStatus() {
     const bridgePorts = await rosSafe(c, ['/interface/bridge/port/print']);
     const bridgeHosts = await rosSafe(c, ['/interface/bridge/host/print']);
     const capsman = await rosSafe(c, ['/caps-man/registration-table/print']);
+    const services = await rosSafe(c, ['/ip/service/print']);
     return {
       ok: true, host: cfg.host, port: cfg.port,
       identity: rosOne(identity), resource: rosOne(resource), routerboard: rosOne(routerboard),
       addresses: rosRows(addresses), interfaces: rosRows(interfaces), leases: rosRows(leases),
       wifi: [...rosRows(wifi), ...rosRows(capsman)], arp: rosRows(arp), dns: rosOne(dns), routes: rosRows(routes),
       nat: rosRows(nat), firewall: rosRows(firewall), dhcpServers: rosRows(dhcpServers),
-      bridgePorts: rosRows(bridgePorts), bridgeHosts: rosRows(bridgeHosts),
+      bridgePorts: rosRows(bridgePorts), bridgeHosts: rosRows(bridgeHosts), services: rosRows(services),
       fetchedAt: new Date().toISOString(),
     };
   }, cfg);
