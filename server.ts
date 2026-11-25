@@ -59,6 +59,7 @@ import {
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { runShellCommand } from './server/terminalRunner.js';
 import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities } from './server/cameras.js';
+import { mikrotikGetStatus, mikrotikTestConnection } from './server/mikrotik.js';
 import { 
   getSecurityAttackStatus, 
   recordPanelFailedLogin, 
@@ -467,6 +468,16 @@ export function createApp() {
   app.post('/api/adguard/config', requireAdminAuth, (req, res) => {
     const updated = updateAdGuardConfig(req.body);
     res.json({ success: true, config: updated });
+  });
+
+  // MikroTik (read-only)
+  app.get('/api/mikrotik/status', requireUserOrAdminAuth, async (_req, res) => {
+    try { res.json(await mikrotikGetStatus()); }
+    catch (e:any) { res.status(500).json({ ok:false, error: e?.message || String(e) }); }
+  });
+  app.get('/api/mikrotik/test', requireAdminAuth, async (_req, res) => {
+    try { res.json(await mikrotikTestConnection()); }
+    catch (e:any) { res.status(500).json({ ok:false, error: e?.message || String(e) }); }
   });
 
   // Câmeras (ao vivo, sem gravação no servidor)

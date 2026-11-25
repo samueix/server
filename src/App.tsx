@@ -26,6 +26,7 @@ const CredentialsTab = React.lazy(() => import('./components/tabs/CredentialsTab
 const OpencodeTab = React.lazy(() => import('./components/tabs/OpencodeTab').then(m => ({ default: m.OpencodeTab })));
 const RemoteBrowserTab = React.lazy(() => import('./components/tabs/RemoteBrowserTab').then(m => ({ default: m.RemoteBrowserTab })));
 const CamerasTab = React.lazy(() => import('./components/tabs/CamerasTab').then(m => ({ default: m.CamerasTab })));
+const MikroTikTab = React.lazy(() => import('./components/tabs/MikroTikTab').then(m => ({ default: m.MikroTikTab })));
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
@@ -97,6 +98,7 @@ const TAB_PATHS: Record<NavigationTab, string> = {
   opencode: '/opencode',
   browser: '/navegador',
   cameras: '/cameras',
+  mikrotik: '/mikrotik',
   files: '/arquivos',
   security: '/seguranca',
   credentials: '/credenciais',
@@ -790,6 +792,14 @@ export default function App() {
               <Suspense fallback={<TabLoadingFallback />}>
                 <TabErrorBoundary tabName="Câmeras">
                   <CamerasTab />
+                </TabErrorBoundary>
+              </Suspense>
+            )}
+
+            {activeTab === 'mikrotik' && (
+              <Suspense fallback={<TabLoadingFallback />}>
+                <TabErrorBoundary tabName="MikroTik">
+                  <MikroTikTab />
                 </TabErrorBoundary>
               </Suspense>
             )}

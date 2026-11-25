@@ -7,6 +7,7 @@ export type NavigationTab =
   | 'opencode' 
   | 'browser'
   | 'cameras'
+  | 'mikrotik'
   | 'files' 
   | 'security'
   | 'credentials'
@@ -596,3 +597,23 @@ export interface N8nStatusResponse {
   workflows: N8nWorkflow[];
 }
 
+
+export interface MikrotikStatus {
+  ok: boolean;
+  host?: string;
+  error?: string;
+  identity?: Record<string, string>;
+  resource?: Record<string, string>;
+  routerboard?: Record<string, string>;
+  addresses?: Record<string, string>[];
+  interfaces?: Record<string, string>[];
+  leases?: Record<string, string>[];
+  wifi?: Record<string, string>[];
+  arp?: Record<string, string>[];
+  dns?: Record<string, string>;
+  routes?: Record<string, string>[];
+  nat?: Record<string, string>[];
+  firewall?: Record<string, string>[];
+  dhcpServers?: Record<string, string>[];
+  fetchedAt?: string;
+}
