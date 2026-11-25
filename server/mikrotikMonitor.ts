@@ -1,5 +1,5 @@
 import { mikrotikGetStatus } from './mikrotik.js';
-import { upsertMikrotikDevices, addMikrotikEvent, saveMikrotikSnapshot, listMikrotikDevices } from './db.js';
+import { upsertMikrotikDevices, addMikrotikEvent, saveMikrotikSnapshot, listMikrotikDevices, listMikrotikEvents } from './db.js';
 
 const OUI: Record<string,string> = { 'D0:39:57':'Liteon/PC', '2C:C8:1B':'MikroTik', 'C4:3C:B0':'Yoosee/IPC', '5C:CD:5B':'Intel', '1C:EF:03':'ISP/Router' };
 function vendor(mac=''){ const p=mac.toUpperCase().split(':').slice(0,3).join(':'); return OUI[p] || 'Desconhecido'; }
@@ -38,8 +38,13 @@ export async function pollMikrotikOnce() {
     if (prev && Number(prev.online) !== (d.online?1:0)) addMikrotikEvent({ ts: now, event_type: d.online?'online':'offline', mac:d.mac, ip:d.ip, hostname:d.hostname, details:`${d.hostname||d.mac} ${d.online?'online':'offline'}` });
   }
   upsertMikrotikDevices(devices);
+  const res=status.resource||{};
+  const cpu=Number(res['cpu-load']||0); const memTotal=Number(res['total-memory']||0); const memFree=Number(res['free-memory']||0);
+  const memPct=memTotal?((memTotal-memFree)/memTotal*100):0;
+  if (cpu>=85) addMikrotikEvent({ ts: now, event_type:'alert_cpu', details:`CPU alta: ${cpu}%` });
+  if (memPct>=90) addMikrotikEvent({ ts: now, event_type:'alert_mem', details:`RAM alta: ${memPct.toFixed(1)}%` });
   saveMikrotikSnapshot({ ts: now, resource: status.resource, interfaces: status.interfaces, leases: status.leases, wifi: status.wifi, arp: status.arp });
-  last = { ...status, devices: listMikrotikDevices(), events: [] };
+  last = { ...status, devices: listMikrotikDevices(), events: listMikrotikEvents(50) };
   return last;
 }
 

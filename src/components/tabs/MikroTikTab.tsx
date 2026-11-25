@@ -21,8 +21,17 @@ export const MikroTikTab: React.FC = () => {
   const [traceResult, setTraceResult] = useState<any>(null);
   const [dnsName, setDnsName] = useState('google.com');
   const [dnsResult, setDnsResult] = useState<any>(null);
+  const [snapshots, setSnapshots] = useState<any[]>([]);
   const refresh = useCallback(async () => {
-    try { setError(null); const res = await fetch('/api/mikrotik/status', { headers: getAuthHeaders() }); const j = await res.json(); if (!res.ok || j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setData(j); }
+    try {
+      setError(null);
+      const [res, sres] = await Promise.all([
+        fetch('/api/mikrotik/status', { headers: getAuthHeaders() }),
+        fetch('/api/mikrotik/snapshots?limit=60', { headers: getAuthHeaders() })
+      ]);
+      const j = await res.json(); if (!res.ok || j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setData(j);
+      const sj = await sres.json().catch(()=>({snapshots:[]})); if (Array.isArray(sj?.snapshots)) setSnapshots(sj.snapshots);
+    }
     catch (e:any) { setError(e?.message||'Falha ao consultar MikroTik'); }
     finally { setLoading(false); }
   }, []);
@@ -90,6 +99,14 @@ export const MikroTikTab: React.FC = () => {
         <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><History className="w-4 h-4 text-[#FF5A36]"/>Eventos recentes</div>
           <Table cols={['Quando','Evento','Dispositivo','Detalhe']} rows={events.slice(0,20).map((e:any)=>[e.ts?new Date(e.ts).toLocaleString():'—', e.event_type, `${e.hostname||''} ${e.ip||''} ${e.mac||''}`.trim(), e.details||'—'])} />
         </div>
+      </div>
+
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Activity className="w-4 h-4 text-[#FF5A36]"/>Histórico (snapshots locais)</div>
+        <Table cols={['Quando','CPU','RAM','Wi-Fi','Leases','RX total','TX total']} rows={snapshots.slice().reverse().slice(0,20).map((s:any)=>{
+          const res=s.resource||{}; const memTotal=Number(res['total-memory']||0); const memFree=Number(res['free-memory']||0); const memPct=memTotal?Math.round(((memTotal-memFree)/memTotal)*100):0;
+          const ifs=s.interfaces||[]; const rx=ifs.reduce((a:number,i:any)=>a+Number(i['rx-byte']||0),0); const tx=ifs.reduce((a:number,i:any)=>a+Number(i['tx-byte']||0),0);
+          return [s.ts?new Date(s.ts).toLocaleTimeString():'—', `${res['cpu-load']||0}%`, `${memPct}%`, String((s.wifi||[]).length), String((s.leases||[]).length), fmtBytes(rx), fmtBytes(tx)];
+        })} />
       </div>
 
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Cable className="w-4 h-4 text-[#FF5A36]"/>Interfaces</div>

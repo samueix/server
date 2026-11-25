@@ -198,7 +198,9 @@ export async function mikrotikTraceroute(target: string) {
 export async function mikrotikDnsLookup(name: string) {
   const safe = String(name||'').trim(); if (!/^[a-zA-Z0-9.\-:]+$/.test(safe)) throw new Error('name inválido');
   return await withMikrotik(async (c) => {
-    const r = rosRows(await c.talk(['/resolve', `=name=${safe}`]));
-    return { ok:true, name:safe, results:r };
+    const sentences = await c.talk(['/resolve', `=name=${safe}`]);
+    const rows = rosRows(sentences);
+    const ret = sentences.filter(s=>s._type==='!done').flatMap(s => Object.entries(s).filter(([k])=>k!=='_type').map(([k,v])=>({[k]:v})));
+    return { ok:true, name:safe, results: rows.length?rows:ret, raw: sentences };
   });
 }
