@@ -49,7 +49,7 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
     if (ip.startsWith(wanPrefix)) return true;
     return ifaceOf(d) === 'ether1';
   });
-  const lanDevices = devices.filter(d => !wanDevices.includes(d));
+  const lanDevices = devices.filter(d => !wanDevices.includes(d) && ipOf(d) !== String(gw));
   const portOf = (d: any) => { const p = ifaceOf(d); return p === 'ether1' ? '' : p; };
   const portNames = Array.from(new Set([
     ...bridgePorts.filter(p => p.disabled !== 'true').map(p => p.interface).filter(Boolean),

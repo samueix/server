@@ -576,7 +576,27 @@ export function upsertMikrotikDevices(devices: any[]) {
       signal_dbm=excluded.signal_dbm, tx_rate=excluded.tx_rate, rx_rate=excluded.rx_rate, last_seen=excluded.last_seen, last_ip=excluded.ip, online=excluded.online,
       blocked=excluded.blocked
   `);
-  for (const d of devices) stmt.run({ ...d, first_seen: d.first_seen || now, last_seen: now, online: d.online?1:0, blocked: d.blocked?1:0, trusted: d.trusted?1:0 });
+  for (const d of devices) stmt.run({
+    mac: d.mac ?? null,
+    ip: d.ip ?? null,
+    hostname: d.hostname ?? null,
+    vendor: d.vendor ?? null,
+    device_type: d.device_type ?? null,
+    nickname: d.nickname ?? null,
+    interface: d.interface ?? null,
+    connection: d.connection ?? null,
+    ssid: d.ssid ?? null,
+    signal_dbm: d.signal_dbm ?? null,
+    tx_rate: d.tx_rate ?? null,
+    rx_rate: d.rx_rate ?? null,
+    first_seen: d.first_seen || now,
+    last_seen: now,
+    last_ip: d.last_ip ?? d.ip ?? null,
+    online: d.online ? 1 : 0,
+    blocked: d.blocked ? 1 : 0,
+    trusted: d.trusted ? 1 : 0,
+    notes: d.notes ?? null,
+  });
 }
 export function listMikrotikDevices() {
   if (!sqliteDb) return [];
