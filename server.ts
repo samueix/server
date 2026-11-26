@@ -1994,6 +1994,11 @@ export function createApp() {
     }
   });
 
+  app.get('/api/services', requireUserOrAdminAuth, (_req, res) => {
+    const services = getAllMonitoredServices();
+    return res.json({ success: true, count: services.length, services, servicos: services });
+  });
+
   // Proxy reverso para o backend FastAPI do Ubuntu Server (/api/system, /api/cpu, /api/network, etc.)
   app.all('/api/*', async (req, res, next) => {
     // Rotas tratadas internamente pelo server.ts
