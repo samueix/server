@@ -190,19 +190,22 @@ export const PingTab: React.FC = () => {
         });
         const j = await r.json();
         if (!r.ok || j?.ok === false) throw new Error(j?.error || `HTTP ${r.status}`);
-        const mapped: TraceHop[] = (j.results || []).map((h: any, i: number) => ({
-          count: i + 1,
-          host: h.address || '???',
-          loss: Number(h.loss ?? 0),
-          sent: Number(h.sent ?? 1),
-          last: Number(h.last ?? 0),
-          avg: Number(h.avg ?? 0),
-          best: Number(h.best ?? 0),
-          wrst: Number(h.worst ?? 0),
-          stdev: Number(h['std-dev'] ?? 0),
-          timeout: !h.address,
-          reached: false,
-        }));
+        const mapped: TraceHop[] = (j.results || []).map((h: any, i: number) => {
+          const address = String(h.address || '').trim();
+          return {
+            count: Number(h.hop ?? (i + 1)),
+            host: address || '???',
+            loss: Number(h.loss ?? 0),
+            sent: Number(h.sent ?? 1),
+            last: Number(h.last ?? 0),
+            avg: Number(h.avg ?? 0),
+            best: Number(h.best ?? 0),
+            wrst: Number(h.worst ?? 0),
+            stdev: Number(h['std-dev'] ?? 0),
+            timeout: !address,
+            reached: false,
+          };
+        });
         if (traceRunIdRef.current === runId) {
           setHops(mapped);
           setTraceSource('MikroTik RouterOS (API 8728)');

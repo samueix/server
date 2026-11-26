@@ -393,7 +393,7 @@ export const MikroTikTab: React.FC = () => {
                     <tbody>
                       {hops.map((h:any, i:number) => (
                         <tr key={i} className="border-t border-[#1A1A2E]/10">
-                          <td className="p-1.5 text-[#4A4A68]">{i + 1}</td>
+                          <td className="p-1.5 text-[#4A4A68]">{h.hop ?? (i + 1)}</td>
                           <td className="p-1.5 font-bold">{h.address || '*'}</td>
                           <td className="p-1.5">{h.avg ? `${h.avg} ms` : '—'}</td>
                           <td className="p-1.5">{h.best ? `${h.best} ms` : '—'}</td>

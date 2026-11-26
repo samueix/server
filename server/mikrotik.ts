@@ -226,7 +226,19 @@ export async function mikrotikTraceroute(target: string) {
   const safeTarget = String(target||'').trim(); if (!/^[a-zA-Z0-9.\-:]+$/.test(safeTarget)) throw new Error('target inválido');
   return await withMikrotik(async (c) => {
     const r = rosRows(await c.talk(['/tool/traceroute', `=address=${safeTarget}`, '=count=1', '=duration=5']));
-    return { ok:true, target:safeTarget, results:r };
+    const results = r.map((h: any, i: number) => ({
+      hop: i + 1,
+      address: String(h.address || h['ip-address'] || '').trim(),
+      loss: Number(h.loss ?? 0),
+      sent: Number(h.sent ?? 1),
+      last: Number(h.last ?? h['last-rtt'] ?? 0),
+      avg: Number(h.avg ?? h['avg-rtt'] ?? 0),
+      best: Number(h.best ?? h['min-rtt'] ?? 0),
+      worst: Number(h.worst ?? h['max-rtt'] ?? 0),
+      'std-dev': Number(h['std-dev'] ?? 0),
+      status: String(h.status || '')
+    })).filter((h: any) => h.address || h.sent > 0 || h.status);
+    return { ok:true, target:safeTarget, results };
   });
 }
 

@@ -791,9 +791,9 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
           {wifiMsg && <div className="text-xs font-mono p-2 rounded bg-[#FFF7E8] border border-[#1A1A2E]">{wifiMsg}</div>}
         </div>
 
-        <div className="overflow-x-auto rounded-lg border-2 border-[#1A1A2E]">
+        <div className="overflow-x-auto rounded-lg border-2 border-[#1A1A2E] max-h-72">
           <table className="w-full text-xs font-mono text-left text-[#1A1A2E]">
-            <thead className="bg-[#FFF7E8] text-[#1A1A2E] border-b-2 border-[#1A1A2E] font-sans font-bold">
+            <thead className="bg-[#FFF7E8] text-[#1A1A2E] border-b-2 border-[#1A1A2E] font-sans font-bold sticky top-0 z-10">
               <tr>
                 <th className="py-2.5 px-3">SSID</th><th className="py-2.5 px-3">BSSID</th><th className="py-2.5 px-3">Canal</th><th className="py-2.5 px-3">Freq/Banda</th><th className="py-2.5 px-3">Potência</th><th className="py-2.5 px-3">Segurança</th><th className="py-2.5 px-3 text-center">Conexão</th>
               </tr>
@@ -870,9 +870,9 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
         </div>
 
         {/* Tabela de Clientes Conectados */}
-        <div className="overflow-x-auto rounded-lg border-2 border-[#1A1A2E]">
+        <div className="overflow-x-auto rounded-lg border-2 border-[#1A1A2E] max-h-[420px]">
           <table className="w-full text-xs font-mono text-left text-[#1A1A2E]">
-            <thead className="bg-[#FFF7E8] text-[#1A1A2E] text-xs border-b-2 border-[#1A1A2E] font-sans font-bold">
+            <thead className="bg-[#FFF7E8] text-[#1A1A2E] text-xs border-b-2 border-[#1A1A2E] font-sans font-bold sticky top-0 z-10">
               <tr>
                 <th 
                   onClick={() => { setClientSort('ip'); setClientSortAsc(!clientSortAsc); }}

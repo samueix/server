@@ -85,9 +85,15 @@ class TabErrorBoundary extends React.Component<
 }
 
 const TabLoadingFallback: React.FC = () => (
-  <div className="p-12 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] text-center font-mono text-xs flex flex-col items-center justify-center gap-3">
-    <div className="w-8 h-8 rounded-full border-4 border-[#1A1A2E] border-t-[#FF5A36] animate-spin" />
-    <span className="font-bold text-[#1A1A2E]">Carregando módulo...</span>
+  <div className="space-y-4 animate-pulse">
+    <div className="h-24 rounded-xl bg-white border-2 border-[#1A1A2E]/20" />
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="h-20 rounded-xl bg-white border-2 border-[#1A1A2E]/15" />
+      <div className="h-20 rounded-xl bg-white border-2 border-[#1A1A2E]/15" />
+      <div className="h-20 rounded-xl bg-white border-2 border-[#1A1A2E]/15" />
+      <div className="h-20 rounded-xl bg-white border-2 border-[#1A1A2E]/15" />
+    </div>
+    <div className="h-64 rounded-xl bg-white border-2 border-[#1A1A2E]/15" />
   </div>
 );
 
