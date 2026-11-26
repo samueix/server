@@ -1,9 +1,33 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Router, Wifi, Shield, Network, Cable, Users, AlertTriangle, Activity, History, Server, Globe, ShieldCheck, ArrowRight, Lock } from 'lucide-react';
+import { RefreshCw, Router, Wifi, Shield, Network, Cable, Users, AlertTriangle, Activity, History, Server, Globe, ShieldCheck, ArrowRight, Lock, Download } from 'lucide-react';
 import { getAuthHeaders } from '../../services/authService';
 import type { MikrotikStatus } from '../../types';
 
 const fmtBytes = (n: any) => { const v=Number(n||0); if(v>1e9) return (v/1e9).toFixed(2)+' GB'; if(v>1e6) return (v/1e6).toFixed(1)+' MB'; if(v>1e3) return (v/1e3).toFixed(1)+' KB'; return v+' B'; };
+const fmtRate = (bps: any) => { const v=Number(bps||0); if(v>=1e9) return (v/1e9).toFixed(2)+' Gbps'; if(v>=1e6) return (v/1e6).toFixed(2)+' Mbps'; if(v>=1e3) return (v/1e3).toFixed(1)+' Kbps'; return Math.round(v)+' bps'; };
+function LineChart({ series, labels, yMax, unit = '', height = 160 }: { series: { name: string; color: string; values: number[] }[]; labels?: string[]; yMax?: number; unit?: string; height?: number }) {
+  const n = Math.max(0, ...series.map(s => s.values.length));
+  if (n < 2) return <div style={{ height }} className="flex items-center justify-center text-xs font-mono text-[#4A4A68]">Sem dados suficientes para o gráfico.</div>;
+  const W = 640, padL = 46, padR = 12, padT = 10, padB = 20;
+  const max = Math.max(yMax ?? 0, ...series.flatMap(s => s.values), 0.0001);
+  const x = (i: number) => padL + (i / (n - 1)) * (W - padL - padR);
+  const y = (v: number) => padT + (1 - Math.max(0, Math.min(v, max)) / max) * (height - padT - padB);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => max * f);
+  const fmtVal = (v: number) => unit === 'Mbps' ? fmtRate(v * 1e6) : `${Math.round(v)}${unit}`;
+  const labelAt = (i: number) => { const l = labels?.[i] || ''; if (!l) return ''; const d = new Date(l); return isNaN(d.getTime()) ? l : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+  return <div>
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-bold mb-1">
+      {series.map(s => <span key={s.name} className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: s.color }} />{s.name}: <span className="font-mono">{fmtVal(s.values[n - 1] || 0)}</span></span>)}
+    </div>
+    <svg viewBox={`0 0 ${W} ${height}`} className="w-full">
+      {ticks.map((t, i) => { const yy = y(t); return <g key={i}><line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#1A1A2E" strokeOpacity="0.12" /><text x={padL - 5} y={yy + 3} textAnchor="end" fontSize="9" fill="#4A4A68">{unit === 'Mbps' ? fmtRate(t * 1e6).replace(' Gbps','G').replace(' Mbps','M').replace(' Kbps','K').replace(' bps','') : `${Math.round(t)}${unit}`}</text></g>; })}
+      <text x={padL} y={height - 5} fontSize="9" fill="#4A4A68">{labelAt(0)}</text>
+      <text x={W - padR} y={height - 5} textAnchor="end" fontSize="9" fill="#4A4A68">{labelAt(n - 1)}</text>
+      {series.map(s => { const pts = s.values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' '); return <polyline key={s.name} points={pts} fill="none" stroke={s.color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />; })}
+      {series.map(s => { const i = Math.min(n - 1, s.values.length - 1); if (i < 0) return null; return <circle key={s.name} cx={x(i)} cy={y(s.values[i])} r="2.4" fill={s.color} />; })}
+    </svg>
+  </div>;
+}
 function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return <div className="bg-[#FFF7E8] border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]"><div className="text-[11px] font-bold uppercase tracking-wider text-[#4A4A68]">{label}</div><div className="text-lg font-black font-title text-[#1A1A2E] mt-1 break-all">{value}</div>{sub && <div className="text-[11px] font-mono text-[#4A4A68] mt-1">{sub}</div>}</div>;
 }
@@ -22,6 +46,8 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   const devices = (data.devices || []) as any[];
   const bridgePorts = (data.bridgePorts || []) as any[];
   const bridgeHosts = (data.bridgeHosts || []) as any[];
+  const interfaces = (data.interfaces || []) as any[];
+  const ethernet = (data.ethernet || []) as any[];
   const wanAddr = addresses.find(a => a.interface === 'ether1')?.address || 'WAN';
   const lanAddr = addresses.find(a => String(a.interface || '').startsWith('bridge'))?.address || 'LAN';
   const gw = routes.find(r => r['dst-address'] === '0.0.0.0/0')?.gateway || 'gateway';
@@ -50,6 +76,13 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
     return ifaceOf(d) === 'ether1';
   });
   const lanDevices = devices.filter(d => !wanDevices.includes(d) && ipOf(d) !== String(gw));
+  const ifaceMap = new Map<string, any>(interfaces.map((i: any) => [String(i.name), i]));
+  const ethMap = new Map<string, any>(ethernet.map((e: any) => [String(e.name), e]));
+  const portInfo = (name: string) => {
+    const ifc = ifaceMap.get(name);
+    const eth = ethMap.get(name);
+    return { running: ifc ? ifc.running === 'true' : undefined, speed: String(eth?.speed || '') };
+  };
   const portOf = (d: any) => { const p = ifaceOf(d); return p === 'ether1' ? '' : p; };
   const portNames = Array.from(new Set([
     ...bridgePorts.filter(p => p.disabled !== 'true').map(p => p.interface).filter(Boolean),
@@ -57,7 +90,9 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   ]));
   const lanChildren: TopoNode[] = portNames.map(port => {
     const onPort = lanDevices.filter(d => portOf(d) === port);
-    return { label: port, sub: `${onPort.length} dispositivo(s)`, kind: 'port', children: onPort.map(devNode) };
+    const info = portInfo(port);
+    const state = info.running === false ? 'link down' : 'link up';
+    return { label: port, sub: `${state}${info.speed ? ` · ${info.speed}` : ''} · ${onPort.length} dispositivo(s)`, kind: 'port', online: info.running, children: onPort.map(devNode) };
   });
   const mapped = new Set(portNames.flatMap(p => lanDevices.filter(d => portOf(d) === p).map(d => d.mac)));
   const otherLan = lanDevices.filter(d => !mapped.has(d.mac));
@@ -104,10 +139,12 @@ export const MikroTikTab: React.FC = () => {
   const [dnsName, setDnsName] = useState('google.com');
   const [dnsResult, setDnsResult] = useState<any>(null);
   const [snapshots, setSnapshots] = useState<any[]>([]);
+  const [bandwidth, setBandwidth] = useState<any>(null);
   const [dnsSettings, setDnsSettings] = useState<any>(null);
   const [dnsServersInput, setDnsServersInput] = useState('192.168.100.23');
   const [dhcpDnsInput, setDhcpDnsInput] = useState('192.168.88.1');
   const [busyDns, setBusyDns] = useState(false);
+  const [busyExport, setBusyExport] = useState<string|null>(null);
   const [dnsMsg, setDnsMsg] = useState<string|null>(null);
   const loadDnsSettings = useCallback(async () => {
     try {
@@ -143,7 +180,7 @@ export const MikroTikTab: React.FC = () => {
       setError(null);
       const [res, sres] = await Promise.all([
         fetch('/api/mikrotik/status', { headers: getAuthHeaders() }),
-        fetch('/api/mikrotik/snapshots?limit=60', { headers: getAuthHeaders() })
+        fetch('/api/mikrotik/snapshots?limit=180', { headers: getAuthHeaders() })
       ]);
       const j = await res.json(); if (!res.ok || j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); setData(j);
       const sj = await sres.json().catch(()=>({snapshots:[]})); if (Array.isArray(sj?.snapshots)) setSnapshots(sj.snapshots);
@@ -178,8 +215,27 @@ export const MikroTikTab: React.FC = () => {
     try { const res = await fetch(`/api/mikrotik/devices/${encodeURIComponent(mac)}/make-static`, { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ address: ip||'', comment: 'server-panel static' }) }); const j=await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`); await refresh(); }
     catch(e:any){ alert(e?.message||'Falha'); } finally { setBusyMac(null); }
   };
+  const exportData = async (format:'json'|'csv', scope='devices') => {
+    setBusyExport(format+scope);
+    try {
+      const res = await fetch(`/api/mikrotik/export?format=${format}&scope=${scope}`, { headers: getAuthHeaders() });
+      if (!res.ok) { const j = await res.json().catch(()=>({})); throw new Error(j?.error || `HTTP ${res.status}`); }
+      const blob = await res.blob();
+      const disp = res.headers.get('content-disposition') || '';
+      const m = /filename="?([^";]+)"?/.exec(disp);
+      const name = m?.[1] || `mikrotik-report.${format}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch(e:any){ alert(e?.message||'Falha ao exportar'); } finally { setBusyExport(null); }
+  };
+  const loadBandwidth = useCallback(async () => {
+    try { const res = await fetch('/api/mikrotik/bandwidth', { headers: getAuthHeaders() }); const j = await res.json().catch(()=>null); if (res.ok && j?.ok !== false) setBandwidth(j); }
+    catch {}
+  }, []);
   useEffect(()=>{ refresh(); const id=setInterval(refresh,3000); return ()=>clearInterval(id); },[refresh]);
   useEffect(()=>{ loadDnsSettings(); },[loadDnsSettings]);
+  useEffect(()=>{ loadBandwidth(); const id=setInterval(loadBandwidth,5000); return ()=>clearInterval(id); },[loadBandwidth]);
 
   const r=data?.resource||{}; const devices=data?.devices||[]; const events=data?.events||[]; const wifi=data?.wifi||[]; const leases=data?.leases||[]; const interfaces=data?.interfaces||[]; const firewall=data?.firewall||[]; const routes=data?.routes||[]; const nat=data?.nat||[];
   const memUsed=(Number(r['total-memory']||0)-Number(r['free-memory']||0)); const memPct=r['total-memory']?Math.round((memUsed/Number(r['total-memory']))*100):0;
@@ -191,7 +247,11 @@ export const MikroTikTab: React.FC = () => {
   return <div className="space-y-4 font-sans text-[#1A1A2E]">
     <div className="p-4 sm:p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] flex flex-col md:flex-row md:items-center justify-between gap-4">
       <div className="flex items-start gap-3"><div className="w-10 h-10 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] flex items-center justify-center"><Router className="w-5 h-5 text-[#FF5A36]"/></div><div><h2 className="text-lg sm:text-xl font-black font-title tracking-tight">Network Center / MikroTik</h2><p className="text-xs sm:text-sm text-[#4A4A68] font-medium mt-0.5">RouterOS 8728 • inventário/histórico local • auto 3s. {data?.identity?.name||''}</p></div></div>
-      <button type="button" onClick={refresh} className="min-h-[40px] px-3.5 py-2 rounded-lg bg-[#FF5A36] hover:bg-[#E04522] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-white font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"><RefreshCw className="w-4 h-4"/>Atualizar</button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={()=>exportData('json')} disabled={busyExport==='jsondevices'} className="min-h-[40px] px-3.5 py-2 rounded-lg bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-[#1A1A2E] font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer disabled:opacity-60"><Download className="w-4 h-4"/>{busyExport==='jsondevices'?'Gerando...':'Relatório JSON'}</button>
+        <button type="button" onClick={()=>exportData('csv','devices')} disabled={busyExport==='csvdevices'} className="min-h-[40px] px-3.5 py-2 rounded-lg bg-white hover:bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-[#1A1A2E] font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer disabled:opacity-60"><Download className="w-4 h-4"/>{busyExport==='csvdevices'?'Gerando...':'Inventário CSV'}</button>
+        <button type="button" onClick={refresh} className="min-h-[40px] px-3.5 py-2 rounded-lg bg-[#FF5A36] hover:bg-[#E04522] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] text-white font-bold text-xs sm:text-sm flex items-center gap-2 cursor-pointer"><RefreshCw className="w-4 h-4"/>Atualizar</button>
+      </div>
     </div>
     {error && <div className="bg-[#FEE4E2] border-2 border-[#1A1A2E] text-[#B42318] rounded-xl p-4 text-sm flex gap-2"><AlertTriangle className="w-4 h-4 mt-0.5"/><div><div className="font-bold">Erro MikroTik</div><div className="font-mono text-xs mt-1">{error}</div></div></div>}
     {loading && <div className="p-8 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] text-center font-semibold text-[#4A4A68]">Consultando MikroTik...</div>}
@@ -212,6 +272,28 @@ export const MikroTikTab: React.FC = () => {
         </div>
       </div>
 
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Cable className="w-4 h-4 text-[#FF5A36]"/>Portas físicas / topologia</div>
+        <Table cols={['Porta','Link','Velocidade','Papel','Dispositivos']} rows={(() => {
+          const eth = (data?.ethernet || []) as any[];
+          const ifs = (data?.interfaces || []) as any[];
+          const bPorts = (data?.bridgePorts || []) as any[];
+          const bHosts = (data?.bridgeHosts || []) as any[];
+          const macOn = (port:string) => bHosts.filter((h:any)=>h['on-interface']===port && h['local']!=='true').map((h:any)=>String(h['mac-address']).toUpperCase());
+          const namesFor = (port:string) => macOn(port).map(m => { const d = devices.find((x:any)=>String(x.mac).toUpperCase()===m); return d ? (d.nickname||d.hostname||d.mac) : m; });
+          const rows = eth.map((e:any) => {
+            const ifc = ifs.find((i:any)=>i.name===e.name);
+            const bp = bPorts.find((p:any)=>p.interface===e.name);
+            const role = e.name==='ether1' ? 'WAN' : (bp?.role || (ifc?.slave==='true'?'bridge':'—'));
+            const on = namesFor(e.name);
+            const speed = e.speed ? `${e.speed}${e['full-duplex']==='true'?' FD':''}` : '—';
+            return [e.name, ifc?.running==='true'?<span className="text-[#027A48] font-bold">up</span>:<span className="text-[#B42318] font-bold">down</span>, speed, role, on.length ? on.join(', ') : '—'];
+          });
+          const wlan = ifs.find((i:any)=>i.name==='wlan1');
+          rows.push(['wlan1', wlan?.running==='true'?<span className="text-[#027A48] font-bold">up</span>:<span className="text-[#B42318] font-bold">down</span>, 'wireless', 'bridge', namesFor('wlan1').join(', ') || '—']);
+          return rows;
+        })()} />
+      </div>
+
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Users className="w-4 h-4 text-[#FF5A36]"/>Inventário de dispositivos</div>
         <Table cols={['Nome/Host','IP','MAC','Tipo/Fabricante','Conexão','Sinal','Último visto','Status','Ações']} rows={devices.map((d:any)=>[
           <div><div className="font-bold">{d.nickname||d.hostname||'—'}</div><div className="text-[#4A4A68]">{d.hostname||''}</div></div>, d.ip||d.last_ip||'—', d.mac, <div><div>{d.device_type||'unknown'}</div><div className="text-[#4A4A68]">{d.vendor||''}</div></div>, `${d.connection||'—'}${d.interface?` (${d.interface})`:''}`, d.signal_dbm?`${d.signal_dbm} dBm`:'—', d.last_seen?new Date(d.last_seen).toLocaleString():'—', <span className={Number(d.online)?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{Number(d.online)?'online':'offline'}</span>,
@@ -228,12 +310,32 @@ export const MikroTikTab: React.FC = () => {
         </div>
       </div>
 
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Activity className="w-4 h-4 text-[#FF5A36]"/>Banda por dispositivo</div>
+        <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E] space-y-2">
+          <div className="flex justify-between text-[11px] font-mono text-[#4A4A68]"><span>Base: /ip/firewall/connection (orig-rate/repl-rate)</span><span>{bandwidth?.ts?new Date(bandwidth.ts).toLocaleTimeString():'—'}</span></div>
+          {(() => {
+            const bw = new Map<string,any>((bandwidth?.devices||[]).map((x:any)=>[String(x.ip),x]));
+            const rows = devices.map((d:any)=>{ const ip=String(d.ip||d.last_ip||''); const b=bw.get(ip); return { d, ip, rx:Number(b?.rx_bps||0), tx:Number(b?.tx_bps||0), conns:Number(b?.connections||0), total:Number(b?.rx_bps||0)+Number(b?.tx_bps||0) }; }).filter((r:any)=>r.ip).sort((a:any,b:any)=>b.total-a.total);
+            const max = Math.max(1, ...rows.map((r:any)=>Math.max(r.rx,r.tx)));
+            if (!rows.length) return <div className="text-xs text-[#4A4A68]">Sem dispositivos com IP conhecido.</div>;
+            return <div className="space-y-2">{rows.map((r:any)=><div key={r.d.mac||r.ip} className="space-y-1"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-bold truncate">{r.d.nickname||r.d.hostname||r.d.mac}<span className="ml-2 font-normal text-[#4A4A68]">{r.ip}</span></span><span className="font-mono text-[11px] shrink-0">{fmtRate(r.rx)} ↓ · {fmtRate(r.tx)} ↑{r.conns?` · ${r.conns} conn`:''}</span></div><div className="flex gap-1"><div className="flex-1 h-2 rounded bg-[#1A1A2E]/10 overflow-hidden"><div className="h-full bg-[#0BA5EC]" style={{width:`${Math.min(100,(r.rx/max)*100)}%`}}/></div><div className="flex-1 h-2 rounded bg-[#1A1A2E]/10 overflow-hidden"><div className="h-full bg-[#FF5A36]" style={{width:`${Math.min(100,(r.tx/max)*100)}%`}}/></div></div></div>)}</div>;
+          })()}
+          <div className="text-[10px] font-mono text-[#4A4A68]">Azul = download, laranja = upload. Taxas instantâneas; pode variar entre amostras.</div>
+        </div>
+      </div>
+
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Activity className="w-4 h-4 text-[#FF5A36]"/>Histórico (snapshots locais)</div>
-        <Table cols={['Quando','CPU','RAM','Wi-Fi','Leases','RX total','TX total']} rows={snapshots.slice().reverse().slice(0,20).map((s:any)=>{
-          const res=s.resource||{}; const memTotal=Number(res['total-memory']||0); const memFree=Number(res['free-memory']||0); const memPct=memTotal?Math.round(((memTotal-memFree)/memTotal)*100):0;
-          const ifs=s.interfaces||[]; const rx=ifs.reduce((a:number,i:any)=>a+Number(i['rx-byte']||0),0); const tx=ifs.reduce((a:number,i:any)=>a+Number(i['tx-byte']||0),0);
-          return [s.ts?new Date(s.ts).toLocaleTimeString():'—', `${res['cpu-load']||0}%`, `${memPct}%`, String((s.wifi||[]).length), String((s.leases||[]).length), fmtBytes(rx), fmtBytes(tx)];
-        })} />
+        {(() => {
+          const history = snapshots.slice().reverse().map((s:any)=>{ const r=s.resource||{}; const total=Number(r['total-memory']||0); const free=Number(r['free-memory']||0); return { ts:s.ts, cpu:Number(r['cpu-load']||0), ram: total?Math.round(((total-free)/total)*100):0, wifi:(s.wifi||[]).length, leases:(s.leases||[]).length, interfaces:s.interfaces||[] }; });
+          const traffic:any[] = []; for(let i=1;i<history.length;i++){ const a=history[i-1], b=history[i]; const dt=(new Date(b.ts).getTime()-new Date(a.ts).getTime())/1000; if(!(dt>0)) continue; const sum=(s:any,k:string)=>(s.interfaces||[]).reduce((acc:number,x:any)=>acc+Number(x[k]||0),0); let drx=sum(b,'rx-byte')-sum(a,'rx-byte'); let dtx=sum(b,'tx-byte')-sum(a,'tx-byte'); if(drx<0) drx=0; if(dtx<0) dtx=0; traffic.push({ ts:b.ts, rx:(drx*8)/dt/1e6, tx:(dtx*8)/dt/1e6 }); }
+          const labels = history.map((h:any)=>h.ts); const tLabels = traffic.map((t:any)=>t.ts);
+          return <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]"><div className="text-[11px] font-bold mb-1">CPU e RAM (%)</div><LineChart series={[{name:'CPU',color:'#FF5A36',values:history.map((h:any)=>h.cpu)},{name:'RAM',color:'#1A1A2E',values:history.map((h:any)=>h.ram)}]} labels={labels} yMax={100} unit="%" /></div>
+            <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]"><div className="text-[11px] font-bold mb-1">Clientes Wi‑Fi e leases DHCP</div><LineChart series={[{name:'Wi‑Fi',color:'#0BA5EC',values:history.map((h:any)=>h.wifi)},{name:'Leases',color:'#12B76A',values:history.map((h:any)=>h.leases)}]} labels={labels} unit="" /></div>
+            <div className="xl:col-span-2 bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E]"><div className="text-[11px] font-bold mb-1">Tráfego total (Mbps, delta entre snapshots)</div><LineChart series={[{name:'Download',color:'#0BA5EC',values:traffic.map((t:any)=>t.rx)},{name:'Upload',color:'#FF5A36',values:traffic.map((t:any)=>t.tx)}]} labels={tLabels} unit="Mbps" /></div>
+            <div className="xl:col-span-2 text-[10px] font-mono text-[#4A4A68]">{history.length} amostras locais (poll 15s, retenção 7 dias). Taxas de tráfego calculadas por delta de bytes das interfaces.</div>
+          </div>;
+        })()}
       </div>
 
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Cable className="w-4 h-4 text-[#FF5A36]"/>Interfaces</div>

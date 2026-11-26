@@ -601,7 +601,7 @@ export interface N8nStatusResponse {
 export interface MikrotikStatus {
   ok: boolean; host?: string; error?: string; stale?: boolean;
   identity?: Record<string, string>; resource?: Record<string, string>; routerboard?: Record<string, string>;
-  addresses?: Record<string, string>[]; interfaces?: Record<string, string>[]; leases?: Record<string, string>[];
+  addresses?: Record<string, string>[]; interfaces?: Record<string, string>[]; ethernet?: Record<string, string>[]; leases?: Record<string, string>[];
   wifi?: Record<string, string>[]; arp?: Record<string, string>[]; dns?: Record<string, string>;
   routes?: Record<string, string>[]; nat?: Record<string, string>[]; firewall?: Record<string, string>[];
   dhcpServers?: Record<string, string>[]; bridgePorts?: Record<string,string>[]; bridgeHosts?: Record<string,string>[]; services?: Record<string,string>[];

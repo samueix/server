@@ -107,6 +107,7 @@ export async function mikrotikGetStatus() {
     const routerboard = await rosSafe(c, ['/system/routerboard/print']);
     const addresses = await rosSafe(c, ['/ip/address/print']);
     const interfaces = await rosSafe(c, ['/interface/print']);
+    const ethernet = await rosSafe(c, ['/interface/ethernet/print']);
     const leases = await rosSafe(c, ['/ip/dhcp-server/lease/print']);
     const wifi = await rosSafe(c, ['/interface/wireless/registration-table/print']);
     const arp = await rosSafe(c, ['/ip/arp/print']);
@@ -122,13 +123,47 @@ export async function mikrotikGetStatus() {
     return {
       ok: true, host: cfg.host, port: cfg.port,
       identity: rosOne(identity), resource: rosOne(resource), routerboard: rosOne(routerboard),
-      addresses: rosRows(addresses), interfaces: rosRows(interfaces), leases: rosRows(leases),
+      addresses: rosRows(addresses), interfaces: rosRows(interfaces), ethernet: rosRows(ethernet), leases: rosRows(leases),
       wifi: [...rosRows(wifi), ...rosRows(capsman)], arp: rosRows(arp), dns: rosOne(dns), routes: rosRows(routes),
       nat: rosRows(nat), firewall: rosRows(firewall), dhcpServers: rosRows(dhcpServers),
       bridgePorts: rosRows(bridgePorts), bridgeHosts: rosRows(bridgeHosts), services: rosRows(services),
       fetchedAt: new Date().toISOString(),
     };
   }, cfg);
+}
+
+export async function mikrotikGetBandwidth(knownIps: string[] = []) {
+  const known = new Set(knownIps.map(s => String(s || '').trim()).filter(Boolean));
+  return await withMikrotik(async (c) => {
+    const conns = rosRows(await rosSafe(c, ['/ip/firewall/connection/print']));
+    const byIp = new Map<string, { rx_bps: number; tx_bps: number; connections: number }>();
+    const ipOnly = (v: any) => String(v || '').split(':')[0].trim();
+    for (const con of conns) {
+      const orig = Number(con['orig-rate'] || 0);
+      const repl = Number(con['repl-rate'] || 0);
+      if (!orig && !repl) continue;
+      const src = ipOnly(con['src-address']);
+      const dst = ipOnly(con['reply-dst-address']);
+      const srcKnown = known.size ? known.has(src) : Boolean(src);
+      const dstKnown = known.size ? known.has(dst) : false;
+      if (srcKnown && src) {
+        const r = byIp.get(src) || { rx_bps: 0, tx_bps: 0, connections: 0 };
+        r.tx_bps += orig; r.rx_bps += repl; r.connections++;
+        byIp.set(src, r);
+      }
+      if (dstKnown && dst && dst !== src) {
+        const r = byIp.get(dst) || { rx_bps: 0, tx_bps: 0, connections: 0 };
+        r.rx_bps += orig; r.tx_bps += repl; r.connections++;
+        byIp.set(dst, r);
+      }
+    }
+    return {
+      ok: true,
+      ts: new Date().toISOString(),
+      source: 'connection-tracking',
+      devices: Array.from(byIp.entries()).map(([ip, v]) => ({ ip, ...v }))
+    };
+  });
 }
 
 export async function mikrotikTestConnection() {

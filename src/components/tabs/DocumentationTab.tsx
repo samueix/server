@@ -344,17 +344,18 @@ const TABS_DOCUMENTATION: DocTab[] = [
     summary: 'Inventário, topologia, histórico, bloqueio, DHCP fixo e diagnóstico executado no roteador.',
     purpose: 'Centralizar a operação da rede no RB951G-2HnD via RouterOS API 8728, reduzindo o processamento no servidor.',
     whatYouCanDo: [
-      'Ver árvore da rede (WAN/LAN/portas/dispositivos), inventário, Wi‑Fi e eventos.',
+      'Ver árvore da rede (WAN/LAN/portas/dispositivos), portas físicas (link/velocidade/papel) e banda por dispositivo.',
       'Bloquear/desbloquear por MAC e tornar leases DHCP estáticos com confirmação e auditoria.',
       'Executar ping, traceroute e consulta DNS no próprio roteador (offload do servidor).',
-      'Configurar o DNS do roteador/DHCP para usar o AdGuard e ver o histórico local de snapshots.'
+      'Configurar o DNS do roteador/DHCP para usar o AdGuard e ver histórico local em gráficos (CPU/RAM/clientes/tráfego).',
+      'Exportar relatório completo em JSON (configuração, inventário, eventos e histórico) e inventário em CSV.'
     ],
     indicators: [
       { label: 'Árvore da rede', desc: 'Montada de bridge ports/hosts, ARP, DHCP, Wi‑Fi e rotas.' },
       { label: 'DNS do roteador', desc: 'Servidores atuais, allow-remote-requests e DNS entregue via DHCP LAN.' },
       { label: 'Alertas', desc: 'Eventos de CPU/RAM alta, novo dispositivo e online/offline.' }
     ],
-    apis: 'GET /api/mikrotik/status|devices|events|snapshots|dns-settings|logs; POST /api/mikrotik/ping|traceroute|dns|dns-settings|devices/:mac/block|unblock|make-static (admin para escrita).',
+    apis: 'GET /api/mikrotik/status|devices|events|snapshots|dns-settings|logs|bandwidth|export?format=json|csv&scope=devices; POST /api/mikrotik/ping|traceroute|dns|dns-settings|devices/:mac/block|unblock|make-static (admin para escrita).',
     permissions: 'Leitura para autenticados; ações de escrita/DNS exigem admin e são auditadas.',
     troubleshooting: 'Sem resposta: valide API 8728, regras de firewall TEMP e credenciais. REST /rest não é confiável no RouterOS 7.5 deste modelo.'
   },
