@@ -608,7 +608,7 @@ const CameraCard: React.FC<{
             </div>
             {!rec && (
               <div className="text-[11px] text-[#4A4A68] leading-relaxed">
-                Esta Yoosee não expõe replay ONVIF padrão. Sem endpoint de playback confirmado, não dá para exibir gravações SD no painel com segurança.
+                Esta Yoosee não expõe replay ONVIF padrão. Sem endpoint de playback confirmado, a reprodução do cartão SD não é exibida no painel.
               </div>
             )}
             {rec && (

@@ -696,12 +696,12 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
 
                   <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]">
                     <span className="text-[10px] text-[#4A4A68] font-sans font-bold uppercase tracking-wider block">Gateway padrão</span>
-                    <span className="text-[#1A1A2E] font-semibold tabular-nums">{iface.gateway || '192.168.100.1'}</span>
+                    <span className="text-[#1A1A2E] font-semibold tabular-nums">{iface.gateway || (iface.nome === 'lo' ? '—' : '—')}</span>
                   </div>
 
                   <div className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E]">
                     <span className="text-[10px] text-[#4A4A68] font-sans font-bold uppercase tracking-wider block">Máscara / prefixo</span>
-                    <span className="text-[#1A1A2E] font-semibold tabular-nums">{iface.mascara || '255.255.255.0 (/24)'}</span>
+                    <span className="text-[#1A1A2E] font-semibold tabular-nums">{iface.mascara || (iface.nome === 'lo' ? '255.0.0.0 (/8)' : '—')}</span>
                   </div>
                 </div>
 

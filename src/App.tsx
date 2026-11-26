@@ -329,9 +329,9 @@ export default function App() {
       ? server.cpu.nucleos_uso.map(v => Number(v) || 0)
       : undefined;
     const ram = server?.memoria?.uso_percentual ?? 0;
-    const temp = tempResp?.disponivel && tempResp?.sensores?.[0]
-      ? (tempResp.sensores[0].temperatura_c ?? 0)
-      : (server?.temperatura?.disponivel && server?.temperatura?.sensores?.[0] ? server.temperatura.sensores[0].temperatura_c : 0);
+    const tempSensors = tempResp?.sensores?.length ? tempResp.sensores : (server?.temperatura?.sensores || []);
+    const cpuTempSensor = tempSensors.find((s: any) => /package|tctl|tctl|cpu|core 0/i.test(String(s?.nome || s?.name || ''))) || tempSensors.find((s: any) => s?.isCore || /core/i.test(String(s?.nome || s?.name || ''))) || tempSensors[0];
+    const temp = Number((cpuTempSensor as any)?.temperatura_c ?? (cpuTempSensor as any)?.temp ?? 0) || 0;
     const netDown = net?.downloadSpeedBytes ? (net.downloadSpeedBytes / 1024) : 0;
     const netUp = net?.uploadSpeedBytes ? (net.uploadSpeedBytes / 1024) : 0;
 

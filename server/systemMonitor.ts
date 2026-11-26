@@ -574,7 +574,7 @@ export function getNetworkInfo() {
       ipv6: ipv6 || null,
       mac,
       netmask,
-      gateway: ipv4 ? defaultGateway : '--',
+      gateway: (name === 'lo' || !ipv4) ? '--' : defaultGateway,
       is_up: isUp,
       status: isUp ? 'UP' : 'DOWN',
       speed_mbps: speedMbps,
