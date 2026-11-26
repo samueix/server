@@ -1409,8 +1409,20 @@ export function createApp() {
   app.post('/api/n8n/start', requireAdminAuth, async (req, res) => {
     applyCors(res, req);
     const caller = extractCaller(req); const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+    const startContainer = async () => execFileAsync('docker', ['start', 'n8n'], { timeout: 30000 });
     try {
-      await execFileAsync('docker', ['start', 'n8n'], { timeout: 30000 });
+      try {
+        await startContainer();
+      } catch (err: any) {
+        const raw = String(err?.stderr || err?.message || '');
+        if (/docker daemon|Cannot connect to the Docker daemon|Is the docker daemon running/i.test(raw)) {
+          await execFileAsync('systemctl', ['start', 'docker'], { timeout: 30000 });
+          await new Promise(r => setTimeout(r, 1500));
+          await startContainer();
+        } else {
+          throw err;
+        }
+      }
       const status = await fetchN8nFallback();
       logAudit({ actor: caller.username||'admin', role: caller.role||'admin', ip, action: 'n8n_start', target: 'n8n', details: 'Container n8n iniciado', status: 'success' });
       return res.json({ success: true, message: 'Container n8n iniciado.', status });
