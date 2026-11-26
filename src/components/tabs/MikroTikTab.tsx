@@ -302,7 +302,7 @@ export const MikroTikTab: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Wifi className="w-4 h-4 text-[#FF5A36]"/>Wi-Fi (radio MikroTik)</div>
+        <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Wifi className="w-4 h-4 text-[#FF5A36]"/>Wi-Fi (rádio MikroTik)</div>
           <Table cols={['IP','MAC','Sinal','TX/RX','Uptime']} rows={wifi.map((w:any)=>[w['last-ip']||'—', w['mac-address'], w['signal-strength']||'—', `${w['tx-rate']||'—'} / ${w['rx-rate']||'—'}`, w.uptime||'—'])} />
         </div>
         <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><History className="w-4 h-4 text-[#FF5A36]"/>Eventos recentes</div>
