@@ -102,14 +102,6 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
     name: 'Tailscale VPN', 
     desc: 'Rede privada mesh VPN segura', 
     port: undefined 
-  },
-  { 
-    key: 'n8n', 
-    aliases: ['n8n', 'n8n workflow automation', 'n8n-server'], 
-    name: 'n8n Workflow Automation', 
-    desc: 'Automação de fluxos (container Docker em :5678)', 
-    port: 5678, 
-    isFuture: false 
   }
 ];
 

@@ -676,9 +676,13 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
         const comm = parts[6] || '';
         const argsStr = parts.slice(7).join(' ') || comm;
 
-        const status = statusRaw.startsWith('R') ? 'running' : 'sleeping';
-        if (status === 'running') running++;
-        else sleeping++;
+        let status = 'sleeping';
+        if (statusRaw.startsWith('R')) { status = 'running'; running++; }
+        else if (statusRaw.startsWith('S') || statusRaw.startsWith('I')) { status = 'sleeping'; sleeping++; }
+        else if (statusRaw.startsWith('D')) { status = 'disk-sleep'; other++; }
+        else if (statusRaw.startsWith('Z')) { status = 'zombie'; other++; }
+        else if (statusRaw.startsWith('T') || statusRaw.startsWith('t')) { status = 'stopped'; other++; }
+        else { status = statusRaw.toLowerCase() || 'sleeping'; other++; }
 
         processes.push({
           pid,
@@ -714,7 +718,6 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
       { pid: 610, name: 'systemd-resolved', user: 'systemd-resolve', cpu: 0.1, mem: 0.5, status: 'sleeping', time: '12:44:10' },
       { pid: 720, name: 'cron', user: 'root', cpu: 0.0, mem: 0.2, status: 'sleeping', time: '12:43:00' },
       { pid: 850, name: 'docker', user: 'root', cpu: 0.3, mem: 1.4, status: 'sleeping', time: '12:40:00' },
-      { pid: 920, name: 'fail2ban-server', user: 'root', cpu: 0.1, mem: 0.7, status: 'sleeping', time: '12:35:00' },
       { pid: 1040, name: 'tailscaled', user: 'root', cpu: 0.2, mem: 0.8, status: 'sleeping', time: '12:30:00' }
     ];
 

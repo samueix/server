@@ -82,13 +82,6 @@ const CANONICAL_SERVICES = [
     name: 'Tailscale VPN',
     porta: null,
     descricao: 'Rede privada mesh VPN'
-  },
-  {
-    canonical: 'n8n',
-    aliases: ['n8n', 'n8n.service'],
-    name: 'n8n Workflow Automation',
-    porta: 5678,
-    descricao: 'Automação de fluxos e integrações (container Docker)'
   }
 ];
 
