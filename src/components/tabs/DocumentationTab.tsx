@@ -480,7 +480,7 @@ export const DocumentationTab: React.FC = () => {
       {(activeSection === 'all' || activeSection === 'tabs') && (
         <div className="p-5 rounded-xl bg-white border-2 border-[#1A1A2E] shadow-[4px_4px_0px_#1A1A2E] space-y-4">
           <div className="flex items-center justify-between pb-2.5 border-b-2 border-[#1A1A2E] flex-wrap gap-2">
-            <div className="flex items-center gap-2"><BookOpen className="w-5 h-5 text-[#FF5A36]" /><h2 className="text-xs font-black font-title uppercase tracking-wider">Manual das Abas (1–17, ordem real do painel)</h2></div>
+            <div className="flex items-center gap-2"><BookOpen className="w-5 h-5 text-[#FF5A36]" /><h2 className="text-xs font-black font-title uppercase tracking-wider">Manual das Abas (1–19, ordem real do painel)</h2></div>
             <span className="text-xs font-mono font-bold text-[#4A4A68]">Clique para expandir</span>
           </div>
           <div className="space-y-3">
