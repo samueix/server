@@ -116,14 +116,50 @@ function Tree({ node, depth = 0 }: { node: TopoNode; depth?: number }) {
   return (
     <div className={depth ? 'ml-3 border-l-2 border-[#1A1A2E]/20 pl-3' : ''}>
       <div className="flex items-center gap-1.5 py-0.5 flex-wrap">
-        <span className={`inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] ${node.kind === 'router' ? 'bg-[#FF5A36] text-white' : node.kind === 'wan' ? 'bg-[#E0F4FE]' : node.kind === 'lan' ? 'bg-[#ECFDF3]' : 'bg-[#FFF7E8]'}`}>
-          <Icon className="w-3 h-3" />
-        </span>
+        <span className={`inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] ${node.kind === 'router' ? 'bg-[#FF5A36] text-white' : node.kind === 'wan' ? 'bg-[#E0F4FE]' : node.kind === 'lan' ? 'bg-[#ECFDF3]' : 'bg-[#FFF7E8]'}`}><Icon className="w-3 h-3" /></span>
         <span className="font-bold text-xs">{node.label}</span>
         {node.sub && <span className="text-[10px] font-mono text-[#4A4A68]">{node.sub}</span>}
         {node.online !== undefined && <span className={`text-[10px] font-bold ${node.online ? 'text-[#027A48]' : 'text-[#B42318]'}`}>{node.online ? 'online' : 'offline'}</span>}
       </div>
       {node.children?.map((c, i) => <Tree key={`${c.label}-${i}`} node={c} depth={depth + 1} />)}
+    </div>
+  );
+}
+
+function flattenTopo(node: TopoNode, parentId?: string, out: any[] = [], depth=0) {
+  const id = `${parentId||'root'}>${node.label}:${node.sub||''}:${depth}:${out.length}`;
+  out.push({ id, node, parentId, depth });
+  node.children?.forEach(c=>flattenTopo(c,id,out,depth+1));
+  return out;
+}
+function TopologyMap({ root, pos, onMove }: { root: TopoNode; pos: Record<string,{x:number;y:number}>; onMove:(id:string,x:number,y:number)=>void }) {
+  const flat = useMemo(()=>flattenTopo(root),[root]);
+  const byId = new Map(flat.map(f=>[f.id,f]));
+  const defaultPos = (f:any) => ({ x: 20 + f.depth*240, y: 20 + (flat.filter(x=>x.depth===f.depth).indexOf(f))*92 });
+  const getPos = (f:any) => pos[f.id] || defaultPos(f);
+  const [drag, setDrag] = useState<{id:string;ox:number;oy:number;sx:number;sy:number}|null>(null);
+  const [pan, setPan] = useState({x:0,y:0});
+  const [zoom, setZoom] = useState(1);
+  const [panning, setPanning] = useState<{sx:number;sy:number;ox:number;oy:number}|null>(null);
+  return (
+    <div className="relative border-2 border-[#1A1A2E] rounded-xl bg-[#fffdf7] overflow-hidden" style={{height:460}}
+      onWheel={(e)=>{ e.preventDefault(); const d=e.deltaY>0?-0.08:0.08; setZoom(z=>Math.min(2,Math.max(0.4, +(z+d).toFixed(2)))); }}
+      onMouseMove={(e)=>{ if(drag){ onMove(drag.id, Math.max(0, drag.ox + (e.clientX-drag.sx)/zoom), Math.max(0, drag.oy + (e.clientY-drag.sy)/zoom)); } else if(panning){ setPan({x:panning.ox+(e.clientX-panning.sx), y:panning.oy+(e.clientY-panning.sy)}); } }}
+      onMouseUp={()=>{setDrag(null); setPanning(null);}} onMouseLeave={()=>{setDrag(null); setPanning(null);}}
+      onMouseDown={(e)=>{ if((e.target as HTMLElement).closest('[data-node]')) return; setPanning({sx:e.clientX,sy:e.clientY,ox:pan.x,oy:pan.y}); }}>
+      <div className="absolute top-2 right-2 z-10 flex gap-1"><button className="px-2 py-1 border-2 border-[#1A1A2E] bg-white text-xs font-bold rounded" onClick={()=>setZoom(z=>Math.min(2,z+0.1))}>+</button><button className="px-2 py-1 border-2 border-[#1A1A2E] bg-white text-xs font-bold rounded" onClick={()=>setZoom(z=>Math.max(0.4,z-0.1))}>-</button><button className="px-2 py-1 border-2 border-[#1A1A2E] bg-white text-xs font-bold rounded" onClick={()=>{setZoom(1);setPan({x:0,y:0});}}>Reset</button></div>
+      <div style={{transform:`translate(${pan.x}px,${pan.y}px) scale(${zoom})`, transformOrigin:'0 0', minWidth:1400, minHeight:900, position:'relative'}}>
+        <svg className="absolute top-0 left-0 pointer-events-none" width={1400} height={900}>
+          {flat.filter(f=>f.parentId).map(f=>{ const a=getPos(byId.get(f.parentId!)); const b=getPos(f); if(!a||!b) return null; return <line key={f.id} x1={a.x+210} y1={a.y+28} x2={b.x} y2={b.y+28} stroke="#1A1A2E" strokeOpacity="0.35" strokeWidth="2" />; })}
+        </svg>
+        {flat.map(f=>{ const p=getPos(f); const Icon = f.node.kind==='router'?Router:f.node.kind==='wan'?Globe:f.node.kind==='lan'?Network:f.node.kind==='port'?Cable:f.node.kind==='gateway'?ArrowRight:Server;
+          return <div key={f.id} data-node onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); setDrag({id:f.id,ox:p.x,oy:p.y,sx:e.clientX,sy:e.clientY}); }}
+            className="absolute cursor-grab active:cursor-grabbing select-none bg-white border-2 border-[#1A1A2E] rounded-lg shadow-[2px_2px_0px_#1A1A2E] px-2 py-1.5" style={{left:p.x,top:p.y,width:210}}>
+            <div className="flex items-center gap-1 text-xs font-bold"><Icon className="w-3.5 h-3.5" /><span className="truncate">{f.node.label}</span></div>
+            {f.node.sub && <div className="text-[10px] font-mono text-[#4A4A68] truncate">{f.node.sub}</div>}
+            {f.node.online!==undefined && <div className={`text-[10px] font-bold ${f.node.online?'text-[#027A48]':'text-[#B42318]'}`}>{f.node.online?'online':'offline'}</div>}
+          </div>; })}
+      </div>
     </div>
   );
 }
@@ -146,6 +182,8 @@ export const MikroTikTab: React.FC = () => {
   const [busyDns, setBusyDns] = useState(false);
   const [busyExport, setBusyExport] = useState<string|null>(null);
   const [dnsMsg, setDnsMsg] = useState<string|null>(null);
+  const [topoView, setTopoView] = useState<'tree'|'map'>(() => (localStorage.getItem('mikrotik_topo_view') as any) || 'tree');
+  const [topoPos, setTopoPos] = useState<Record<string,{x:number;y:number}>>(()=>{ try { return JSON.parse(localStorage.getItem('mikrotik_topo_pos')||'{}'); } catch { return {}; } });
   const loadDnsSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/mikrotik/dns-settings', { headers: getAuthHeaders() });
@@ -241,6 +279,8 @@ export const MikroTikTab: React.FC = () => {
   const memUsed=(Number(r['total-memory']||0)-Number(r['free-memory']||0)); const memPct=r['total-memory']?Math.round((memUsed/Number(r['total-memory']))*100):0;
   const online=devices.filter((d:any)=>Number(d.online)).length; const blocked=devices.filter((d:any)=>Number(d.blocked)).length;
   const topology = useMemo(()=>buildTopology(data),[data]);
+  const saveTopoPos = (id:string,x:number,y:number)=>{ setTopoPos(p=>{ const n={...p,[id]:{x:Math.max(0,Math.round(x)),y:Math.max(0,Math.round(y))}}; localStorage.setItem('mikrotik_topo_pos',JSON.stringify(n)); return n; }); };
+  const ipv6 = (data as any)?.ipv6 || {};
   const routerDns = String(dnsSettings?.dns?.servers || data?.dns?.servers || '');
   const dhcpDns = (dnsSettings?.dhcpNetworks || []).map((n:any)=>n['dns-server']).filter(Boolean).join(', ');
 
@@ -265,10 +305,17 @@ export const MikroTikTab: React.FC = () => {
         <Stat label="Wi-Fi" value={wifi.length} sub={`${leases.length} leases DHCP`}/>
       </div>
 
-      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Network className="w-4 h-4 text-[#FF5A36]"/>Árvore da rede</div>
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Network className="w-4 h-4 text-[#FF5A36]"/>Topologia da rede</div>
         <div className="border-2 border-[#1A1A2E] rounded-xl bg-white p-3 shadow-[2px_2px_0px_#1A1A2E] overflow-auto">
-          {topology ? <Tree node={topology} /> : <div className="text-xs text-[#4A4A68]">Sem dados de topologia.</div>}
-          <div className="mt-2 text-[10px] font-mono text-[#4A4A68]">Montada a partir de bridge ports/hosts, ARP, DHCP e Wi‑Fi. Portas físicas sem dispositivos ativos aparecem vazias.</div>
+          <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+            <div className="text-[10px] font-mono text-[#4A4A68]">Montada a partir de bridge ports/hosts, ARP, DHCP e Wi‑Fi.</div>
+            <div className="flex gap-2">
+              <button onClick={()=>{setTopoView('tree'); localStorage.setItem('mikrotik_topo_view','tree');}} className={`px-2 py-1 text-xs font-bold border-2 border-[#1A1A2E] rounded ${topoView==='tree'?'bg-[#FFC857]':'bg-white'}`}>Árvore</button>
+              <button onClick={()=>{setTopoView('map'); localStorage.setItem('mikrotik_topo_view','map');}} className={`px-2 py-1 text-xs font-bold border-2 border-[#1A1A2E] rounded ${topoView==='map'?'bg-[#FFC857]':'bg-white'}`}>Mapa/Organizar</button>
+              {topoView==='map' && <button onClick={()=>{setTopoPos({}); localStorage.removeItem('mikrotik_topo_pos');}} className="px-2 py-1 text-xs font-bold border-2 border-[#1A1A2E] rounded bg-white">Reset layout</button>}
+            </div>
+          </div>
+          {topology ? (topoView==='map' ? <TopologyMap root={topology} pos={topoPos} onMove={saveTopoPos} /> : <Tree node={topology} />) : <div className="text-xs text-[#4A4A68]">Sem dados de topologia.</div>}
         </div>
       </div>
 
@@ -340,6 +387,20 @@ export const MikroTikTab: React.FC = () => {
 
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Cable className="w-4 h-4 text-[#FF5A36]"/>Interfaces</div>
         <Table cols={['Nome','Tipo','Estado','MAC','RX','TX']} rows={interfaces.map((i:any)=>[i.name,i.type,<span className={i.running==='true'?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{i.running==='true'?'up':'down'}</span>,i['mac-address']||'—',fmtBytes(i['rx-byte']),fmtBytes(i['tx-byte'])])} />
+      </div>
+
+      <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Globe className="w-4 h-4 text-[#FF5A36]"/>IPv6 (roteador e divulgação)</div>
+        <div className="bg-white border-2 border-[#1A1A2E] rounded-xl p-3 shadow-[2px_2px_0px_#1A1A2E] space-y-2 text-xs font-mono">
+          {(()=>{ const addrs=(ipv6.addresses||[]).filter((a:any)=>a.disabled!=='true'); const nd=(ipv6.nd||[]).filter((n:any)=>n.disabled!=='true'); const pools=ipv6.pools||[]; const prefixes=ipv6.ndPrefixes||[]; const settings=ipv6.settings||{}; const global=addrs.filter((a:any)=>!String(a.address||'').toLowerCase().startsWith('fe80:')); const linkLocal=addrs.filter((a:any)=>String(a.address||'').toLowerCase().startsWith('fe80:')); const raOn=nd.length>0; const advertising = raOn && (global.length>0 || pools.length>0 || prefixes.length>0 || String(settings['accept-router-advertisements']||'').includes('yes'));
+          return <>
+            <div><b>IPv6 habilitado:</b> {String(settings['disable-ipv6']||'false')==='true'?'não':'sim'} | <b>Forward:</b> {String(settings.forward||'')} | <b>Accept RA:</b> {String(settings['accept-router-advertisements']||'')}</div>
+            <div><b>Endereços globais:</b> {global.length?global.map((a:any)=>`${a.address} (${a.interface})`).join(', '):'nenhum'}</div>
+            <div><b>Link-local:</b> {linkLocal.length?linkLocal.map((a:any)=>`${a.address} (${a.interface})`).join(', '):'nenhum'}</div>
+            <div><b>ND/RA:</b> {raOn?`ativo em ${nd.map((n:any)=>n.interface).join(', ')}`:'inativo'} {raOn && nd[0]?.['managed-address-configuration']?`| managed=${nd[0]['managed-address-configuration']}`:''} {raOn && nd[0]?.['other-configuration']?`| other=${nd[0]['other-configuration']}`:''}</div>
+            <div><b>Prefixos ND/Pool DHCPv6:</b> {prefixes.length||pools.length ? `${prefixes.length} prefixos, ${pools.length} pools` : 'nenhum (sem prefixo global delegado/anunciado)'}</div>
+            <div className={`font-bold ${global.length||pools.length||prefixes.length ? 'text-[#027A48]' : 'text-[#B54708]'}`}>{global.length||pools.length||prefixes.length ? 'Divulgação IPv6 global parece configurada.' : 'Sem IPv6 global/prefixo delegado: roteador anuncia RA, mas downstream deve ficar só com link-local/sem internet IPv6.'}</div>
+          </>; })()}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

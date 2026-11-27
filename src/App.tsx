@@ -30,7 +30,7 @@ const MikroTikTab = React.lazy(() => import('./components/tabs/MikroTikTab').the
 
 import { LoginScreen } from './components/LoginScreen';
 import { LogoutModal } from './components/LogoutModal';
-import { getStoredAuth, saveAuthSession, clearAuthSession, touchAuthSession, AuthSession } from './services/authService';
+import { getStoredAuth, saveAuthSession, clearAuthSession, touchAuthSession, setSessionLocked, AuthSession } from './services/authService';
 
 import { 
   NavigationTab, 
@@ -532,9 +532,9 @@ export default function App() {
   }, []);
 
 
-  // Auto logout por inatividade (10 minutos)
+  // Auto logout por inatividade (10 minutos) - desativado se sessão travada
   useEffect(() => {
-    if (!authSession?.authenticated) return;
+    if (!authSession?.authenticated || authSession?.locked) return;
     let timer: any = null;
     const reset = () => {
       touchAuthSession();
@@ -549,7 +549,7 @@ export default function App() {
     events.forEach(e => window.addEventListener(e, reset, { passive: true }));
     reset();
     return () => { if (timer) clearTimeout(timer); events.forEach(e => window.removeEventListener(e, reset)); };
-  }, [authSession?.authenticated]);
+  }, [authSession?.authenticated, authSession?.locked]);
 
   // Polling com Backoff Exponencial e Pausa Inteligente em document.hidden
   const scheduleNextPoll = useCallback(() => {
@@ -677,6 +677,8 @@ export default function App() {
         activeAlertsCount={activeAlerts.length}
         currentUser={authSession?.user}
         onLogout={() => setIsLogoutModalOpen(true)}
+        sessionLocked={Boolean(authSession?.locked)}
+        onToggleLock={() => { const s = setSessionLocked(!authSession?.locked); if (s) setAuthSession({ ...s }); }}
       />
 
       {/* Main Layout Area: Sidebar (Left) + Content (Right) */}

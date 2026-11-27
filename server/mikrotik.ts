@@ -120,6 +120,12 @@ export async function mikrotikGetStatus() {
     const bridgeHosts = await rosSafe(c, ['/interface/bridge/host/print']);
     const capsman = await rosSafe(c, ['/caps-man/registration-table/print']);
     const services = await rosSafe(c, ['/ip/service/print']);
+    const ipv6Addresses = await rosSafe(c, ['/ipv6/address/print']);
+    const ipv6Routes = await rosSafe(c, ['/ipv6/route/print']);
+    const ipv6Nd = await rosSafe(c, ['/ipv6/nd/print']);
+    const ipv6NdPrefix = await rosSafe(c, ['/ipv6/nd/prefix/print']);
+    const ipv6Pool = await rosSafe(c, ['/ipv6/pool/print']);
+    const ipv6Settings = await rosSafe(c, ['/ipv6/settings/print']);
     return {
       ok: true, host: cfg.host, port: cfg.port,
       identity: rosOne(identity), resource: rosOne(resource), routerboard: rosOne(routerboard),
@@ -127,6 +133,7 @@ export async function mikrotikGetStatus() {
       wifi: [...rosRows(wifi), ...rosRows(capsman)], arp: rosRows(arp), dns: rosOne(dns), routes: rosRows(routes),
       nat: rosRows(nat), firewall: rosRows(firewall), dhcpServers: rosRows(dhcpServers),
       bridgePorts: rosRows(bridgePorts), bridgeHosts: rosRows(bridgeHosts), services: rosRows(services),
+      ipv6: { addresses: rosRows(ipv6Addresses), routes: rosRows(ipv6Routes), nd: rosRows(ipv6Nd), ndPrefixes: rosRows(ipv6NdPrefix), pools: rosRows(ipv6Pool), settings: rosOne(ipv6Settings) },
       fetchedAt: new Date().toISOString(),
     };
   }, cfg);

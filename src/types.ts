@@ -605,5 +605,6 @@ export interface MikrotikStatus {
   wifi?: Record<string, string>[]; arp?: Record<string, string>[]; dns?: Record<string, string>;
   routes?: Record<string, string>[]; nat?: Record<string, string>[]; firewall?: Record<string, string>[];
   dhcpServers?: Record<string, string>[]; bridgePorts?: Record<string,string>[]; bridgeHosts?: Record<string,string>[]; services?: Record<string,string>[];
+  ipv6?: { addresses?: Record<string,string>[]; routes?: Record<string,string>[]; nd?: Record<string,string>[]; ndPrefixes?: Record<string,string>[]; pools?: Record<string,string>[]; settings?: Record<string,string> };
   devices?: any[]; events?: any[]; snapshots?: any[]; fetchedAt?: string;
 }

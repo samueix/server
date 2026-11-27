@@ -357,6 +357,18 @@ export async function proxyWebrtcOffer(req: http.IncomingMessage, res: http.Serv
 type LiveStream = { proc: ChildProcess; clients: Set<http.ServerResponse>; lastData: number; stopTimer?: NodeJS.Timeout; boundary: string };
 const liveStreams = new Map<string, LiveStream>();
 
+type CamLiveToken = { camId: string; kind: 'main'|'sub'; expiresAt: number };
+const camLiveTokens = new Map<string, CamLiveToken>();
+function cleanCamLiveTokens(){ const now=Date.now(); for(const [k,v] of camLiveTokens) if(v.expiresAt<=now) camLiveTokens.delete(k); }
+export function createCameraLiveToken(camId: string, kind: 'main'|'sub'='sub', ttlMs=5*60*1000){
+  cleanCamLiveTokens();
+  const token = crypto.randomBytes(18).toString('hex');
+  const rec = { camId: safeCamId(camId), kind, expiresAt: Date.now()+Math.max(30000,ttlMs) };
+  camLiveTokens.set(token, rec);
+  return { token, camId: rec.camId, kind, expiresAt: rec.expiresAt, path: `/api/cameras/live/${token}`, streamPath: `/api/cameras/live/${token}/stream.mjpeg`, framePath: `/api/cameras/live/${token}/frame.jpeg` };
+}
+export function getCameraLiveToken(token: string){ cleanCamLiveTokens(); const r=camLiveTokens.get(String(token||'')); if(!r || r.expiresAt<=Date.now()) return null; return r; }
+
 function stopLiveStream(key: string) {
   const s = liveStreams.get(key);
   if (!s) return;

@@ -20,6 +20,7 @@ export interface AuthSession {
   savedAt: string;
   expiresAt?: number; // epoch ms, 10 min inactivity
   remember?: boolean;
+  locked?: boolean;
 }
 
 const SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutos
@@ -39,6 +40,7 @@ export function setRememberPreference(remember: boolean): void {
 
 export function isSessionExpired(session: AuthSession | null): boolean {
   if (!session) return true;
+  if (session.locked) return false;
   if (session.expiresAt && Date.now() > session.expiresAt) return true;
   return false;
 }
@@ -55,7 +57,7 @@ export function touchAuthSession(): void {
   if (s && s.authenticated) {
     s.expiresAt = Date.now() + SESSION_TTL_MS;
     try {
-      const storage = s.remember ? localStorage : sessionStorage;
+      const storage = (s.remember || s.locked) ? localStorage : sessionStorage;
       storage.setItem(AUTH_STORAGE_KEY, JSON.stringify(s));
     } catch {}
   }
@@ -109,13 +111,12 @@ export function getStoredAuth(): AuthSession | null {
 export function saveAuthSession(session: AuthSession, remember = false): void {
   try {
     if (!session.expiresAt) session.expiresAt = Date.now() + SESSION_TTL_MS;
-    session.remember = remember;
-    setRememberPreference(remember);
+    session.remember = remember || Boolean(session.locked);
+    if (session.remember) setRememberPreference(true);
     const payload = JSON.stringify(session);
-    // limpa ambos e grava no destino correto
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem(AUTH_STORAGE_KEY);
-    if (remember) {
+    if (session.remember || session.locked) {
       localStorage.setItem(AUTH_STORAGE_KEY, payload);
       sessionStorage.setItem(AUTH_STORAGE_KEY, payload);
     } else {
@@ -124,6 +125,16 @@ export function saveAuthSession(session: AuthSession, remember = false): void {
   } catch (e) {
     console.error('Erro ao salvar autenticação', e);
   }
+}
+
+export function setSessionLocked(locked: boolean): AuthSession | null {
+  const s = getStoredAuthInternal();
+  if (!s) return null;
+  s.locked = locked;
+  if (locked) { s.remember = true; setRememberPreference(true); }
+  s.expiresAt = Date.now() + SESSION_TTL_MS;
+  saveAuthSession(s, Boolean(s.remember));
+  return s;
 }
 
 /**

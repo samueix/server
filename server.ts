@@ -58,7 +58,7 @@ import {
 } from './server/opencode.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { runShellCommand } from './server/terminalRunner.js';
-import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities } from './server/cameras.js';
+import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities, createCameraLiveToken, getCameraLiveToken } from './server/cameras.js';
 import { mikrotikGetStatus, mikrotikTestConnection, mikrotikBlockDevice, mikrotikUnblockDevice, mikrotikRunPing, mikrotikMakeLeaseStatic, mikrotikTraceroute, mikrotikDnsLookup, mikrotikGetDnsSettings, mikrotikSetDnsServers, mikrotikGetLogs, mikrotikGetBandwidth } from './server/mikrotik.js';
 import { startMikrotikMonitor, getMikrotikCached, pollMikrotikOnce } from './server/mikrotikMonitor.js';
 import { listMikrotikDevices, listMikrotikEvents, listMikrotikSnapshots, setMikrotikDeviceNickname, addMikrotikEvent } from './server/db.js';
@@ -257,6 +257,30 @@ function applyCors(res: express.Response, req?: express.Request) {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
   }
+}
+
+function expiredLiveHtml(){ return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><body style="background:#111;color:#eee;font-family:sans-serif;display:grid;place-items:center;height:100vh;margin:0"><div><h2>Link expirado</h2><p>Gere um novo link no Telegram.</p></div></body>`; }
+function cameraLiveHtml(token:string, camId:string, expiresAt:number){
+  const exp = new Date(expiresAt).toISOString();
+  return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Câmera Live</title>
+<style>body{margin:0;background:#0b1020;color:#e5e7eb;font-family:system-ui,sans-serif} .wrap{max-width:980px;margin:0 auto;padding:12px} .top{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap} .badge{background:#1f2937;padding:8px 12px;border-radius:10px} .timer{font-size:20px;font-weight:700;color:#22c55e} .timer.warn{color:#f59e0b} .timer.bad{color:#ef4444} img{width:100%;max-height:72vh;object-fit:contain;background:#000;border-radius:12px} .grid{display:grid;grid-template-columns:repeat(3,72px);gap:8px;justify-content:center;margin-top:12px} button{padding:14px;border:0;border-radius:10px;background:#263041;color:#fff;font-size:18px;cursor:pointer} button:active{transform:scale(.98)} .muted{color:#9ca3af;font-size:13px}</style></head><body><div class=wrap>
+<div class=top><div><div class=badge>Câmera: <b>${camId}</b></div><div class="muted" id=exp></div></div><div class=badge>Expira em <span id=t class=timer>--:--</span></div></div>
+<div style="margin-top:12px"><img id=img src="/api/cameras/live/${token}/stream.mjpeg" alt="live"></div>
+<div style="margin-top:10px;display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap"><button id=audBtn onclick="toggleAudio()">🔇 Ativar áudio</button><audio id=aud preload="none"></audio><span class=muted id=audSt></span></div>
+<div class=grid>
+  <div></div><button onclick="ptz('up')">⬆️</button><div></div>
+  <button onclick="ptz('left')">⬅️</button><button onclick="ptz('stop')">⏹</button><button onclick="ptz('right')">➡️</button>
+  <div></div><button onclick="ptz('down')">⬇️</button><div></div>
+</div>
+<p class=muted style="text-align:center">Link temporário. Ao expirar, gere outro no Telegram.</p>
+</div><script>
+const expAt=new Date(${JSON.stringify(exp)}).getTime();
+const t=document.getElementById('t'), exp=document.getElementById('exp'); exp.textContent='Expira às '+new Date(expAt).toLocaleTimeString();
+function tick(){const ms=expAt-Date.now(); if(ms<=0){t.textContent='00:00'; t.className='timer bad'; document.body.innerHTML='<div style="display:grid;place-items:center;height:100vh;font-family:sans-serif;background:#111;color:#eee"><div><h2>Link expirado</h2><p>Gere um novo link no Telegram.</p></div></div>'; return;} const s=Math.floor(ms/1000), m=Math.floor(s/60), rs=s%60; t.textContent=String(m).padStart(2,'0')+':'+String(rs).padStart(2,'0'); t.className='timer'+(ms<60000?' bad':ms<120000?' warn':''); }
+tick(); setInterval(tick,1000);
+async function ptz(action){ try{ await fetch('/api/cameras/live/${token}/ptz',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,speed:0.5})}); if(action!=='stop') setTimeout(()=>ptz('stop'),700);}catch(e){console.error(e)} }
+let audioOn=false; async function toggleAudio(){ const a=document.getElementById('aud'), b=document.getElementById('audBtn'), st=document.getElementById('audSt'); if(audioOn){ a.pause(); a.removeAttribute('src'); a.load(); audioOn=false; b.textContent='🔇 Ativar áudio'; st.textContent=''; return; } a.src='/api/cameras/live/${token}/audio.mp3?ts='+Date.now(); try{ await a.play(); audioOn=true; b.textContent='🔊 Desativar áudio'; st.textContent='(pode ter atraso)'; }catch(e){ st.textContent='Falha ao iniciar áudio'; } }
+</script></body></html>`;
 }
 
 function requireAdminAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -631,6 +655,34 @@ export function createApp() {
   });
   app.get('/api/cameras/:id/stream/:kind/stream.mp4', requireUserOrAdminAuth, async (req,res) => {
     await proxyCameraRequest(req, res, req.params.id, req.params.kind === 'sub' ? 'sub' : 'main', 'stream.mp4');
+  });
+
+  // Token temporário de câmera (5 min) - sem auth, token no path
+  app.get('/api/cameras/live/:token', async (req,res) => {
+    const rec = getCameraLiveToken(req.params.token);
+    if (!rec) { res.status(410).send(expiredLiveHtml()); return; }
+    res.setHeader('Content-Type','text/html; charset=utf-8');
+    res.end(cameraLiveHtml(req.params.token, rec.camId, rec.expiresAt));
+  });
+  app.get('/api/cameras/live/:token/stream.mjpeg', async (req,res) => {
+    const rec = getCameraLiveToken(req.params.token);
+    if (!rec) { res.status(410).json({ ok:false, error:'Link expirado ou inválido.' }); return; }
+    await serveLiveMjpeg(req, res, rec.camId, rec.kind);
+  });
+  app.get('/api/cameras/live/:token/frame.jpeg', async (req,res) => {
+    const rec = getCameraLiveToken(req.params.token);
+    if (!rec) { res.status(410).json({ ok:false, error:'Link expirado ou inválido.' }); return; }
+    await proxyCameraRequest(req, res, rec.camId, rec.kind, 'frame.jpeg');
+  });
+  app.get('/api/cameras/live/:token/audio.mp3', async (req,res) => {
+    const rec = getCameraLiveToken(req.params.token);
+    if (!rec) { res.status(410).json({ ok:false, error:'Link expirado ou inválido.' }); return; }
+    await serveLiveAudio(req, res, rec.camId);
+  });
+  app.post('/api/cameras/live/:token/ptz', async (req,res) => {
+    const rec = getCameraLiveToken(req.params.token);
+    if (!rec) { res.status(410).json({ ok:false, error:'Link expirado ou inválido.' }); return; }
+    try { const action = String(req.body?.action||''); const speed = Number(req.body?.speed); const r = await cameraPtz(rec.camId, action, Number.isFinite(speed)?speed:0.5); res.json(r); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)}); }
   });
 
   // AdGuard Status

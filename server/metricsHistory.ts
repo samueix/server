@@ -37,7 +37,9 @@ export function addMetricPoint(p: MetricPoint): void {
   }
 }
 
+let loaded = false;
 export function getMetricsHistory(rangeMs?: number): MetricPoint[] {
+  if (!loaded) { loaded = true; loadMetricsHistory(); }
   if (!rangeMs) return buffer.slice(-500);
   const cutoff = Date.now() - rangeMs;
   return buffer.filter(p => p.ts >= cutoff);

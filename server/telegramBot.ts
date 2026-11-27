@@ -13,11 +13,16 @@ import {
   type InlineKeyboardMarkup,
 } from './telegramNotifier.js';
 import { takeScreenshot, getBrowserState, startBrowser, navigateBrowser, browserClickSelector, browserTypeText, browserPressKey, browserWait, browserGetInfo, browserEval } from './browserSession.js';
-import { getCameraStatus } from './cameras.js';
+import { getCameraStatus, cameraPtz, createCameraLiveToken } from './cameras.js';
 import { askOpencodeAgent, listOpencodeModels } from './opencode.js';
 import { getFullSystemSnapshot, getProcessesList } from './systemMonitor.js';
 import { getAllMonitoredServices } from './servicesMonitor.js';
 import { getSecurityAttackStatus } from './securityMonitor.js';
+import { mikrotikGetStatus, mikrotikGetBandwidth, mikrotikRunPing, mikrotikTraceroute, mikrotikDnsLookup, mikrotikGetDnsSettings, mikrotikSetDnsServers, mikrotikGetLogs, mikrotikBlockDevice, mikrotikUnblockDevice, mikrotikMakeLeaseStatic } from './mikrotik.js';
+import { listMikrotikDevices, listMikrotikEvents } from './db.js';
+import { getMetricsHistory } from './metricsHistory.js';
+import { renderLineChartPng } from './chartImage.js';
+import { fetchAdGuardStats, fetchAdGuardQueryLog, setAdGuardDomainBlocked } from './adguardClient.js';
 import { execFile, spawn } from 'child_process';
 import dns from 'dns';
 
@@ -29,6 +34,9 @@ interface ChatState {
   opencodeSessionId?: string;
   aiModel?: string;
   pendingNetTool?: NetTool;
+  pendingMikrotik?: 'ping' | 'trace' | 'dns' | 'block' | 'unblock' | 'makestatic' | 'dnsset';
+  pendingMikrotikTarget?: string;
+  pendingAdguard?: 'block' | 'unblock';
 }
 
 interface BotPersisted {
@@ -109,6 +117,13 @@ function fmtNum(n: any, digits = 1): string {
   const v = Number(n);
   return Number.isFinite(v) ? v.toFixed(digits) : 'N/D';
 }
+function fmtRate(bps: any): string {
+  const v = Number(bps || 0);
+  if (v >= 1e9) return (v/1e9).toFixed(2)+' Gbps';
+  if (v >= 1e6) return (v/1e6).toFixed(2)+' Mbps';
+  if (v >= 1e3) return (v/1e3).toFixed(1)+' Kbps';
+  return Math.round(v)+' bps';
+}
 
 function pickAccessInfo(net: any, hostname?: string) {
   const ifaces = Array.isArray(net?.interfaces) ? net.interfaces : [];
@@ -146,46 +161,42 @@ function mainMenuKeyboard(): InlineKeyboardMarkup {
         { text: '🧠 Escolher IA', callback_data: 'act:models' },
       ],
       [
-        { text: '📊 Status Geral', callback_data: 'act:status' },
+        { text: '📊 Status', callback_data: 'act:status' },
         { text: '🧩 Serviços', callback_data: 'act:servicos' },
       ],
       [
         { text: '🛡️ Segurança', callback_data: 'act:seguranca' },
-        { text: '⚙️ Processos', callback_data: 'act:processos' },
+        { text: '📡 MikroTik', callback_data: 'act:mikrotik' },
       ],
       [
-        { text: '🌐 Rede & IPs', callback_data: 'act:rede' },
-        { text: '💾 Disco & RAM', callback_data: 'act:disco' },
+        { text: '🌐 Rede', callback_data: 'act:rede' },
+        { text: '💾 Disco/RAM', callback_data: 'act:disco' },
       ],
       [
         { text: '🐳 Docker', callback_data: 'act:docker' },
-        { text: '🔗 Acesso & SSH', callback_data: 'act:acesso' },
+        { text: '⚙️ Processos', callback_data: 'act:processos' },
       ],
       [
         { text: '📡 Ping', callback_data: 'act:ping' },
-        { text: '🧭 Traceroute', callback_data: 'act:trace' },
+        { text: '🧭 Trace', callback_data: 'act:trace' },
       ],
       [
-        { text: '📸 Print Browser', callback_data: 'act:print' },
-        { text: '📷 Foto Câmera', callback_data: 'act:camera' },
+        { text: '📸 Browser', callback_data: 'act:print' },
+        { text: '📷 Câmeras/PTZ', callback_data: 'act:camera' },
       ],
       [
-        { text: '🔄 Atualizar Menu', callback_data: 'act:menu' },
+        { text: '🔗 Acesso', callback_data: 'act:acesso' },
+        { text: '🔄 Menu', callback_data: 'act:menu' },
       ],
     ],
   };
 }
 
-function reportFooterKeyboard(refreshAction: string): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: '🔄 Atualizar', callback_data: refreshAction },
-        { text: '🤖 Perguntar à IA', callback_data: 'act:ia' },
-      ],
-      [{ text: '⬅️ Voltar ao Menu', callback_data: 'act:menu' }],
-    ],
-  };
+function reportFooterKeyboard(refreshAction: string, backAction = 'act:menu', backLabel = '⬅️ Menu', extra?: InlineKeyboardButton[]): InlineKeyboardMarkup {
+  const row1: InlineKeyboardButton[] = [{ text: '🔄 Atualizar', callback_data: refreshAction }];
+  if (extra?.length) row1.push(...extra);
+  row1.push({ text: '🤖 IA', callback_data: 'act:ia' });
+  return { inline_keyboard: [row1, [{ text: backLabel, callback_data: backAction }]] };
 }
 
 function aiModeKeyboard(): InlineKeyboardMarkup {
@@ -215,6 +226,7 @@ function isValidHostInput(host: string): boolean {
   if (!h || h.length > 253) return false;
   return /^[a-zA-Z0-9._:-]+$/.test(h);
 }
+function isValidMac(mac: string): boolean { return /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/.test(mac.trim()); }
 
 function netToolKeyboard(tool: NetTool): InlineKeyboardMarkup {
   const prefix = tool === 'ping' ? 'net:ping:' : 'net:trace:';
@@ -536,13 +548,13 @@ async function buildSecurityText(): Promise<string> {
     if (top.length) {
       lines.push('', '<b>Top origens:</b>');
       for (const a of top) {
-        lines.push(
-          `• <code>${escapeHtml(a.ip)}</code> (${a.count}x) ${escapeHtml(a.country || '')} ${escapeHtml(
-            a.status || ''
-          )}`.trim()
-        );
+        lines.push(`• <code>${escapeHtml(a.ip)}</code> (${a.count}x) ${escapeHtml(a.country || '')} ${escapeHtml(a.status || '')}`.trim());
       }
     }
+    try {
+      const ag: any = await fetchAdGuardStats();
+      if (ag && !ag.error) lines.push('', `<b>AdGuard:</b> ${ag.num_dns_queries||0} queries | ${ag.num_blocked_filtering||0} bloqueadas (${ag.blocked_percentage||0}%)`);
+    } catch {}
     return lines.join('\n');
   } catch (e: any) {
     return `❌ Erro ao obter segurança: ${escapeHtml(e?.message || e)}`;
@@ -816,6 +828,226 @@ async function trySendBrowserScreenshot(
   }
 }
 
+function mikrotikMenuKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '📊 Status', callback_data: 'mk:status' }, { text: '📱 Dispositivos', callback_data: 'mk:devices' }],
+      [{ text: '📈 Banda', callback_data: 'mk:bw' }, { text: '🧾 Eventos', callback_data: 'mk:events' }],
+      [{ text: '🌐 DNS', callback_data: 'mk:dns' }, { text: '🛠 Set DNS', callback_data: 'mk:dnsset' }],
+      [{ text: '📡 Ping', callback_data: 'mk:ping' }, { text: '🧭 Trace', callback_data: 'mk:trace' }],
+      [{ text: '🔎 Lookup', callback_data: 'mk:lookup' }, { text: '📜 Logs', callback_data: 'mk:logs' }],
+      [{ text: '🔒 Bloquear', callback_data: 'mk:block' }, { text: '🔓 Desbloquear', callback_data: 'mk:unblock' }],
+      [{ text: '📌 Make Static', callback_data: 'mk:makestatic' }, { text: '⬅️ Menu', callback_data: 'act:menu' }],
+    ],
+  };
+}
+
+async function buildMikrotikStatusText(): Promise<string> {
+  try {
+    const [live, devices, bw] = await Promise.all([mikrotikGetStatus(), Promise.resolve(listMikrotikDevices()), mikrotikGetBandwidth(listMikrotikDevices().map((d:any)=>d.ip||d.last_ip).filter(Boolean))]);
+    const r: any = live.resource || {};
+    const total = Number(r['total-memory'] || 0); const free = Number(r['free-memory'] || 0);
+    const memPct = total ? Math.round(((total - free) / total) * 100) : 0;
+    const online = devices.filter((d:any)=>Number(d.online)).length;
+    const topBw = (bw.devices || []).map((b:any)=>{ const d=devices.find((x:any)=>String(x.ip||x.last_ip)===String(b.ip)); return { name:d?.nickname||d?.hostname||b.ip, ip:b.ip, rx:Number(b.rx_bps||0), tx:Number(b.tx_bps||0), total:Number(b.rx_bps||0)+Number(b.tx_bps||0)}; }).sort((a:any,b:any)=>b.total-a.total).slice(0,5);
+    const lines = [
+      '📡 <b>MikroTik RouterOS</b>',
+      `<b>Host:</b> <code>${escapeHtml(live.host || '')}</code> | <b>ID:</b> <code>${escapeHtml(live.identity?.name || '')}</code>`,
+      `<b>Versão:</b> ${escapeHtml(r.version || '')} | <b>Board:</b> ${escapeHtml(r['board-name'] || '')}`,
+      `<b>Uptime:</b> ${escapeHtml(r.uptime || '')} | <b>CPU:</b> ${fmtNum(r['cpu-load'])}% | <b>RAM:</b> ${memPct}%`,
+      `<b>Dispositivos:</b> ${devices.length} (${online} online)`,
+      `<b>DNS:</b> <code>${escapeHtml(String((live.dns as any)?.servers || ''))}</code>`,
+    ];
+    if (topBw.length) {
+      lines.push('', '<b>Top banda:</b>');
+      for (const b of topBw) lines.push(`• ${escapeHtml(b.name)}: ↓${escapeHtml(fmtRate(b.rx))} ↑${escapeHtml(fmtRate(b.tx))}`);
+    }
+    return lines.join('\n');
+  } catch (e:any) {
+    return `❌ Erro MikroTik: ${escapeHtml(e?.message || e)}`;
+  }
+}
+
+async function buildMikrotikDevicesText(): Promise<string> {
+  try {
+    const devices = listMikrotikDevices().slice(0, 20);
+    if (!devices.length) return '📱 Nenhum dispositivo no inventário MikroTik.';
+    const lines = ['📱 <b>Dispositivos MikroTik</b>', ''];
+    for (const d of devices as any[]) {
+      const icon = Number(d.online) ? '🟢' : '⚪';
+      lines.push(`${icon} <b>${escapeHtml(d.nickname || d.hostname || d.mac)}</b>`);
+      lines.push(`   <code>${escapeHtml(d.ip || d.last_ip || '-')}</code> | <code>${escapeHtml(d.mac)}</code> | ${escapeHtml(d.connection || d.interface || '-')}`);
+    }
+    return lines.join('\n').slice(0, 3900);
+  } catch (e:any) {
+    return `❌ Erro: ${escapeHtml(e?.message || e)}`;
+  }
+}
+
+async function buildMikrotikBandwidthText(): Promise<string> {
+  try {
+    const devices = listMikrotikDevices();
+    const bw = await mikrotikGetBandwidth(devices.map((d:any)=>d.ip||d.last_ip).filter(Boolean));
+    const rows = (bw.devices || []).map((b:any)=>{ const d=devices.find((x:any)=>String(x.ip||x.last_ip)===String(b.ip)); return { name:d?.nickname||d?.hostname||b.ip, rx:Number(b.rx_bps||0), tx:Number(b.tx_bps||0), total:Number(b.rx_bps||0)+Number(b.tx_bps||0), conns:Number(b.connections||0) }; }).sort((a:any,b:any)=>b.total-a.total).slice(0,15);
+    if (!rows.length) return '📈 Sem tráfego ativo por dispositivo (connection tracking).';
+    const lines = ['📈 <b>Banda por dispositivo</b>', ''];
+    for (const r of rows) lines.push(`• <b>${escapeHtml(r.name)}</b>: ↓${escapeHtml(fmtRate(r.rx))} ↑${escapeHtml(fmtRate(r.tx))}${r.conns?` (${r.conns} conn)`:''}`);
+    return lines.join('\n');
+  } catch (e:any) { return `❌ Erro: ${escapeHtml(e?.message || e)}`; }
+}
+
+async function buildMikrotikEventsText(): Promise<string> {
+  try {
+    const ev = listMikrotikEvents(15);
+    if (!ev.length) return '🧾 Sem eventos MikroTik.';
+    const lines = ['🧾 <b>Eventos MikroTik</b>', ''];
+    for (const e of ev as any[]) lines.push(`• <code>${escapeHtml(String(e.ts||'').slice(11,19))}</code> <b>${escapeHtml(e.event_type||'')}</b> ${escapeHtml([e.hostname,e.ip,e.mac].filter(Boolean).join(' '))} — ${escapeHtml(String(e.details||'').slice(0,80))}`);
+    return lines.join('\n').slice(0,3900);
+  } catch (e:any) { return `❌ Erro: ${escapeHtml(e?.message || e)}`; }
+}
+
+async function buildMikrotikDnsText(): Promise<string> {
+  try {
+    const s = await mikrotikGetDnsSettings();
+    const dns: any = s.dns || {};
+    const dhcp = (s.dhcpNetworks || []).map((n:any)=>`${n.name}: ${n['dns-server']||'-'}`).join(', ');
+    return [`🌐 <b>DNS MikroTik</b>`, `<b>Servers:</b> <code>${escapeHtml(String(dns.servers||''))}</code>`, `<b>Allow remote:</b> ${escapeHtml(String(dns['allow-remote-requests']||''))}`, `<b>DHCP DNS:</b> <code>${escapeHtml(dhcp||'-')}</code>`].join('\n');
+  } catch (e:any) { return `❌ Erro: ${escapeHtml(e?.message || e)}`; }
+}
+
+async function buildMikrotikLogsText(): Promise<string> {
+  try {
+    const r: any = await mikrotikGetLogs(30);
+    const logs = Array.isArray(r?.logs) ? r.logs : [];
+    if (!logs.length) return '📜 Sem logs MikroTik.';
+    return ['📜 <b>Logs MikroTik</b>', '', ...logs.slice(-20).map((l:any)=>`• <code>${escapeHtml(String(l.timestamp||''))}</code> [${escapeHtml(String(l.process||''))}] ${escapeHtml(String(l.message||'').slice(0,120))}`)].join('\n').slice(0,3900);
+  } catch (e:any) { return `❌ Erro: ${escapeHtml(e?.message || e)}`; }
+}
+
+async function sendMikrotikMenu(chatId: string, editMessageId?: number): Promise<void> {
+  const text = '📡 <b>Network Center / MikroTik</b>\nEscolha uma ação:';
+  const markup = mikrotikMenuKeyboard();
+  if (editMessageId) { const ed = await editTelegramMessageText(chatId, editMessageId, text, { parseMode:'HTML', replyMarkup: markup }); if (ed.ok) return; }
+  await sendTelegramMessage(text, { chatId, parseMode:'HTML', replyMarkup: markup });
+}
+
+async function promptMikrotikInput(chatId: string, kind: 'ping'|'dns'|'block'|'unblock'|'makestatic'|'dnsset', editMessageId?: number): Promise<void> {
+  const st = getState(chatId); st.pendingMikrotik = kind; st.pendingNetTool = undefined; st.mode = 'menu'; persistState();
+  const label = kind==='ping'?'IP/host para ping no roteador':kind==='dns'?'Nome para lookup DNS no roteador':kind==='block'?'MAC para bloquear (ex: AA:BB:CC:DD:EE:FF)':kind==='unblock'?'MAC para desbloquear':kind==='makestatic'?'MAC para tornar lease estático (ex: AA:BB:CC:DD:EE:FF)':'DNS servers (ex: 1.1.1.1,8.8.8.8)';
+  const text = `✍️ <b>MikroTik ${kind}</b>\nEnvie: ${label}`;
+  const markup: InlineKeyboardMarkup = { inline_keyboard: [[{ text:'⬅️ MikroTik', callback_data:'act:mikrotik' }]] };
+  if (editMessageId) { const ed = await editTelegramMessageText(chatId, editMessageId, text, { parseMode:'HTML', replyMarkup: markup }); if (ed.ok) return; }
+  await sendTelegramMessage(text, { chatId, parseMode:'HTML', replyMarkup: markup });
+}
+
+function cameraPtzKeyboard(camId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text:'⬆️', callback_data:`cam:ptz:${camId}:up` }],
+      [{ text:'⬅️', callback_data:`cam:ptz:${camId}:left` }, { text:'⏹', callback_data:`cam:ptz:${camId}:stop` }, { text:'➡️', callback_data:`cam:ptz:${camId}:right` }],
+      [{ text:'⬇️', callback_data:`cam:ptz:${camId}:down` }],
+      [{ text:'📷 Snapshot', callback_data:`cam:snap:${camId}` }, { text:'⬅️ Câmeras', callback_data:'act:camera' }],
+    ],
+  };
+}
+
+async function sendMetricsChart(chatId: string, kind: 'cpu'|'temp'|'ram'|'all', editMessageId?: number): Promise<void> {
+  try {
+    const hist = getMetricsHistory(6 * 60 * 60 * 1000).slice(-120);
+    if (hist.length < 2) { await sendTelegramMessage('📈 Sem histórico suficiente para gráfico ainda.', { chatId, replyMarkup: reportFooterKeyboard('act:status') }); return; }
+    const labels = hist.map(p => new Date(p.ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+    const series:any[] = [];
+    if (kind==='cpu'||kind==='all') series.push({ name:'CPU %', color:[239,68,68], values: hist.map(p=>p.cpu) });
+    if (kind==='temp'||kind==='all') series.push({ name:'Temp C', color:[245,158,11], values: hist.map(p=>p.temp) });
+    if (kind==='ram'||kind==='all') series.push({ name:'RAM %', color:[59,130,246], values: hist.map(p=>p.ram) });
+    const title = kind==='cpu'?'CPU (6h)':kind==='temp'?'Temperatura (6h)':kind==='ram'?'RAM (6h)':'CPU / Temp / RAM (6h)';
+    const png = await renderLineChartPng({ title, series, labels, yMin: 0, yMax: kind==='temp'?100:100, ySuffix: kind==='temp'?'C':'%' });
+    const sent = await sendTelegramPhoto(png, `📈 ${title}`, { chatId, replyMarkup: { inline_keyboard: [[{text:'CPU',callback_data:'chart:cpu'},{text:'Temp',callback_data:'chart:temp'},{text:'RAM',callback_data:'chart:ram'},{text:'Tudo',callback_data:'chart:all'}],[{text:'⬅️ Status',callback_data:'act:status'}]] } });
+    if (!sent.ok) await sendTelegramMessage(`❌ Não consegui enviar gráfico: ${escapeHtml(sent.error||'erro')}`, { chatId, parseMode:'HTML' });
+  } catch (e:any) {
+    console.warn('[telegramBot] metrics chart error', e?.message||e);
+    try { await sendTelegramMessage(`❌ Erro gráfico: ${escapeHtml(String(e?.message||e)).slice(0,300)}`, { chatId, parseMode:'HTML', replyMarkup: reportFooterKeyboard('act:status') }); } catch {}
+  }
+}
+
+async function sendBlocksChart(chatId: string): Promise<void> {
+  try {
+    const ag: any = await fetchAdGuardStats().catch(()=>null);
+    const log: any[] = await fetchAdGuardQueryLog(200).catch(()=>[]);
+    const blocked = log.filter((x:any)=>x.status==='BLOCKED');
+    // bucket last 12 hours
+    const now = Date.now();
+    const buckets = Array.from({length:12}, (_,i)=>{ const start = now - (11-i)*60*60*1000; return { start, label: new Date(start).toLocaleTimeString('pt-BR',{hour:'2-digit'}), count:0 }; });
+    for (const b of blocked) {
+      const t = new Date(b.time).getTime();
+      const idx = buckets.findIndex((bk,i)=> t>=bk.start && (i===buckets.length-1 || t < buckets[i+1].start));
+      if (idx>=0) buckets[idx].count++;
+    }
+    const top = Object.entries(blocked.reduce((acc:any,b:any)=>{ const d=String(b.domain||''); acc[d]=(acc[d]||0)+1; return acc; },{})).sort((a:any,b:any)=>b[1]-a[1]).slice(0,5);
+    const labels = buckets.map(b=>b.label);
+    const png = await renderLineChartPng({ title:'AdGuard Bloqueios (12h)', series:[{name:'Bloqueios',color:[239,68,68],values:buckets.map(b=>b.count)}], labels, yMin:0, ySuffix:'' });
+    const lines = ['📈 <b>AdGuard - Bloqueios recentes</b>'];
+    if (ag && !ag.error) lines.push(`<b>Total:</b> ${ag.num_blocked_filtering||0} bloqueadas / ${ag.num_dns_queries||0} queries (${ag.blocked_percentage||0}%)`);
+    if (top.length) { lines.push('', '<b>Top bloqueados:</b>'); for (const [d,c] of top as any[]) lines.push(`• <code>${escapeHtml(String(d))}</code> — ${c}`); }
+    const sent = await sendTelegramPhoto(png, lines.join('\n').slice(0,1024), { chatId, parseMode:'HTML', replyMarkup: { inline_keyboard: [[{text:'🔄 Atualizar',callback_data:'chart:blocks'},{text:'⬅️ Segurança',callback_data:'act:seguranca'}]] } });
+    if (!sent.ok) await sendTelegramMessage(`❌ Não consegui enviar gráfico: ${escapeHtml(sent.error||'erro')}`, { chatId, parseMode:'HTML' });
+  } catch (e:any) {
+    console.warn('[telegramBot] blocks chart error', e?.message||e);
+    try { await sendTelegramMessage(`❌ Erro gráfico bloqueios: ${escapeHtml(String(e?.message||e)).slice(0,300)}`, { chatId, parseMode:'HTML', replyMarkup: reportFooterKeyboard('act:seguranca') }); } catch {}
+  }
+}
+
+async function sendMikrotikChart(chatId: string, kind: 'status'|'bw'): Promise<void> {
+  try {
+    if (kind === 'status') {
+      const { listMikrotikSnapshots } = await import('./db.js');
+      const cutoff = Date.now() - 6*60*60*1000;
+      const snaps = (listMikrotikSnapshots(500) as any[]).filter((s:any)=>new Date(s.ts).getTime() >= cutoff).slice().reverse();
+      if (snaps.length < 2) { await sendTelegramMessage('📈 Sem snapshots MikroTik suficientes.', { chatId, replyMarkup: mikrotikMenuKeyboard() }); return; }
+      const labels = snaps.map(s=>new Date(s.ts).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+      const cpuVals = snaps.map((s:any)=>Number(s.resource?.['cpu-load'] ?? s.cpu_load ?? 0));
+      const ramVals = snaps.map((s:any)=>{ const t=Number(s.resource?.['total-memory'] ?? s.total_memory ?? 0), f=Number(s.resource?.['free-memory'] ?? s.free_memory ?? 0); return t?Math.round(((t-f)/t)*100):0; });
+      const png = await renderLineChartPng({ title:'MikroTik CPU/RAM (6h)', series:[{name:'CPU %',color:[239,68,68],values:cpuVals},{name:'RAM %',color:[59,130,246],values:ramVals}], labels, yMin:0, yMax:100, ySuffix:'%' });
+      const sent = await sendTelegramPhoto(png, '📈 MikroTik CPU/RAM (6h)', { chatId, replyMarkup: { inline_keyboard: [[{text:'⬅️ MikroTik',callback_data:'act:mikrotik'}]] } });
+      if (!sent.ok) await sendTelegramMessage(`❌ Não consegui enviar gráfico: ${escapeHtml(sent.error||'erro')}`, { chatId, parseMode:'HTML' });
+      return;
+    }
+    const devices = listMikrotikDevices();
+    const bw = await mikrotikGetBandwidth(devices.map((d:any)=>d.ip||d.last_ip).filter(Boolean));
+    const top = (bw.devices||[]).map((b:any)=>{const d=devices.find((x:any)=>String(x.ip||x.last_ip)===String(b.ip)); return {name:d?.nickname||d?.hostname||b.ip, rx:Number(b.rx_bps||0), tx:Number(b.tx_bps||0)};}).sort((a:any,b:any)=>(b.rx+b.tx)-(a.rx+a.tx)).slice(0,8);
+    if (!top.length) { await sendTelegramMessage('📈 Sem tráfego ativo.', { chatId, replyMarkup: mikrotikMenuKeyboard() }); return; }
+    // render as simple line chart using index labels (bar-like via two series over categories not ideal; reuse line chart with points)
+    const labels = top.map((_,i)=>String(i+1));
+    const png = await renderLineChartPng({ title:'MikroTik Top Banda (Mbps)', series:[{name:'RX Mbps',color:[34,197,94],values:top.map(t=>+(t.rx/1e6).toFixed(2))},{name:'TX Mbps',color:[59,130,246],values:top.map(t=>+(t.tx/1e6).toFixed(2))}], labels, yMin:0, ySuffix:'M' });
+    const caption = ['📈 <b>Top banda</b>', ...top.map((t,i)=>`${i+1}. ${escapeHtml(t.name)} ↓${fmtRate(t.rx)} ↑${fmtRate(t.tx)}`)].join('\n').slice(0,1024);
+    const sent = await sendTelegramPhoto(png, caption, { chatId, parseMode:'HTML', replyMarkup: { inline_keyboard: [[{text:'⬅️ MikroTik',callback_data:'act:mikrotik'}]] } });
+    if (!sent.ok) await sendTelegramMessage(`❌ Não consegui enviar gráfico: ${escapeHtml(sent.error||'erro')}`, { chatId, parseMode:'HTML' });
+  } catch (e:any) {
+    console.warn('[telegramBot] mikrotik chart error', e?.message||e);
+    try { await sendTelegramMessage(`❌ Erro gráfico: ${escapeHtml(String(e?.message||e)).slice(0,300)}`, { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); } catch {}
+  }
+}
+
+async function sendCameraMenu(chatId: string, editMessageId?: number): Promise<void> {
+  try {
+    const st = await getCameraStatus();
+    const cams = Array.isArray(st?.cameras) ? st.cameras : [];
+    if (!cams.length) { await sendTelegramMessage('📷 Nenhuma câmera configurada.', { chatId, replyMarkup: reportFooterKeyboard('act:camera') }); return; }
+    const rows: InlineKeyboardButton[][] = cams.slice(0,8).map((c:any)=>[
+      { text:`📷 ${c.name}`, callback_data:`cam:snap:${c.id}` },
+      { text:'🕹 PTZ', callback_data:`cam:ctl:${c.id}` },
+      { text:'🎥 Live 5m', callback_data:`cam:live:${c.id}` },
+    ]);
+    rows.push([{ text:'⬅️ Menu', callback_data:'act:menu' }]);
+    const text = ['📷 <b>Câmeras / PTZ</b>', '', ...cams.map((c:any)=>`• <b>${escapeHtml(c.name)}</b> <code>${escapeHtml(c.ip)}</code> ${c.online?'🟢':'⚪'}`)].join('\n');
+    const markup = { inline_keyboard: rows };
+    if (editMessageId) { const ed = await editTelegramMessageText(chatId, editMessageId, text, { parseMode:'HTML', replyMarkup: markup }); if (ed.ok) return; }
+    await sendTelegramMessage(text, { chatId, parseMode:'HTML', replyMarkup: markup });
+  } catch (e:any) {
+    await sendTelegramMessage(`❌ Erro câmeras: ${escapeHtml(e?.message||e)}`, { chatId, parseMode:'HTML' });
+  }
+}
+
 async function handleCameraSnapshot(chatId: string, camId?: string, editMessageId?: number): Promise<void> {
   try {
     const st = await getCameraStatus();
@@ -936,13 +1168,14 @@ async function sendOrEditReport(
   chatId: string,
   actionKey: string,
   builder: () => Promise<string>,
-  editMessageId?: number
+  editMessageId?: number,
+  opts?: { backAction?: string; backLabel?: string; extra?: InlineKeyboardButton[] }
 ): Promise<boolean> {
   const st = getState(chatId);
   st.mode = 'menu';
   persistState();
   const text = await builder();
-  const markup = reportFooterKeyboard(actionKey);
+  const markup = reportFooterKeyboard(actionKey, opts?.backAction, opts?.backLabel, opts?.extra);
   if (editMessageId) {
     const edited = await editTelegramMessageText(chatId, editMessageId, text, {
       parseMode: 'HTML',
@@ -951,11 +1184,7 @@ async function sendOrEditReport(
     if (edited.ok) return true;
     if (/message is not modified/i.test(edited.error || '')) return false;
   }
-  await sendTelegramMessage(text, {
-    chatId,
-    parseMode: 'HTML',
-    replyMarkup: markup,
-  });
+  await sendTelegramMessage(text, { chatId, parseMode: 'HTML', replyMarkup: markup });
   return true;
 }
 
@@ -1135,6 +1364,7 @@ async function handleAction(
   const st = getState(chatId);
 
   if (action === 'act:menu') {
+    st.pendingMikrotik = undefined; st.pendingNetTool = undefined; persistState();
     await sendMainMenu(chatId, undefined, editMessageId);
     return {};
   }
@@ -1183,7 +1413,7 @@ async function handleAction(
   }
 
   if (action === 'act:status') {
-    const updated = await sendOrEditReport(chatId, 'act:status', buildStatusText, editMessageId);
+    const updated = await sendOrEditReport(chatId, 'act:status', buildStatusText, editMessageId, { extra:[{text:'📈 Gráfico', callback_data:'chart:all'}] });
     return updated ? {} : { toast: 'Status já está atualizado.' };
   }
   if (action === 'act:servicos') {
@@ -1191,11 +1421,11 @@ async function handleAction(
     return updated ? {} : { toast: 'Serviços já estão atualizados.' };
   }
   if (action === 'act:seguranca') {
-    const updated = await sendOrEditReport(chatId, 'act:seguranca', buildSecurityText, editMessageId);
+    const updated = await sendOrEditReport(chatId, 'act:seguranca', buildSecurityText, editMessageId, { extra:[{text:'📈 Bloqueios', callback_data:'chart:blocks'},{text:'🧱 AdGuard', callback_data:'ag:menu'}] });
     return updated ? {} : { toast: 'Segurança já está atualizada.' };
   }
   if (action === 'act:processos') {
-    const updated = await sendOrEditReport(chatId, 'act:processos', buildProcessesText, editMessageId);
+    const updated = await sendOrEditReport(chatId, 'act:processos', buildProcessesText, editMessageId, { extra:[{text:'📈 CPU', callback_data:'chart:cpu'}] });
     return updated ? {} : { toast: 'Processos já estão atualizados.' };
   }
   if (action === 'act:rede') {
@@ -1203,7 +1433,7 @@ async function handleAction(
     return updated ? {} : { toast: 'Rede já está atualizada.' };
   }
   if (action === 'act:disco') {
-    const updated = await sendOrEditReport(chatId, 'act:disco', buildDiskText, editMessageId);
+    const updated = await sendOrEditReport(chatId, 'act:disco', buildDiskText, editMessageId, { extra:[{text:'📈 RAM', callback_data:'chart:ram'}] });
     return updated ? {} : { toast: 'Disco e RAM já estão atualizados.' };
   }
   if (action === 'act:docker') {
@@ -1255,11 +1485,85 @@ async function handleAction(
     if (!shot.ok) await sendTelegramMessage(`📷 ${escapeHtml(shot.message || 'Navegador remoto indisponível.')}`, { chatId, parseMode: 'HTML', replyMarkup: reportFooterKeyboard('act:print') });
     return {};
   }
-  if (action === 'act:camera' || action.startsWith('cam:snap:')) {
-    const camId = action.startsWith('cam:snap:') ? action.slice('cam:snap:'.length) : undefined;
-    await handleCameraSnapshot(chatId, camId, editMessageId);
+  if (action === 'act:camera') { await sendCameraMenu(chatId, editMessageId); return {}; }
+  if (action.startsWith('cam:snap:')) { await handleCameraSnapshot(chatId, action.slice('cam:snap:'.length), editMessageId); return {}; }
+  if (action.startsWith('cam:live:')) {
+    const camId = action.slice('cam:live:'.length);
+    try {
+      const tok = createCameraLiveToken(camId, 'sub', 5*60*1000);
+      const snap = await Promise.resolve(getFullSystemSnapshot()).catch(()=>null as any);
+      const acc = pickAccessInfo((snap as any)?.network, (snap as any)?.hostname);
+      const host = acc.ts4 || acc.lan4 || acc.global6 || '127.0.0.1';
+      const base = host.includes(':') ? `http://[${host}]:3000` : `http://${host}:3000`;
+      const url = `${base}${tok.path}`;
+      const exp = new Date(tok.expiresAt).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      const text = `🎥 <b>Live temporário (5 min)</b>\nCâmera: <code>${escapeHtml(camId)}</code>\nExpira: <b>${escapeHtml(exp)}</b>\n\n<a href="${escapeHtml(url)}">Abrir stream MJPEG</a>\n<code>${escapeHtml(url)}</code>`;
+      if (editMessageId) { const ed = await editTelegramMessageText(chatId, editMessageId, text, { parseMode:'HTML', replyMarkup: { inline_keyboard:[[{text:'🔄 Novo link',callback_data:`cam:live:${camId}`},{text:'⬅️ Câmeras',callback_data:'act:camera'}]] } }); if (ed.ok) return {}; }
+      await sendTelegramMessage(text, { chatId, parseMode:'HTML', replyMarkup: { inline_keyboard:[[{text:'🔄 Novo link',callback_data:`cam:live:${camId}`},{text:'⬅️ Câmeras',callback_data:'act:camera'}]] } });
+    } catch (e:any) {
+      await sendTelegramMessage(`❌ Live link: ${escapeHtml(e?.message||e)}`, { chatId, parseMode:'HTML' });
+    }
     return {};
   }
+  if (action.startsWith('cam:ctl:')) {
+    const camId = action.slice('cam:ctl:'.length);
+    const text = `🕹 <b>Controle PTZ</b>\nCâmera: <code>${escapeHtml(camId)}</code>\nUse os botões para mover.`;
+    const markup = cameraPtzKeyboard(camId);
+    if (editMessageId) { const ed = await editTelegramMessageText(chatId, editMessageId, text, { parseMode:'HTML', replyMarkup: markup }); if (ed.ok) return {}; }
+    await sendTelegramMessage(text, { chatId, parseMode:'HTML', replyMarkup: markup });
+    return {};
+  }
+  if (action.startsWith('cam:ptz:')) {
+    const [, , camId, dir] = action.split(':');
+    try {
+      const r = await cameraPtz(camId, dir as any, 0.5);
+      return { toast: r?.ok ? `PTZ ${dir}` : `PTZ: ${String((r as any)?.error || 'falha').slice(0,40)}` };
+    } catch (e:any) {
+      return { toast: `PTZ erro: ${String(e?.message||e).slice(0,40)}` };
+    }
+  }
+
+  if (action === 'act:mikrotik') { await sendMikrotikMenu(chatId, editMessageId); return {}; }
+  const mkBack = { backAction: 'act:mikrotik', backLabel: '⬅️ MikroTik' };
+  if (action === 'mk:status') { const updated = await sendOrEditReport(chatId, 'mk:status', buildMikrotikStatusText, editMessageId, { ...mkBack, extra:[{text:'📈 Gráfico', callback_data:'mk:chart:status'}] }); return updated ? {} : { toast:'Já atualizado' }; }
+  if (action === 'mk:devices') { const updated = await sendOrEditReport(chatId, 'mk:devices', buildMikrotikDevicesText, editMessageId, mkBack); return updated ? {} : { toast:'Já atualizado' }; }
+  if (action === 'mk:bw') { const updated = await sendOrEditReport(chatId, 'mk:bw', buildMikrotikBandwidthText, editMessageId, { ...mkBack, extra:[{text:'📈 Gráfico', callback_data:'mk:chart:bw'}] }); return updated ? {} : { toast:'Já atualizado' }; }
+  if (action === 'mk:events') { const updated = await sendOrEditReport(chatId, 'mk:events', buildMikrotikEventsText, editMessageId, mkBack); return updated ? {} : { toast:'Já atualizado' }; }
+  if (action === 'mk:dns') { const updated = await sendOrEditReport(chatId, 'mk:dns', buildMikrotikDnsText, editMessageId, mkBack); return updated ? {} : { toast:'Já atualizado' }; }
+  if (action === 'mk:logs') { const updated = await sendOrEditReport(chatId, 'mk:logs', buildMikrotikLogsText, editMessageId, mkBack); return updated ? {} : { toast:'Já atualizado' }; }
+  if (action === 'mk:dnsset') { await promptMikrotikInput(chatId, 'dnsset', editMessageId); return { toast:'Envie DNS' }; }
+  if (action === 'mk:makestatic') { await promptMikrotikInput(chatId, 'makestatic', editMessageId); return { toast:'Envie MAC' }; }
+  if (action === 'mk:ping') { await promptMikrotikInput(chatId, 'ping', editMessageId); return { toast:'Envie IP/host' }; }
+  if (action === 'mk:trace') { st.pendingMikrotik = 'trace' as any; st.pendingNetTool = undefined; st.mode='menu'; persistState(); const text='✍️ <b>MikroTik Traceroute</b>\nEnvie IP/host para rastrear pelo roteador.'; const markup:InlineKeyboardMarkup={inline_keyboard:[[{text:'⬅️ MikroTik',callback_data:'act:mikrotik'}]]}; if(editMessageId){const ed=await editTelegramMessageText(chatId,editMessageId,text,{parseMode:'HTML',replyMarkup:markup}); if(ed.ok) return {toast:'Envie IP/host'};} await sendTelegramMessage(text,{chatId,parseMode:'HTML',replyMarkup:markup}); return {toast:'Envie IP/host'}; }
+  if (action === 'mk:lookup') { await promptMikrotikInput(chatId, 'dns', editMessageId); return { toast:'Envie nome DNS' }; }
+  if (action === 'mk:block') { await promptMikrotikInput(chatId, 'block', editMessageId); return { toast:'Envie MAC' }; }
+  if (action === 'mk:unblock') { await promptMikrotikInput(chatId, 'unblock', editMessageId); return { toast:'Envie MAC' }; }
+  if (action.startsWith('mk:do:block:') || action.startsWith('mk:do:unblock:')) {
+    const unblock = action.startsWith('mk:do:unblock:');
+    const mac = action.slice(unblock ? 'mk:do:unblock:'.length : 'mk:do:block:'.length);
+    try {
+      const r: any = unblock ? await mikrotikUnblockDevice(mac) : await mikrotikBlockDevice(mac);
+      const msg = `${r?.ok!==false?'✅':'❌'} ${unblock?'Desbloqueio':'Bloqueio'} <code>${escapeHtml(mac)}</code>`;
+      if (editMessageId) { const ed = await editTelegramMessageText(chatId, editMessageId, msg, { parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); if (ed.ok) return {}; }
+      await sendTelegramMessage(msg, { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() });
+    } catch (e:any) {
+      await sendTelegramMessage(`❌ Erro: ${escapeHtml(e?.message||e)}`, { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() });
+    }
+    return {};
+  }
+  if (action.startsWith('mk:do:dnsset:')) {
+    const servers = decodeURIComponent(action.slice('mk:do:dnsset:'.length)).split(',').map(s=>s.trim()).filter(Boolean);
+    try { await mikrotikSetDnsServers(servers); const msg = `✅ DNS MikroTik atualizado: <code>${escapeHtml(servers.join(','))}</code>`; if (editMessageId){const ed=await editTelegramMessageText(chatId,editMessageId,msg,{parseMode:'HTML',replyMarkup:mikrotikMenuKeyboard()}); if(ed.ok) return {}; } await sendTelegramMessage(msg,{chatId,parseMode:'HTML',replyMarkup:mikrotikMenuKeyboard()}); } catch(e:any){ await sendTelegramMessage(`❌ DNS: ${escapeHtml(e?.message||e)}`, {chatId,parseMode:'HTML',replyMarkup:mikrotikMenuKeyboard()}); }
+    return {};
+  }
+  if (action.startsWith('mk:do:makestatic:')) {
+    const mac = decodeURIComponent(action.slice('mk:do:makestatic:'.length));
+    try { await mikrotikMakeLeaseStatic(mac); const msg = `✅ Lease estático: <code>${escapeHtml(mac)}</code>`; if (editMessageId){const ed=await editTelegramMessageText(chatId,editMessageId,msg,{parseMode:'HTML',replyMarkup:mikrotikMenuKeyboard()}); if(ed.ok) return {}; } await sendTelegramMessage(msg,{chatId,parseMode:'HTML',replyMarkup:mikrotikMenuKeyboard()}); } catch(e:any){ await sendTelegramMessage(`❌ Make static: ${escapeHtml(e?.message||e)}`, {chatId,parseMode:'HTML',replyMarkup:mikrotikMenuKeyboard()}); }
+    return {};
+  }
+  if (action.startsWith('mk:chart:')) { await sendMikrotikChart(chatId, action.endsWith('bw') ? 'bw' : 'status'); return {}; }
+  if (action === 'chart:blocks') { await sendBlocksChart(chatId); return {}; }
+  if (action.startsWith('chart:')) { const k = action.slice('chart:'.length) as any; await sendMetricsChart(chatId, ['cpu','temp','ram','all'].includes(k)?k:'all'); return {}; }
 
   await sendMainMenu(chatId);
   return {};
@@ -1358,6 +1662,7 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
     await handleAction(chatId, 'act:camera');
     return;
   }
+  if (lower === '/mikrotik' || lower === 'mikrotik' || lower === 'mikrotik status') { await handleAction(chatId, 'act:mikrotik'); return; }
 
   // Intenções rápidas no modo menu (evita ecoar mensagem sem ação)
   if (/\b(desliga|desligar|encerra|encerrar|parar|fechar)\b.*\b(navegador|browser|chromium)\b/i.test(text)) {
@@ -1390,6 +1695,61 @@ async function handleCommand(chatId: string, raw: string): Promise<void> {
     if (tool === 'ping') await runTelegramPing(chatId, host);
     else await runTelegramTrace(chatId, host);
     return;
+  }
+
+  if (st.pendingMikrotik) {
+    const kind = st.pendingMikrotik;
+    st.pendingMikrotik = undefined;
+    persistState();
+    const arg = text.trim().split(/\s+/)[0];
+    try {
+      if (kind === 'ping') {
+        if (!isValidHostInput(arg)) { await sendTelegramMessage('❌ IP/host inválido.', { chatId, replyMarkup: mikrotikMenuKeyboard() }); return; }
+        await sendTelegramMessage(`📡 Ping MikroTik → <code>${escapeHtml(arg)}</code>...`, { chatId, parseMode:'HTML' });
+        const r: any = await mikrotikRunPing(arg);
+        const rows = Array.isArray(r) ? r : [r];
+        const lines = [`📡 <b>Ping MikroTik</b> <code>${escapeHtml(arg)}</code>`];
+        for (const row of rows.slice(0,5)) lines.push(`• seq=${escapeHtml(String(row.seq??''))} time=${escapeHtml(String(row.time??row['time']??'-'))} ttl=${escapeHtml(String(row.ttl??'-'))} ${row.status?escapeHtml(String(row.status)):''}`);
+        await sendTelegramMessage(lines.join('\n').slice(0,3900), { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); return;
+      }
+      if (kind === 'trace') {
+        if (!isValidHostInput(arg)) { await sendTelegramMessage('❌ IP/host inválido.', { chatId, replyMarkup: mikrotikMenuKeyboard() }); return; }
+        await sendTelegramMessage(`🧭 Traceroute MikroTik → <code>${escapeHtml(arg)}</code>...`, { chatId, parseMode:'HTML' });
+        const r: any = await mikrotikTraceroute(arg);
+        const rows = Array.isArray(r) ? r : [r];
+        const lines = [`🧭 <b>Traceroute MikroTik</b> <code>${escapeHtml(arg)}</code>`];
+        for (const row of rows.slice(0,20)) lines.push(`• ${escapeHtml(String(row['#']??row.seq??''))} ${escapeHtml(String(row.address??row.last??'*'))} ${escapeHtml(String(row.time??''))}`);
+        await sendTelegramMessage(lines.join('\n').slice(0,3900), { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); return;
+      }
+      if (kind === 'dns') {
+        if (!isValidHostInput(arg)) { await sendTelegramMessage('❌ Nome inválido.', { chatId, replyMarkup: mikrotikMenuKeyboard() }); return; }
+        const r: any = await mikrotikDnsLookup(arg);
+        const rows = Array.isArray(r) ? r : [r];
+        const lines = [`🔎 <b>DNS Lookup MikroTik</b> <code>${escapeHtml(arg)}</code>`];
+        for (const row of rows.slice(0,15)) lines.push(`• ${escapeHtml(String(row.name??arg))} → ${escapeHtml(String(row.address||row.data||row.status||'-'))}`);
+        await sendTelegramMessage(lines.join('\n').slice(0,3900), { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); return;
+      }
+      if (kind === 'block' || kind === 'unblock') {
+        if (!isValidMac(arg)) { await sendTelegramMessage('❌ MAC inválido. Ex: <code>AA:BB:CC:DD:EE:FF</code>', { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); return; }
+        const act = kind === 'block' ? 'mk:do:block' : 'mk:do:unblock';
+        await sendTelegramMessage(`⚠️ Confirmar <b>${kind}</b> para <code>${escapeHtml(arg)}</code>?`, { chatId, parseMode:'HTML', replyMarkup: { inline_keyboard: [[{ text: '✅ Confirmar', callback_data: `${act}:${arg}` }, { text: '❌ Cancelar', callback_data: 'act:mikrotik' }]] } });
+        return;
+      }
+      if (kind === 'makestatic') {
+        if (!isValidMac(arg)) { await sendTelegramMessage('❌ MAC inválido.', { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); return; }
+        await sendTelegramMessage(`⚠️ Tornar lease estático para <code>${escapeHtml(arg)}</code>?`, { chatId, parseMode:'HTML', replyMarkup: { inline_keyboard: [[{ text:'✅ Confirmar', callback_data:`mk:do:makestatic:${encodeURIComponent(arg)}` }, { text:'❌ Cancelar', callback_data:'act:mikrotik' }]] } });
+        return;
+      }
+      if (kind === 'dnsset') {
+        const servers = text.split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
+        if (!servers.length || !servers.every(isValidHostInput)) { await sendTelegramMessage('❌ DNS inválido. Ex: <code>1.1.1.1,8.8.8.8</code>', { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() }); return; }
+        await sendTelegramMessage(`⚠️ Definir DNS MikroTik para <code>${escapeHtml(servers.join(','))}</code>?`, { chatId, parseMode:'HTML', replyMarkup: { inline_keyboard: [[{ text:'✅ Confirmar', callback_data:`mk:do:dnsset:${encodeURIComponent(servers.join(','))}` }, { text:'❌ Cancelar', callback_data:'act:mikrotik' }]] } });
+        return;
+      }
+    } catch (e:any) {
+      await sendTelegramMessage(`❌ MikroTik ${kind}: ${escapeHtml(e?.message||e)}`, { chatId, parseMode:'HTML', replyMarkup: mikrotikMenuKeyboard() });
+      return;
+    }
   }
 
   // Unrecognized text in menu mode -> present clean inline button panel echoing the message
@@ -1435,10 +1795,11 @@ async function processUpdate(update: any) {
     const data = typeof cb.data === 'string' ? cb.data : '';
     const messageId = typeof cb.message?.message_id === 'number' ? cb.message.message_id : undefined;
     const isSlowAction =
-      data === 'act:models' || data === 'act:print' || data === 'act:docker' || data === 'act:seguranca';
+      data === 'act:models' || data === 'act:print' || data === 'act:docker' || data === 'act:seguranca' ||
+      data.startsWith('chart:') || data.startsWith('mk:') || data.startsWith('cam:');
     if (isSlowAction) {
-      await answerTelegramCallbackQuery(cb.id);
-      await handleAction(chatId, data, messageId);
+      await answerTelegramCallbackQuery(cb.id, { text: '⏳...' });
+      handleAction(chatId, data, messageId).catch(async (e:any)=>{ console.warn('[telegramBot] action error', data, e?.message||e); try{ await sendTelegramMessage(`❌ ${escapeHtml(String(e?.message||e)).slice(0,500)}`, {chatId, parseMode:'HTML'});}catch{} });
       return;
     }
     let toast: string | undefined;

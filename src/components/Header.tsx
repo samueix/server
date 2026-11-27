@@ -24,6 +24,8 @@ interface HeaderProps {
   activeAlertsCount?: number;
   currentUser?: string | null;
   onLogout?: () => void;
+  sessionLocked?: boolean;
+  onToggleLock?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,7 +39,9 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleMobileMenu,
   activeAlertsCount = 0,
   currentUser,
-  onLogout
+  onLogout,
+  sessionLocked,
+  onToggleLock
 }) => {
   const isOnline = connectionStatus === 'connected';
 
@@ -128,6 +132,16 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>{currentUser}</span>
                 </div>
 
+                {onToggleLock && (
+                  <button
+                    onClick={onToggleLock}
+                    className={`h-8 px-2.5 rounded-md border-2 border-[#1A1A2E] text-xs font-bold shadow-[2px_2px_0px_#1A1A2E] transition-all duration-120 flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none ${sessionLocked ? 'bg-[#D1FADF] text-[#027A48]' : 'bg-white text-[#1A1A2E] hover:bg-[#FFF7E8]'}`}
+                    title={sessionLocked ? 'Sessão travada (não desloga por inatividade)' : 'Travar sessão para não deslogar'}
+                  >
+                    <span>{sessionLocked ? '🔒' : '🔓'}</span>
+                    <span className="hidden sm:inline">{sessionLocked ? 'Travado' : 'Travar'}</span>
+                  </button>
+                )}
                 <button
                   onClick={onLogout}
                   className="h-8 px-2.5 rounded-md bg-white hover:bg-[#FEE4E2] text-[#F04438] border-2 border-[#1A1A2E] text-xs font-bold shadow-[2px_2px_0px_#1A1A2E] transition-all duration-120 flex items-center gap-1.5 active:translate-x-[1px] active:translate-y-[1px] active:shadow-none"
