@@ -212,15 +212,21 @@ const CameraCard: React.FC<{
   );
 
   const startHoldPtz = useCallback((action: string) => {
+    if (moveTimer.current) { clearInterval(moveTimer.current); moveTimer.current = null; }
     ptzHeldRef.current = true;
-    void doPtz(action);
-  }, [doPtz]);
+    void sendPtz(action);
+    moveTimer.current = setInterval(() => {
+      if (!ptzHeldRef.current) return;
+      void sendPtz(action);
+    }, 450);
+  }, [sendPtz]);
 
   const endHoldPtz = useCallback(() => {
     if (!ptzHeldRef.current) return;
     ptzHeldRef.current = false;
-    void doPtz('stop');
-  }, [doPtz]);
+    if (moveTimer.current) { clearInterval(moveTimer.current); moveTimer.current = null; }
+    void sendPtz('stop');
+  }, [sendPtz]);
 
   useEffect(() => {
     if (!active) return;
@@ -537,7 +543,7 @@ const CameraCard: React.FC<{
               <button type="button" aria-label="Mover câmera para cima" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('up');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">↑</button>
               <div />
               <button type="button" aria-label="Mover câmera para esquerda" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('left');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">←</button>
-              <button type="button" aria-label="Parar movimento PTZ" onClick={(e)=>{e.stopPropagation(); ptzHeldRef.current = false; void doPtz('stop');}} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-[#FEE4E2] hover:bg-[#F04438]/20 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold text-[#B42318] cursor-pointer">■</button>
+              <button type="button" aria-label="Parar movimento PTZ" onClick={(e)=>{e.stopPropagation(); ptzHeldRef.current = false; if (moveTimer.current) { clearInterval(moveTimer.current); moveTimer.current = null; } void doPtz('stop');}} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-[#FEE4E2] hover:bg-[#F04438]/20 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold text-[#B42318] cursor-pointer">■</button>
               <button type="button" aria-label="Mover câmera para direita" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('right');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">→</button>
               <div />
               <button type="button" aria-label="Mover câmera para baixo" onPointerDown={(e)=>{e.preventDefault(); startHoldPtz('down');}} onPointerUp={endHoldPtz} onPointerLeave={endHoldPtz} onPointerCancel={endHoldPtz} className="h-11 rounded-lg border-2 border-[#1A1A2E] bg-white hover:bg-[#FFC857]/30 shadow-[2px_2px_0px_#1A1A2E] active:translate-y-[1px] font-bold cursor-pointer">↓</button>
