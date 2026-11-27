@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Router, Wifi, Shield, Network, Cable, Users, AlertTriangle, Activity, History, Server, Globe, ShieldCheck, ArrowRight, Lock, Download } from 'lucide-react';
+import { RefreshCw, Router, Wifi, Shield, Network, Cable, Users, AlertTriangle, Activity, History, Server, Globe, ShieldCheck, ArrowRight, Lock, Download, ChevronDown, ChevronRight } from 'lucide-react';
 import { getAuthHeaders } from '../../services/authService';
 import type { MikrotikStatus } from '../../types';
 
@@ -116,16 +116,20 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
 }
 
 function Tree({ node, depth = 0 }: { node: TopoNode; depth?: number }) {
+  const [collapsed, setCollapsed] = useState(depth > 1);
   const Icon = node.kind === 'router' ? Router : node.kind === 'wan' ? Globe : node.kind === 'lan' ? Network : node.kind === 'port' ? Cable : node.kind === 'gateway' ? ArrowRight : Server;
+  const hasChildren = Boolean(node.children?.length);
   return (
     <div className={depth ? 'ml-3 border-l-2 border-[#1A1A2E]/20 pl-3' : ''}>
       <div className="flex items-center gap-1.5 py-0.5 flex-wrap">
+        {hasChildren ? <button onClick={()=>setCollapsed(v=>!v)} className="inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] bg-white hover:bg-[#FFF7E8]">{collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}</button> : <span className="w-5" />}
         <span className={`inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] ${node.kind === 'router' ? 'bg-[#FF5A36] text-white' : node.kind === 'wan' ? 'bg-[#E0F4FE]' : node.kind === 'lan' ? 'bg-[#ECFDF3]' : 'bg-[#FFF7E8]'}`}><Icon className="w-3 h-3" /></span>
         <span className="font-bold text-xs">{node.label}</span>
         {node.sub && <span className="text-[10px] font-mono text-[#4A4A68]">{node.sub}</span>}
         {node.online !== undefined && <span className={`text-[10px] font-bold ${node.online ? 'text-[#027A48]' : 'text-[#B42318]'}`}>{node.online ? 'online' : 'offline'}</span>}
+        {hasChildren && <span className="text-[10px] font-mono text-[#4A4A68]">({node.children!.length})</span>}
       </div>
-      {node.children?.map((c, i) => <Tree key={`${c.label}-${i}`} node={c} depth={depth + 1} />)}
+      {!collapsed && node.children?.map((c, i) => <Tree key={`${c.label}-${i}`} node={c} depth={depth + 1} />)}
     </div>
   );
 }
