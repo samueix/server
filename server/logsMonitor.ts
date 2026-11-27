@@ -28,17 +28,12 @@ const memoryLogHistory: string[] = [];
 
 export function recordServerEvent(message: string, level: 'INFO' | 'WARN' | 'ERROR' = 'INFO') {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const line = `${ts} ubuntu-server adguard-ai[${process.pid}]: [${level}] ${message}`;
+  const line = `${ts} samuelserver server-panel[${process.pid}]: [${level}] ${message}`;
   memoryLogHistory.push(line);
   if (memoryLogHistory.length > 200) {
     memoryLogHistory.shift();
   }
 }
-
-// Inicializa alguns eventos do servidor
-recordServerEvent('Sistema de telemetria inicializado com sucesso', 'INFO');
-recordServerEvent('Proxy de requisições AdGuard Home operacional na porta 3000', 'INFO');
-recordServerEvent('Monitor de recursos (CPU, RAM, Disco, Rede) ativo', 'INFO');
 
 function parseLogLine(raw: string, index: number): LogEntry {
   const clean = raw.trim();
@@ -128,48 +123,26 @@ export function getSystemLogs(source: string = 'syslog', linesCount: number = 50
     }
 
     if (rawLines.length === 0) {
-      // Gera registros realistas de inicialização e telemetria do agente
-      const now = new Date();
-      const formatTs = (offsetSec: number) => {
-        const d = new Date(now.getTime() - offsetSec * 1000);
-        return d.toLocaleTimeString('pt-BR');
-      };
-
-      rawLines = [
-        `Oct 05 ${formatTs(120)} ubuntu-server systemd[1]: Started server-monitor.service - Ubuntu Server Telemetry Agent.`,
-        `Oct 05 ${formatTs(119)} ubuntu-server python3[8420]: [INFO] Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)`,
-        `Oct 05 ${formatTs(118)} ubuntu-server python3[8420]: [INFO] Started reloader process [8420] using WatchFiles`,
-        `Oct 05 ${formatTs(115)} ubuntu-server python3[8420]: [INFO] Application startup complete. FastAPI 2.0.0 active.`,
-        `Oct 05 ${formatTs(90)} ubuntu-server python3[8420]: [INFO] 127.0.0.1:48212 - "GET /api/system HTTP/1.1" 200 OK`,
-        `Oct 05 ${formatTs(75)} ubuntu-server python3[8420]: [INFO] 127.0.0.1:48218 - "GET /api/cpu HTTP/1.1" 200 OK`,
-        `Oct 05 ${formatTs(60)} ubuntu-server python3[8420]: [INFO] 127.0.0.1:48224 - "GET /api/memory HTTP/1.1" 200 OK`,
-        `Oct 05 ${formatTs(45)} ubuntu-server python3[8420]: [INFO] WebSocket connected from 127.0.0.1:48230 to /ws/monitor`,
-        `Oct 05 ${formatTs(30)} ubuntu-server python3[8420]: [INFO] Telemetry broadcast stream active (1s sample rate)`,
-        `Oct 05 ${formatTs(15)} ubuntu-server python3[8420]: [INFO] psutil sensors checked: 4 cores, 16.0 GB RAM, NVMe disk OK`,
-        `Oct 05 ${formatTs(5)} ubuntu-server python3[8420]: [INFO] 127.0.0.1:48240 - "GET /api/health HTTP/1.1" 200 OK`
-      ];
+      rawLines = [];
+      fileExists = false;
     }
   } else if (source === 'panel') {
-    sourcePath = 'systemd: adguard-ai.service (Painel Web Node.js :3000)';
-    try {
-      const output = execSync(`journalctl -u adguard-ai.service -n ${count} --no-pager 2>/dev/null`, { timeout: 2000, encoding: 'utf-8' });
-      if (output && output.trim()) {
-        rawLines = output.split('\n').filter(l => l.trim().length > 0);
-        fileExists = true;
-      }
-    } catch {}
+    sourcePath = 'systemd: server-panel.service (Painel Web Node.js :3000)';
+    for (const unit of ['server-panel.service', 'adguard-ai.service']) {
+      try {
+        const output = execSync(`journalctl -u ${unit} -n ${count} --no-pager 2>/dev/null`, { timeout: 2000, encoding: 'utf-8' });
+        if (output && output.trim()) {
+          rawLines = output.split('\n').filter(l => l.trim().length > 0);
+          sourcePath = `systemd: ${unit} (Painel Web Node.js :3000)`;
+          fileExists = true;
+          break;
+        }
+      } catch {}
+    }
 
-    if (rawLines.length === 0) {
+    if (rawLines.length === 0 && memoryLogHistory.length > 0) {
       rawLines = memoryLogHistory.slice(-count);
-      if (rawLines.length < 5) {
-        rawLines.push(
-          `Oct 05 05:20:00 ubuntu-server systemd[1]: Started adguard-ai.service - AdGuard AI NOC Web Panel.`,
-          `Oct 05 05:20:01 ubuntu-server node[9120]: [AdGuard AI NOC] Servidor iniciado na porta 3000 (0.0.0.0:3000)`,
-          `Oct 05 05:20:02 ubuntu-server node[9120]: [Auth] Credenciais de acesso carregadas com sucesso`,
-          `Oct 05 05:20:03 ubuntu-server node[9120]: [AdGuard] Conectando ao host AdGuard Home http://192.168.100.23:8081...`,
-          `Oct 05 05:20:04 ubuntu-server node[9120]: [AdGuard] Conexão estabelecida e sincronização ativa`
-        );
-      }
+      fileExists = true;
     }
   } else if (source === 'adguard') {
     sourcePath = '/opt/AdGuardHome/data/adguardhome.log';
@@ -215,12 +188,8 @@ export function getSystemLogs(source: string = 'syslog', linesCount: number = 50
     }
 
     if (rawLines.length === 0) {
-      rawLines = [
-        `Oct 05 04:30:10 ubuntu-server sshd[3210]: Server listening on 0.0.0.0 port 22.`,
-        `Oct 05 04:30:10 ubuntu-server sshd[3210]: Server listening on :: port 22.`,
-        `Oct 05 04:55:00 ubuntu-server sudo[4120]: samuel : TTY=pts/0 ; PWD=/home/samuel ; USER=root ; COMMAND=/bin/systemctl status adguard-ai`,
-        `Oct 05 04:55:00 ubuntu-server sudo[4120]: pam_unix(sudo:session): session opened for user root(uid=0) by samuel(uid=1000)`
-      ];
+      rawLines = [];
+      fileExists = false;
     }
   } else if (source === 'dmesg') {
     sourcePath = '/var/log/dmesg';
@@ -233,16 +202,8 @@ export function getSystemLogs(source: string = 'syslog', linesCount: number = 50
     } catch {}
 
     if (rawLines.length === 0) {
-      rawLines = [
-        `[Mon Oct  5 04:00:01 2026] Linux version 6.8.0-40-generic (buildd@lcy02-amd64-073) (x86_64)`,
-        `[Mon Oct  5 04:00:01 2026] Command line: BOOT_IMAGE=/vmlinuz-6.8.0-40-generic root=/dev/nvme0n1p2 ro quiet splash`,
-        `[Mon Oct  5 04:00:02 2026] smpboot: CPU0: Intel(R) Core(TM) i5 / Xeon Processor (family: 0x6, model: 0x9e)`,
-        `[Mon Oct  5 04:00:02 2026] Performance Events: PEBS fmt3+, Skylake events, 32-deep LBR, full-width counters`,
-        `[Mon Oct  5 04:00:03 2026] nvme nvme0: 4/0/0 default/read/poll queues`,
-        `[Mon Oct  5 04:00:04 2026] systemd[1]: Detected architecture x86-64.`,
-        `[Mon Oct  5 04:00:05 2026] eth0: renamed from enp3s0`,
-        `[Mon Oct  5 04:00:06 2026] IPv6: ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready`
-      ];
+      rawLines = [];
+      fileExists = false;
     }
   } else {
     // Padrão: /var/log/syslog
@@ -268,23 +229,9 @@ export function getSystemLogs(source: string = 'syslog', linesCount: number = 50
       } catch {}
     }
 
-    // Fallback enriquecido e contextualizado com os daemons reais do Ubuntu
     if (rawLines.length === 0) {
-      rawLines = [
-        `Oct 05 05:00:15 ubuntu-server systemd[1]: Starting Daily apt download activities...`,
-        `Oct 05 05:00:22 ubuntu-server systemd[1]: apt-daily.service: Deactivated successfully.`,
-        `Oct 05 05:00:22 ubuntu-server systemd[1]: Finished Daily apt download activities.`,
-        `Oct 05 05:01:00 ubuntu-server CRON[6120]: (root) CMD (test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; })`,
-        `Oct 05 05:02:10 ubuntu-server systemd-timesyncd[720]: Contacted time server 185.125.190.58:123 (ntp.ubuntu.com).`,
-        `Oct 05 05:02:10 ubuntu-server systemd-timesyncd[720]: Initial clock synchronization to Mon 2026-10-05 05:02:10.`,
-        `Oct 05 05:10:00 ubuntu-server AdGuardHome[1020]: [info] 192.168.100.23: Processing DNS queries smoothly (avg 12ms)`,
-        `Oct 05 05:15:30 ubuntu-server server-monitor[8420]: [INFO] Hardware telemetry sample: CPU 14.2%, RAM 41.5%, Disk 38.0%`,
-        `Oct 05 05:20:00 ubuntu-server adguard-ai[9120]: [INFO] Health check probe OK (200)`,
-        `Oct 05 05:25:40 ubuntu-server kernel: [ 4512.102040] TCP: request_sock_TCP: Possible SYN flooding on port 80? Sending cookies.`,
-        `Oct 05 05:28:12 ubuntu-server systemd[1]: Started Clean php session files.`,
-        `Oct 05 05:30:00 ubuntu-server CRON[6890]: (samuel) CMD (/opt/server-monitor/scripts/healthcheck.sh >/dev/null 2>&1)`,
-        `Oct 05 05:35:10 ubuntu-server NetworkManager[840]: <info>  [1762320910.12] dhcp4 (eth0): state changed new lease, address=192.168.100.23`
-      ];
+      rawLines = [];
+      fileExists = false;
     }
   }
 

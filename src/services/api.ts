@@ -11,7 +11,7 @@ import {
   TraceResponse,
   PingTarget
 } from '../types';
-import { API, SERVER_IPV4, SERVER_IPV6 } from '../config';
+import { API } from '../config';
 import { getAuthHeaders, notifyUnauthorized } from './authService';
 
 // Armazena a leitura anterior de rede para cálculo de velocidade em tempo real (MB/s ou KB/s)
@@ -295,7 +295,7 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
   const hostname = sysObj.hostname || data.hostname || data.servidor || 'samuelserver';
   const nome = sysObj.os || sysObj.nome || 'Linux';
   const versao = sysObj.os_version || sysObj.versao || 'Não disponível';
-  const arquitetura = sysObj.arch || sysObj.arquitetura || 'x86_64';
+  const arquitetura = sysObj.arch || sysObj.arquitetura || 'Não disponível';
   const kernel = sysObj.kernel || data.kernel || sysObj.kernel_version || undefined;
 
   // Uptime
@@ -322,8 +322,8 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
   // CPU
   const cpuObj = data.cpu || {};
   const uso_percentual = Number(cpuObj.usage_percent ?? cpuObj.uso_percentual ?? data.cpu_percentual ?? 0);
-  const nucleos_fisicos = Number(cpuObj.cores_physical ?? cpuObj.nucleos_fisicos ?? 2);
-  const nucleos_logicos = Number(cpuObj.cores_logical ?? cpuObj.nucleos_logicos ?? 4);
+  const nucleos_fisicos = Number(cpuObj.cores_physical ?? cpuObj.nucleos_fisicos ?? 0);
+  const nucleos_logicos = Number(cpuObj.cores_logical ?? cpuObj.nucleos_logicos ?? 0);
   const frequencia_mhz = typeof cpuObj.frequency_mhz === 'object' && cpuObj.frequency_mhz !== null
     ? Number(cpuObj.frequency_mhz.current || 0)
     : Number(cpuObj.frequencia_mhz || 0);
@@ -342,12 +342,26 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
   const livre_gb = Number(ramObj.free_gb ?? ramObj.livre_gb ?? 0);
   const ram_percent = Number(ramObj.usage_percent ?? ramObj.uso_percentual ?? 0);
 
-  // Disco
-  const diskRoot = data.disk?.root || data.disco || {};
-  const disk_total_gb = Number(diskRoot.total_gb || 0);
-  const disk_usado_gb = Number(diskRoot.used_gb ?? diskRoot.usado_gb ?? 0);
-  const disk_livre_gb = Number(diskRoot.free_gb ?? diskRoot.livre_gb ?? Math.max(0, disk_total_gb - disk_usado_gb));
-  const disk_percent = Number(diskRoot.percent ?? diskRoot.uso_percentual ?? 0);
+  // Disco e partições reais
+  const diskRoot = data.disk?.root || data.disco?.root || data.disco || {};
+  const disk_total_gb = Number(diskRoot.total_gb || data.disco?.total_gb || 0);
+  const disk_usado_gb = Number(diskRoot.used_gb ?? diskRoot.usado_gb ?? data.disco?.usado_gb ?? 0);
+  const disk_livre_gb = Number(diskRoot.free_gb ?? diskRoot.livre_gb ?? data.disco?.livre_gb ?? Math.max(0, disk_total_gb - disk_usado_gb));
+  const disk_percent = Number(diskRoot.percent ?? diskRoot.uso_percentual ?? data.disco?.uso_percentual ?? 0);
+  const rawPartitions = Array.isArray(data.disk?.partitions)
+    ? data.disk.partitions
+    : Array.isArray(data.disco?.particoes)
+    ? data.disco.particoes
+    : [];
+  const partitions = rawPartitions.map((p: any) => ({
+    device: String(p.device || p.dispositivo || '--'),
+    mount_point: String(p.mount_point || p.mountpoint || p.ponto_montagem || '/'),
+    fs_type: String(p.fs_type || p.fstype || p.sistema_arquivos || '--'),
+    total_gb: Number(p.total_gb ?? 0),
+    used_gb: Number(p.used_gb ?? p.usado_gb ?? 0),
+    free_gb: Number(p.free_gb ?? p.livre_gb ?? 0),
+    percent: Number(p.percent ?? p.uso_percentual ?? 0),
+  }));
 
   // Temperatura integrada com todos os núcleos e sensores reais
   const temperatura = data.temperature 
@@ -355,9 +369,11 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
     : undefined;
 
   const nucleos_uso: number[] | undefined = Array.isArray(cpuObj.per_core_percent)
-    ? cpuObj.per_core_percent
+    ? cpuObj.per_core_percent.map((n: any) => Number(n ?? 0))
     : Array.isArray(cpuObj.nucleos_uso)
-    ? cpuObj.nucleos_uso
+    ? cpuObj.nucleos_uso.map((n: any) => Number(n ?? 0))
+    : Array.isArray(cpuObj.por_nucleo)
+    ? cpuObj.por_nucleo.map((c: any) => (typeof c === 'number' ? c : Number(c?.uso_percentual ?? c?.usage_percent ?? 0)))
     : undefined;
 
   return {
@@ -367,7 +383,12 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
       versao,
       arquitetura,
       hostname,
-      kernel
+      kernel,
+      timezone: sysObj.timezone || undefined,
+      firmware: sysObj.firmware || undefined,
+      hardware_vendor: sysObj.hardware_vendor || undefined,
+      hardware_model: sysObj.hardware_model || undefined,
+      ntp_synced: typeof sysObj.ntp_synced === 'boolean' ? sysObj.ntp_synced : undefined,
     },
     uptime: {
       dias,
@@ -398,7 +419,17 @@ function parseSystemSnapshot(data: any): ApiServerResponse {
       total_gb: disk_total_gb,
       usado_gb: disk_usado_gb,
       livre_gb: disk_livre_gb,
-      uso_percentual: disk_percent
+      uso_percentual: disk_percent,
+      root: {
+        device: diskRoot.device || null,
+        fs_type: diskRoot.fs_type || diskRoot.fstype || null,
+        mount_point: diskRoot.mount_point || diskRoot.mountpoint || '/',
+        total_gb: disk_total_gb,
+        used_gb: disk_usado_gb,
+        free_gb: disk_livre_gb,
+        percent: disk_percent,
+      },
+      partitions,
     },
     temperatura
   };
@@ -491,15 +522,15 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
   let totalSent = 0;
 
   const interfaces: NetworkInterfaceItem[] = rawList.map((item: any) => {
-    const nome = item.interface || item.nome || item.name || 'eth0';
+    const nome = item.interface || item.nome || item.name || 'N/D';
 
     // Extração do IP
     let ip = item.ip || item.endereco || item.address;
     let ipv4 = item.ipv4;
     let ipv6 = item.ipv6;
-    let mac = item.mac || '--';
-    let netmask = item.netmask || item.mascara || '--';
-    let gateway = item.gateway || (ipv4 ? '192.168.100.1' : '--');
+    const mac = item.mac || '--';
+    const netmask = item.netmask || item.mascara || '--';
+    const gateway = item.gateway || '--';
 
     if (!ipv4 && Array.isArray(item.enderecos)) {
       const v4 = item.enderecos.find((e: any) => e.endereco && !e.endereco.includes(':') && e.endereco !== '127.0.0.1');
@@ -513,9 +544,6 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
     if (!ip) ip = ipv4 || '--';
     if (!ipv4 && ip !== '--' && !ip.includes(':')) ipv4 = ip;
     if (!ipv6 && ip.includes(':')) ipv6 = ip;
-    if (!ipv6 && (nome.startsWith('en') || nome.startsWith('eth') || nome === 'primary')) {
-      ipv6 = raw.primary_ipv6 || SERVER_IPV6;
-    }
 
     // Status: "online" / "active" / "up"
     const rawStatus = (item.status || (item.is_up ? 'UP' : 'DOWN') || 'UP').toString().toLowerCase();
@@ -556,7 +584,7 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
         ipv4: c.ipv4 || c.ip,
         ipv6: c.ipv6,
         mac: c.mac,
-        interface: c.interface || 'enp2s0',
+        interface: c.interface || undefined,
         fabricante: c.fabricante || c.vendor,
         tempo_conectado: c.tempo_conectado || c.uptime,
         trafego: c.trafego || c.traffic,
@@ -611,9 +639,9 @@ export function parseNetworkData(raw: any): NetworkTelemetry {
   return {
     interfaces,
     activeClients,
-    primaryInterface: raw.primary_interface || 'enp2s0',
-    primaryIp: raw.primary_ip || SERVER_IPV4,
-    primaryIpv6: raw.primary_ipv6 || SERVER_IPV6,
+    primaryInterface: raw?.primary_interface || interfaces.find(i => i.status === 'UP' && i.nome !== 'lo')?.nome || interfaces[0]?.nome || 'N/D',
+    primaryIp: raw?.primary_ip || interfaces.find(i => i.status === 'UP' && i.ipv4 && i.ipv4 !== '127.0.0.1')?.ipv4 || '',
+    primaryIpv6: raw?.primary_ipv6 || interfaces.find(i => i.status === 'UP' && i.ipv6)?.ipv6 || '',
     downloadSpeedFormatted: formatSpeed(downloadSpeedBps),
     uploadSpeedFormatted: formatSpeed(uploadSpeedBps),
     downloadSpeedBytes: downloadSpeedBps,
@@ -767,7 +795,7 @@ export const apiService = {
         servidor: serverDetails.sistema?.hostname || serverDetails.servidor || 'samuelserver',
         cpu: {
           uso_percentual: serverDetails.cpu?.uso_percentual ?? 0,
-          nucleos: serverDetails.cpu?.nucleos_logicos ?? 4
+          nucleos: serverDetails.cpu?.nucleos_logicos ?? 0
         },
         cpu_percentual: serverDetails.cpu?.uso_percentual ?? 0,
         memoria: {
@@ -792,7 +820,8 @@ export const apiService = {
       serverDetails.temperatura = temperature;
 
       // 4. Extrai telemetria de rede diretamente do payload de /api/system
-      const network = rawSystem.network ? parseNetworkData(rawSystem.network) : null;
+      const netRaw = rawSystem.network || rawSystem.rede;
+      const network = netRaw ? parseNetworkData(netRaw) : null;
 
       // 5. Processos do sistema (prioriza payload de /api/system ou consulta /api/processes)
       const now = Date.now();

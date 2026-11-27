@@ -137,8 +137,49 @@ const TABS_DOCUMENTATION: DocTab[] = [
     troubleshooting: 'Se não iniciar, valide Chromium/Playwright no host, perfil em /opt/server-panel/data/browser e logs: sudo journalctl -u server-panel -n 120.'
   },
   {
+    id: 'cameras',
+    name: '7. Câmeras IP',
+    icon: Radio,
+    summary: 'Câmeras RTSP/ONVIF com visualização ao vivo sob demanda, PTZ e áudio.',
+    purpose: 'Gerenciar câmeras IP genéricas (ex.: Yoosee) sem depender do app do fabricante, mantendo gravação apenas na câmera/NVR.',
+    whatYouCanDo: [
+      'Adicionar/remover câmeras e ver capacidades por marca (RTSP/ONVIF/PTZ).',
+      'Assistir ao vivo via MJPEG sob demanda (inicia com viewer, para após desconexão).',
+      'Usar PTZ ONVIF, áudio MP3/WAV sob demanda e sondagem de gravações SD.',
+      'Enviar snapshot para o Telegram pelo bot.'
+    ],
+    indicators: [
+      { label: 'Ao vivo', desc: 'Stream MJPEG gerado por ffmpeg a partir do RTSP.' },
+      { label: 'PTZ/LED/SD', desc: 'PTZ e detalhes via ONVIF; LED/SD proprietários dependem do suporte da câmera.' }
+    ],
+    apis: 'GET /api/cameras, GET/POST /api/cameras/config (admin), DELETE /api/cameras/:id/config (admin), POST /api/cameras/start (admin), GET /api/cameras/:id/details, GET /api/cameras/:id/stream.mjpeg, GET /api/cameras/:id/audio.mp3|.wav, POST /api/cameras/:id/ptz (admin), POST /api/cameras/:id/led (admin), GET /api/cameras/:id/recordings.',
+    permissions: 'Visualização para autenticados; configuração e controles administrativos exigem admin.',
+    troubleshooting: 'Sem imagem: valide RTSP/ONVIF, credenciais e firewall. Gravação no servidor é intencionalmente desabilitada.'
+  },
+  {
+    id: 'mikrotik',
+    name: '8. MikroTik / Network Center',
+    icon: Network,
+    summary: 'Topologia, histórico, bloqueio, DHCP fixo e diagnóstico executado no roteador.',
+    purpose: 'Centralizar a operação da rede no RB951G-2HnD via RouterOS API 8728, reduzindo o processamento no servidor.',
+    whatYouCanDo: [
+      'Ver árvore da rede (WAN/LAN/portas/dispositivos), portas físicas (link/velocidade/papel) e banda por dispositivo.',
+      'Bloquear/desbloquear por MAC (firewall filter) e tornar leases DHCP estáticos com confirmação e auditoria.',
+      'Executar ping, traceroute e consulta DNS no próprio roteador (offload do servidor).',
+      'Configurar o DNS do roteador/DHCP para usar o AdGuard e ver histórico local em gráficos (CPU/RAM/clientes/tráfego).'
+    ],
+    indicators: [
+      { label: 'Árvore da rede', desc: 'Montada de bridge ports/hosts, ARP, DHCP, Wi‑Fi e rotas.' },
+      { label: 'DNS do roteador', desc: 'Servidores atuais, allow-remote-requests e DNS entregue via DHCP LAN.' },
+      { label: 'Alertas', desc: 'Eventos de CPU/RAM alta, novo dispositivo e online/offline.' }
+    ],
+    apis: 'GET /api/mikrotik/status|devices|events|snapshots|dns-settings|logs|bandwidth; POST /api/mikrotik/poll|ping|traceroute|dns|dns-settings|devices/:mac/block|unblock|make-static|nickname (admin para escrita).',
+    permissions: 'Leitura para autenticados; ações de escrita/DNS exigem admin e são auditadas.',
+    troubleshooting: 'Sem resposta: valide API 8728, regras de firewall e credenciais.'
+  },
+  {
     id: 'files',
-    name: '7. Arquivos',
+    name: '9. Arquivos',
     icon: Folder,
     summary: 'Gerenciador de arquivos do servidor com leitura/edição controlada.',
     purpose: 'Navegar e manipular arquivos de forma administrativa sem SSH direto, dentro das regras de segurança do backend.',
@@ -152,11 +193,11 @@ const TABS_DOCUMENTATION: DocTab[] = [
     ],
     apis: 'GET /api/files/list, /api/files/read, /api/files/raw; POST /api/files/create, /api/files/save (admin).',
     permissions: 'Restrito a administrador.',
-    troubleshooting: 'Falhas de escrita/ leitura geralmente são permissão do usuário do serviço ou caminho inválido/protegido.'
+    troubleshooting: 'Falhas de escrita/leitura geralmente são permissão do usuário do serviço ou caminho inválido/protegido.'
   },
   {
     id: 'security',
-    name: '8. Segurança & Ataques',
+    name: '10. Segurança & Ataques',
     icon: ShieldAlert,
     summary: 'Monitoramento de tentativas de acesso, eventos e regras de bloqueio.',
     purpose: 'Auditar atividade suspeita (ex.: SSH/web), classificar risco e apoiar resposta com firewall.',
@@ -175,7 +216,7 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'credentials',
-    name: '9. Credenciais & APIs',
+    name: '11. Credenciais & APIs',
     icon: Key,
     summary: 'Configuração de credenciais e integrações do painel.',
     purpose: 'Centralizar parâmetros de autenticação e chaves de integração usadas pelo servidor/painel.',
@@ -192,7 +233,7 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'processes',
-    name: '10. Processos',
+    name: '12. Processos',
     icon: Cpu,
     summary: 'Lista de processos em execução e consumo de recursos.',
     purpose: 'Identificar processos com alto uso de CPU/RAM e apoiar diagnóstico operacional.',
@@ -204,16 +245,16 @@ const TABS_DOCUMENTATION: DocTab[] = [
       { label: 'PID / Usuário', desc: 'Identificador e dono do processo.' },
       { label: 'CPU / Memória', desc: 'Consumo relativo/absoluto reportado pelo sistema.' }
     ],
-    apis: 'Monitoramento de processos via backend do painel (consulta em tempo real).',
+    apis: 'Monitoramento de processos via GET /api/processes (consulta em tempo real).',
     permissions: 'Restrito a administrador (conforme sidebar/UI).',
     troubleshooting: 'Dados ausentes podem indicar restrição de leitura em /proc ou falha temporária do coletor.'
   },
   {
     id: 'services',
-    name: '11. Serviços',
+    name: '13. Serviços',
     icon: ShieldCheck,
     summary: 'Status dos serviços/daemons do servidor + card do roteador MikroTik.',
-    purpose: 'Exibir estado operacional dos serviços relevantes instalados no samuelserver.',
+    purpose: 'Exibir estado operacional dos serviços relevantes instalados no servidor.',
     whatYouCanDo: [
       'Ver status (online/offline/erro), boot, porta e infos básicas.',
       'Acompanhar o card do roteador MikroTik (uptime, CPU/RAM, dispositivos e DNS).',
@@ -223,31 +264,32 @@ const TABS_DOCUMENTATION: DocTab[] = [
       { label: 'ONLINE / OFFLINE', desc: 'Estado atual detectado via systemd/porta/processo conforme heurística do monitor.' },
       { label: 'Habilitado no boot', desc: 'Se a unidade está configurada para iniciar automaticamente.' }
     ],
-    apis: 'GET de status de serviços via backend (services monitor) + GET /api/mikrotik/status para o card do roteador. Monitorados: OpenSSH (22), AdGuardHome (53,8081), Server Panel (3000), Nginx (80,443), Cron, systemd-resolved (53), UFW, Docker, Tailscale, n8n (5678, container Docker).',
+    apis: 'GET /api/services (servicesMonitor) + GET /api/mikrotik/status para o card do roteador. Monitorados: OpenSSH (22), AdGuardHome (53, 8081), Server Panel (3000), Nginx (80, 443), Cron, systemd-resolved (53), UFW, Docker e Tailscale.',
     permissions: 'Restrito a administrador (conforme sidebar/UI).',
-    troubleshooting: 'Para investigar: sudo systemctl status <unidade> --no-pager e sudo journalctl -u <unidade> -n 80. n8n roda em Docker (container "n8n").'
+    troubleshooting: 'Para investigar: sudo systemctl status <unidade> --no-pager e sudo journalctl -u <unidade> -n 80. n8n roda em Docker e tem aba própria.'
   },
   {
     id: 'network',
-    name: '12. Rede & MAC',
+    name: '14. Rede & MAC',
     icon: Network,
-    summary: 'Interfaces, conexões e identificação de fabricantes por MAC.',
-    purpose: 'Inspecionar configuração de rede do host e resolver fabricante de endereços MAC.',
+    summary: 'Interfaces, Wi-Fi, conexões e identificação de fabricantes por MAC.',
+    purpose: 'Inspecionar configuração de rede do host, sinal Wi-Fi e resolver fabricante de endereços MAC.',
     whatYouCanDo: [
-      'Ver interfaces/endereços (IPv4/IPv6), gateway e portas/conexões conforme dados disponíveis.',
+      'Ver interfaces/endereços (IPv4/IPv6), gateway, métricas e sinal Wi-Fi (wlo1).',
+      'Escanear redes vizinhas Wi-Fi e alterar configuração via netplan (admin).',
       'Consultar fabricante via lookup de MAC (OUI).'
     ],
     indicators: [
       { label: 'Interfaces ativas', desc: 'Links e endereços em uso (ex.: wlo1, tailscale0, docker bridges).' },
       { label: 'Fabricante (OUI)', desc: 'Identificação do vendor pelo prefixo do MAC; aleatórios/privados podem não ter vendor.' }
     ],
-    apis: 'Telemetria de rede do backend; GET /api/mac-vendor/:mac (consulta externa api.macvendors.com com cache/fallback local, rate-limit ~1 req/s).',
+    apis: 'GET /api/network, GET /api/wifi, POST /api/wifi/scan, POST /api/wifi/connect (admin); GET /api/mac-vendor/:mac.',
     permissions: 'Acesso conforme política da UI (módulo administrativo).',
-    troubleshooting: 'MAC aleatório (locally administered) não possui fabricante público. Em 429 aguarde Retry-After/1s; offline externo usa cache/fallback OUI quando disponível.'
+    troubleshooting: 'MAC aleatório (locally administered) não possui fabricante público. Em 429 aguarde Retry-After/1s.'
   },
   {
     id: 'logs',
-    name: '13. Logs do Sistema',
+    name: '15. Logs do Sistema',
     icon: ScrollText,
     summary: 'Visualização de logs/journal de componentes do servidor.',
     purpose: 'Apoiar diagnóstico de falhas e auditoria operacional.',
@@ -257,7 +299,7 @@ const TABS_DOCUMENTATION: DocTab[] = [
     ],
     indicators: [
       { label: 'Severidade', desc: 'Nível do evento (info/warn/error) quando fornecido pela fonte.' },
-      { label: 'Origem', desc: 'Unidade/serviço que gerou o registro (systemd, nginx, etc.).' }
+      { label: 'Origem', desc: 'Unidade/serviço que gerou o registro (systemd, nginx, RouterOS, etc.).' }
     ],
     apis: 'GET /api/logs (journal/fontes locais) e GET /api/mikrotik/logs (RouterOS /log).',
     permissions: 'Restrito a administrador.',
@@ -265,7 +307,7 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'n8n',
-    name: '14. n8n Workflows',
+    name: '16. n8n Workflows',
     icon: GitBranch,
     summary: 'Status e controle básico da integração com n8n.',
     purpose: 'Monitorar o n8n (container Docker) e acionar operações suportadas pela API do painel.',
@@ -283,7 +325,7 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'commands',
-    name: '15. Terminal & Shell',
+    name: '17. Terminal & Shell',
     icon: Terminal,
     summary: 'Terminal bash interativo no navegador para execução de comandos no servidor.',
     purpose: 'Permitir operações administrativas diretamente pelo painel com acesso completo ao shell do host.',
@@ -302,62 +344,20 @@ const TABS_DOCUMENTATION: DocTab[] = [
   },
   {
     id: 'system',
-    name: '16. Sistema',
+    name: '18. Sistema',
     icon: Server,
     summary: 'Informações do sistema operacional, host e ambiente.',
-    purpose: 'Consultar detalhes do Ubuntu/kernel/host e estado geral do sistema.',
+    purpose: 'Consultar detalhes do Ubuntu/kernel/host e dados reais de hardware/sistema expostos.',
     whatYouCanDo: [
-      'Ver versão do SO, kernel, hostname e dados básicos de hardware/ambiente expostos.'
+      'Ver versão do SO, kernel, hostname, partição raiz e dados de hardware disponíveis no host.'
     ],
     indicators: [
       { label: 'OS / Kernel', desc: 'Distribuição e versão do kernel em execução.' },
-      { label: 'Hostname', desc: 'Identidade do host na rede (samuelserver).' }
+      { label: 'Hostname', desc: 'Identidade real do host na rede.' }
     ],
-    apis: 'Informações de sistema expostas pelo backend de telemetria/saúde do painel.',
+    apis: 'GET /api/system (telemetria de sistema do painel).',
     permissions: 'Restrito a administrador (conforme sidebar/UI).',
     troubleshooting: 'Dados inconsistentes: reinicie o painel (sudo systemctl restart server-panel) e verifique coletores.'
-  },
-  {
-    id: 'cameras',
-    name: '17. Câmeras IP',
-    icon: Radio,
-    summary: 'Câmeras RTSP/ONVIF com visualização ao vivo sob demanda, PTZ e áudio.',
-    purpose: 'Gerenciar câmeras IP genéricas (ex.: Yoosee) sem depender do app do fabricante, mantendo gravação apenas na câmera/NVR.',
-    whatYouCanDo: [
-      'Adicionar/remover câmeras e ver capacidades por marca (RTSP/ONVIF/PTZ).',
-      'Assistir ao vivo via MJPEG sob demanda (inicia com viewer, para após desconexão).',
-      'Usar PTZ ONVIF, áudio WAV sob demanda e sondagem de gravações SD.',
-      'Enviar snapshot para o Telegram pelo bot.'
-    ],
-    indicators: [
-      { label: 'Ao vivo', desc: 'Stream MJPEG SD 10fps/q7 gerado por ffmpeg a partir do RTSP.' },
-      { label: 'PTZ/LED/SD', desc: 'PTZ e detalhes via ONVIF; LED/SD proprietários podem não ser suportados pelo fabricante.' }
-    ],
-    apis: 'GET /api/cameras, GET/POST/DELETE /api/cameras/config (admin), /api/cameras/live, /api/cameras/ptz, /api/cameras/audio, /api/cameras/led, /api/cameras/recordings/probe.',
-    permissions: 'Visualização para autenticados; configuração e controles administrativos exigem admin.',
-    troubleshooting: 'Sem imagem: valide RTSP/ONVIF, credenciais e firewall. Gravação no servidor é intencionalmente desabilitada.'
-  },
-  {
-    id: 'mikrotik',
-    name: '18. MikroTik / Network Center',
-    icon: Network,
-    summary: 'Inventário, topologia, histórico, bloqueio, DHCP fixo e diagnóstico executado no roteador.',
-    purpose: 'Centralizar a operação da rede no RB951G-2HnD via RouterOS API 8728, reduzindo o processamento no servidor.',
-    whatYouCanDo: [
-      'Ver árvore da rede (WAN/LAN/portas/dispositivos), portas físicas (link/velocidade/papel) e banda por dispositivo.',
-      'Bloquear/desbloquear por MAC e tornar leases DHCP estáticos com confirmação e auditoria.',
-      'Executar ping, traceroute e consulta DNS no próprio roteador (offload do servidor).',
-      'Configurar o DNS do roteador/DHCP para usar o AdGuard e ver histórico local em gráficos (CPU/RAM/clientes/tráfego).',
-      'Exportar relatório completo em JSON (configuração, inventário, eventos e histórico) e inventário em CSV.'
-    ],
-    indicators: [
-      { label: 'Árvore da rede', desc: 'Montada de bridge ports/hosts, ARP, DHCP, Wi‑Fi e rotas.' },
-      { label: 'DNS do roteador', desc: 'Servidores atuais, allow-remote-requests e DNS entregue via DHCP LAN.' },
-      { label: 'Alertas', desc: 'Eventos de CPU/RAM alta, novo dispositivo e online/offline.' }
-    ],
-    apis: 'GET /api/mikrotik/status|devices|events|snapshots|dns-settings|logs|bandwidth|export?format=json|csv&scope=devices; POST /api/mikrotik/ping|traceroute|dns|dns-settings|devices/:mac/block|unblock|make-static (admin para escrita).',
-    permissions: 'Leitura para autenticados; ações de escrita/DNS exigem admin e são auditadas.',
-    troubleshooting: 'Sem resposta: valide API 8728, regras de firewall TEMP e credenciais. REST /rest não é confiável no RouterOS 7.5 deste modelo.'
   },
   {
     id: 'documentation',
@@ -370,7 +370,7 @@ const TABS_DOCUMENTATION: DocTab[] = [
       'Copiar comandos de atualização, verificação e recuperação.'
     ],
     indicators: [
-      { label: 'Base de referência', desc: 'Conteúdo estático versionado com o frontend; valide contra o estado real do host quando houver mudanças.' }
+      { label: 'Base de referência', desc: 'Conteúdo versionado com o frontend; valide contra o estado real do host quando houver mudanças.' }
     ],
     apis: 'N/A (conteúdo estático no frontend).',
     permissions: 'Disponível para usuários autenticados.',
@@ -414,7 +414,7 @@ export const DocumentationTab: React.FC = () => {
               <p className="text-xs text-[#4A4A68] font-medium">samuelserver • Ubuntu 26.04.1 LTS (kernel 7.0.0) • Nginx • AdGuard Home • Docker/n8n • Tailscale • Opencode</p>
             </div>
           </div>
-          <span className="text-xs font-mono font-bold text-[#FF5A36] bg-[#FFF7E8] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] self-start sm:self-auto">Revisão: 2026-11-12</span>
+          <span className="text-xs font-mono font-bold text-[#FF5A36] bg-[#FFF7E8] border-2 border-[#1A1A2E] px-3 py-1.5 rounded-lg shadow-[2px_2px_0px_#1A1A2E] self-start sm:self-auto">Revisão: 2026-11-27</span>
         </div>
         <div className="flex items-center gap-2 flex-wrap pt-3 text-xs">
           <span className="text-[#4A4A68] font-bold mr-1">Seções:</span>
@@ -472,7 +472,7 @@ export const DocumentationTab: React.FC = () => {
               <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]"><span className="text-[#4A4A68] text-[10px] block font-bold">Tailscale</span><span className="text-[#00A6FB] font-bold text-sm">100.97.208.102</span></div>
               <div className="p-3 rounded-lg bg-[#FFF7E8] border border-[#1A1A2E]"><span className="text-[#4A4A68] text-[10px] block font-bold">SO / Kernel</span><span className="text-[#12B76A] font-bold text-[11px]">Ubuntu 26.04.1 • 7.0.0-43</span></div>
             </div>
-            <p className="text-xs text-[#4A4A68]"><b>Serviços monitorados:</b> OpenSSH (22), AdGuard Home (53,8081), Server Panel (3000), Nginx (80,443), Cron, systemd-resolved (53), UFW, Docker, Tailscale, n8n (5678, Docker). Itens não instalados não devem aparecer como ativos.</p>
+            <p className="text-xs text-[#4A4A68]"><b>Serviços monitorados:</b> OpenSSH (22), AdGuard Home (53, 8081), Server Panel (3000), Nginx (80, 443), Cron, systemd-resolved (53), UFW, Docker e Tailscale (além da aba n8n Workflows para o container Docker :5678 e card MikroTik RouterOS :8728).</p>
           </div>
         </div>
       )}

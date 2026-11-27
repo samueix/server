@@ -325,8 +325,6 @@ def get_network_info():
                 speed = int(stat.speed)
             except Exception:
                 speed = 0
-        if speed <= 0 and is_up:
-            speed = 1000
 
         interfaces.append({
             "nome": iface,

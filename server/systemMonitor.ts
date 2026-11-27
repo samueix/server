@@ -42,13 +42,41 @@ export function getOsInfo() {
     version = os.release();
   }
 
+  let firmware: string | null = null;
+  try {
+    firmware = fs.existsSync('/sys/firmware/efi') ? `UEFI (${os.arch()})` : `Legacy BIOS (${os.arch()})`;
+  } catch {}
+
+  const readDmi = (name: string): string | null => {
+    try {
+      const p = `/sys/class/dmi/id/${name}`;
+      if (fs.existsSync(p)) {
+        const val = fs.readFileSync(p, 'utf-8').trim();
+        if (val && !/^to be filled|default string|not specified|none$/i.test(val)) return val;
+      }
+    } catch {}
+    return null;
+  };
+
+  let ntpActive: boolean | null = null;
+  try {
+    const timedate = execSync('timedatectl show -p NTPSynchronized --value 2>/dev/null || true', { encoding: 'utf-8', timeout: 600 }).trim().toLowerCase();
+    if (timedate === 'yes') ntpActive = true;
+    else if (timedate === 'no') ntpActive = false;
+  } catch {}
+
   return {
-    hostname: os.hostname() || 'ubuntu-server',
+    hostname: os.hostname() || 'localhost',
     os: distro,
     os_version: version,
     kernel: os.release(),
     arch: os.arch(),
-    node_version: process.version
+    node_version: process.version,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+    firmware,
+    hardware_vendor: readDmi('sys_vendor') || readDmi('board_vendor'),
+    hardware_model: readDmi('board_name') || readDmi('product_name'),
+    ntp_synced: ntpActive
   };
 }
 
@@ -103,7 +131,19 @@ export function getCpuInfo() {
     : 0;
 
   const loadAvg = os.loadavg();
-  const freqMhz = cpus[0]?.speed || 2400;
+  const readFreqKhz = (file: string): number | null => {
+    try {
+      const p = `/sys/devices/system/cpu/cpu0/cpufreq/${file}`;
+      if (fs.existsSync(p)) {
+        const khz = parseInt(fs.readFileSync(p, 'utf-8').trim(), 10);
+        if (Number.isFinite(khz) && khz > 0) return Math.round(khz / 1000);
+      }
+    } catch {}
+    return null;
+  };
+  const freqMhz = readFreqKhz('scaling_cur_freq') ?? (cpus[0]?.speed || 0);
+  const minFreqMhz = readFreqKhz('cpuinfo_min_freq') ?? freqMhz;
+  const maxFreqMhz = readFreqKhz('cpuinfo_max_freq') ?? freqMhz;
 
   return {
     usage_percent: usagePercent,
@@ -116,8 +156,8 @@ export function getCpuInfo() {
     nucleos_uso: perCorePercent,
     frequency_mhz: {
       current: freqMhz,
-      min: Math.round(freqMhz * 0.4),
-      max: freqMhz
+      min: minFreqMhz,
+      max: maxFreqMhz
     },
     frequencia_mhz: freqMhz,
     load_average: {
@@ -341,28 +381,95 @@ export function getTemperatureInfo() {
 }
 
 export function getDiskInfo() {
-  let totalGb = 120.0;
-  let freeGb = 85.5;
-  let usedGb = 34.5;
-  let usagePercent = 28.7;
+  let totalGb = 0;
+  let freeGb = 0;
+  let usedGb = 0;
+  let usagePercent = 0;
+  let rootDevice: string | null = null;
+  let rootFsType: string | null = null;
+  const partitions: Array<{
+    device: string;
+    mount_point: string;
+    fs_type: string;
+    total_gb: number;
+    used_gb: number;
+    free_gb: number;
+    percent: number;
+  }> = [];
 
   try {
-    if (typeof (fs as any).statfsSync === 'function') {
+    const dfOut = execSync(
+      'df -B1 -P -T -x tmpfs -x devtmpfs -x squashfs -x overlay -x efivarfs 2>/dev/null || true',
+      { encoding: 'utf-8', timeout: 1200 }
+    );
+    const lines = dfOut.trim().split('\n').slice(1);
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 7) continue;
+      const [device, fsType, totalStr, usedStr, availStr, _pctStr, ...mountParts] = parts;
+      const mountPoint = mountParts.join(' ');
+      if (!device || device.startsWith('/dev/loop')) continue;
+      const totalBytes = Number(totalStr) || 0;
+      const usedBytes = Number(usedStr) || 0;
+      const freeBytes = Number(availStr) || 0;
+      if (totalBytes <= 0) continue;
+      const tGb = Math.round((totalBytes / (1024 ** 3)) * 10) / 10;
+      const uGb = Math.round((usedBytes / (1024 ** 3)) * 10) / 10;
+      const fGb = Math.round((freeBytes / (1024 ** 3)) * 10) / 10;
+      const pct = Math.round((usedBytes / totalBytes) * 1000) / 10;
+      partitions.push({
+        device,
+        mount_point: mountPoint,
+        fs_type: fsType,
+        total_gb: tGb,
+        used_gb: uGb,
+        free_gb: fGb,
+        percent: pct
+      });
+      if (mountPoint === '/') {
+        rootDevice = device;
+        rootFsType = fsType;
+        totalGb = tGb;
+        usedGb = uGb;
+        freeGb = fGb;
+        usagePercent = pct;
+      }
+    }
+  } catch {}
+
+  try {
+    if (totalGb === 0 && typeof (fs as any).statfsSync === 'function') {
       const stats = (fs as any).statfsSync('/');
       const bsize = stats.bsize;
       const total = stats.blocks * bsize;
       const free = stats.bavail * bsize;
-      const used = total - free;
+      const used = Math.max(0, total - free);
 
-      totalGb = Math.round((total / (1024 ** 3)) * 10) / 10;
-      freeGb = Math.round((free / (1024 ** 3)) * 10) / 10;
-      usedGb = Math.round((used / (1024 ** 3)) * 10) / 10;
-      usagePercent = Math.round((used / total) * 1000) / 10;
+      if (total > 0) {
+        totalGb = Math.round((total / (1024 ** 3)) * 10) / 10;
+        freeGb = Math.round((free / (1024 ** 3)) * 10) / 10;
+        usedGb = Math.round((used / (1024 ** 3)) * 10) / 10;
+        usagePercent = Math.round((used / total) * 1000) / 10;
+      }
     }
   } catch {}
 
+  if (partitions.length === 0 && totalGb > 0) {
+    partitions.push({
+      device: rootDevice || '/',
+      mount_point: '/',
+      fs_type: rootFsType || '—',
+      total_gb: totalGb,
+      used_gb: usedGb,
+      free_gb: freeGb,
+      percent: usagePercent
+    });
+  }
+
   return {
     root: {
+      device: rootDevice || partitions[0]?.device || null,
+      fs_type: rootFsType || partitions[0]?.fs_type || null,
       total_gb: totalGb,
       used_gb: usedGb,
       free_gb: freeGb,
@@ -370,6 +477,8 @@ export function getDiskInfo() {
       uso_percentual: usagePercent,
       mount_point: '/'
     },
+    partitions,
+    particoes: partitions,
     total_gb: totalGb,
     usado_gb: usedGb,
     livre_gb: freeGb,
@@ -587,67 +696,48 @@ export function getNetworkInfo() {
     });
   }
 
-  if (interfaces.length === 0) {
-    interfaces.push({
-      interface: 'eth0',
-      nome: 'eth0',
-      ip: '192.168.100.23',
-      ipv4: '192.168.100.23',
-      ipv6: primaryIpv6 || null,
-      mac: '5c:cd:5b:5a:74:45',
-      netmask: '255.255.255.0',
-      gateway: defaultGateway,
-      is_up: true,
-      status: 'UP',
-      speed_mbps: 1000,
-      mtu: 1500,
-      bytes_enviados: 25400000,
-      bytes_recebidos: 148900000,
-      pacotes_enviados: 28400,
-      pacotes_recebidos: 105200,
-      erros: 0
-    });
-    primaryIp = '192.168.100.23';
-  }
-
   if (!primaryInterface) {
-    const upWithIp = interfaces.find(i => i.status === 'UP' && i.ipv4);
-    primaryInterface = upWithIp?.nome || interfaces[0]?.nome || 'lo';
+    const upWithIp = interfaces.find(i => i.status === 'UP' && i.ipv4 && i.nome !== 'lo');
+    primaryInterface = upWithIp?.nome || interfaces.find(i => i.nome !== 'lo')?.nome || interfaces[0]?.nome || '';
   }
 
   // velocidade em bytes/s calculada por delta real de /proc/net/dev
   let download_bytes_sec = 0;
   let upload_bytes_sec = 0;
+  let totalRxBytes = 0;
+  let totalTxBytes = 0;
   try {
     const now = Date.now();
-    let totalRx = 0;
-    let totalTx = 0;
     const nicNames = new Set(Object.keys(nics || {}));
     for (const [name, c] of Object.entries(counters)) {
       if (name === 'lo') continue;
       if (nicNames.size > 0 && !nicNames.has(name)) continue;
-      totalRx += c.rxBytes;
-      totalTx += c.txBytes;
+      totalRxBytes += c.rxBytes;
+      totalTxBytes += c.txBytes;
     }
     if (lastNetSample.time > 0) {
       const dt = Math.max(0.2, (now - lastNetSample.time) / 1000);
-      if (totalRx >= lastNetSample.bytesRecv && totalTx >= lastNetSample.bytesSent) {
-        download_bytes_sec = Math.max(0, (totalRx - lastNetSample.bytesRecv) / dt);
-        upload_bytes_sec = Math.max(0, (totalTx - lastNetSample.bytesSent) / dt);
+      if (totalRxBytes >= lastNetSample.bytesRecv && totalTxBytes >= lastNetSample.bytesSent) {
+        download_bytes_sec = Math.max(0, (totalRxBytes - lastNetSample.bytesRecv) / dt);
+        upload_bytes_sec = Math.max(0, (totalTxBytes - lastNetSample.bytesSent) / dt);
       }
     }
-    lastNetSample = { time: now, bytesRecv: totalRx, bytesSent: totalTx };
+    lastNetSample = { time: now, bytesRecv: totalRxBytes, bytesSent: totalTxBytes };
   } catch {}
 
   const activeClients = getActiveNetworkClients();
 
   return {
     interfaces,
-    primary_interface: primaryInterface,
+    primary_interface: primaryInterface || null,
     primary_ip: primaryIp,
     primary_ipv6: primaryIpv6,
     download_bytes_sec: Math.round(download_bytes_sec),
     upload_bytes_sec: Math.round(upload_bytes_sec),
+    total: {
+      rx_bytes: totalRxBytes,
+      tx_bytes: totalTxBytes
+    },
     active_clients: activeClients,
     activeClients
   };
@@ -660,21 +750,22 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
   let other = 0;
 
   try {
-    // Tenta ler processos com 'ps' (inclui args/comando completo)
-    const output = execSync('ps -eo pid,user,%cpu,%mem,stat,etime,comm,args --sort=-%cpu', { encoding: 'utf-8', timeout: 2500, maxBuffer: 8 * 1024 * 1024 });
+    // Tenta ler processos reais com 'ps' (inclui RSS em KiB, args/comando completo e lstart/etime)
+    const output = execSync('ps -eo pid,user,%cpu,%mem,rss,stat,etime,comm,args --sort=-%cpu', { encoding: 'utf-8', timeout: 2500, maxBuffer: 8 * 1024 * 1024 });
     const lines = output.trim().split('\n').slice(1);
 
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
-      if (parts.length >= 7) {
+      if (parts.length >= 8) {
         const pid = parseInt(parts[0], 10);
         const user = parts[1] || '';
         const cpuPercent = parseFloat(parts[2]) || 0;
         const memPercent = parseFloat(parts[3]) || 0;
-        const statusRaw = parts[4] || '';
-        const timeStr = parts[5] || '';
-        const comm = parts[6] || '';
-        const argsStr = parts.slice(7).join(' ') || comm;
+        const rssKb = parseInt(parts[4], 10) || 0;
+        const statusRaw = parts[5] || '';
+        const timeStr = parts[6] || '';
+        const comm = parts[7] || '';
+        const argsStr = parts.slice(8).join(' ') || comm;
 
         let status = 'sleeping';
         if (statusRaw.startsWith('R')) { status = 'running'; running++; }
@@ -683,6 +774,8 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
         else if (statusRaw.startsWith('Z')) { status = 'zombie'; other++; }
         else if (statusRaw.startsWith('T') || statusRaw.startsWith('t')) { status = 'stopped'; other++; }
         else { status = statusRaw.toLowerCase() || 'sleeping'; other++; }
+
+        const memMb = Math.round((rssKb / 1024) * 10) / 10;
 
         processes.push({
           pid,
@@ -695,56 +788,17 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
           cpu_percentual: cpuPercent,
           memory_percent: memPercent,
           memoria_percentual: memPercent,
-          memory_mb: Math.round(memPercent * 0.1 * 1024 * 10) / 10,
-          memoria_mb: Math.round(memPercent * 0.1 * 1024 * 10) / 10,
+          memory_mb: memMb,
+          memoria_mb: memMb,
           prioridade: 0,
           threads: 1,
           tempo_execucao: timeStr,
           comando: argsStr,
-          inicio: '00:00:00'
+          inicio: timeStr || '--'
         });
       }
     }
   } catch {}
-
-  // Fallback caso ps não retorne
-  if (processes.length === 0) {
-    const defaultProcs = [
-      { pid: 1, name: 'systemd', user: 'root', cpu: 0.1, mem: 0.4, status: 'running', time: '12:45:10' },
-      { pid: process.pid, name: 'node (server)', user: 'ubuntu', cpu: 0.8, mem: 1.8, status: 'running', time: '01:20:05' },
-      { pid: 482, name: 'AdGuardHome', user: 'root', cpu: 0.4, mem: 2.1, status: 'running', time: '12:45:00' },
-      { pid: 512, name: 'nginx', user: 'www-data', cpu: 0.2, mem: 0.9, status: 'sleeping', time: '12:44:50' },
-      { pid: 580, name: 'sshd', user: 'root', cpu: 0.0, mem: 0.3, status: 'sleeping', time: '12:44:30' },
-      { pid: 610, name: 'systemd-resolved', user: 'systemd-resolve', cpu: 0.1, mem: 0.5, status: 'sleeping', time: '12:44:10' },
-      { pid: 720, name: 'cron', user: 'root', cpu: 0.0, mem: 0.2, status: 'sleeping', time: '12:43:00' },
-      { pid: 850, name: 'docker', user: 'root', cpu: 0.3, mem: 1.4, status: 'sleeping', time: '12:40:00' },
-      { pid: 1040, name: 'tailscaled', user: 'root', cpu: 0.2, mem: 0.8, status: 'sleeping', time: '12:30:00' }
-    ];
-
-    for (const p of defaultProcs) {
-      if (p.status === 'running') running++;
-      else sleeping++;
-      processes.push({
-        pid: p.pid,
-        name: p.name,
-        nome: p.name,
-        user: p.user,
-        usuario: p.user,
-        status: p.status,
-        cpu_percent: p.cpu,
-        cpu_percentual: p.cpu,
-        memory_percent: p.mem,
-        memoria_percentual: p.mem,
-        memory_mb: Math.round(p.mem * 40),
-        memoria_mb: Math.round(p.mem * 40),
-        prioridade: 0,
-        threads: 4,
-        tempo_execucao: p.time,
-        comando: `/usr/sbin/${p.name}`,
-        inicio: '10:00:00'
-      });
-    }
-  }
 
   if (sortBy === 'ram' || sortBy === 'memory') {
     processes.sort((a, b) => b.memory_percent - a.memory_percent);
@@ -770,20 +824,24 @@ export function getProcessesList(sortBy = 'cpu', limit = 30) {
 export function getFullSystemSnapshot() {
   const osInfo = getOsInfo();
   const procInfo = getProcessesList('cpu', 30);
+  const memInfo = getMemoryInfo();
+  const tempInfo = getTemperatureInfo();
+  const diskInfo = getDiskInfo();
+  const netInfo = getNetworkInfo();
   return {
     servidor: osInfo.hostname,
     sistema: osInfo,
     system: osInfo,
     uptime: getUptime(),
     cpu: getCpuInfo(),
-    memory: getMemoryInfo(),
-    memoria: getMemoryInfo(),
-    temperature: getTemperatureInfo(),
-    temperatura: getTemperatureInfo(),
-    disk: getDiskInfo(),
-    disco: getDiskInfo(),
-    network: getNetworkInfo(),
-    rede: getNetworkInfo(),
+    memory: memInfo,
+    memoria: memInfo,
+    temperature: tempInfo,
+    temperatura: tempInfo,
+    disk: diskInfo,
+    disco: diskInfo,
+    network: netInfo,
+    rede: netInfo,
     processes: procInfo.processes,
     processos: procInfo.processes,
     processes_summary: {

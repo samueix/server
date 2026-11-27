@@ -140,7 +140,7 @@ const NODES: ArchNode[] = [
     y: 164,
     w: 182,
     h: 64,
-    summary: 'Estrutura principal do painel React, navegação entre as 17 abas e barra superior.',
+    summary: 'Estrutura principal do painel React, navegação entre as 19 abas e barra superior.',
     details: [
       'Orquestra troca de abas sem recarregar a página.',
       'Exibe hostname, status do servidor, ações rápidas e controle de sessão.',
@@ -193,17 +193,17 @@ const NODES: ArchNode[] = [
   },
   {
     id: 'tab_network',
-    label: 'Rede, Ping & Trace',
-    file: 'NetworkTab • PingTab',
+    label: 'Rede, Ping & MikroTik',
+    file: 'NetworkTab • PingTab • MikroTikTab',
     layer: 'ui',
     x: 242,
     y: 252,
     w: 182,
     h: 64,
-    summary: 'Interfaces IPv4/IPv6, Wi-Fi, vendor MAC, ping contínuo e traceroute em tempo real.',
+    summary: 'Interfaces IPv4/IPv6, Wi-Fi, vendor MAC, ping/traceroute SSE e roteador MikroTik.',
     details: [
-      'PingTab recebe saltos ao vivo via SSE (/api/trace/stream).',
-      'NetworkTab gerencia interfaces, clientes conectados e consulta MAC vendor.',
+      'PingTab recebe saltos ao vivo via SSE (/api/trace/stream); NetworkTab lê Wi-Fi e ARP.',
+      'MikroTikTab monitora RB951G-2HnD (API 8728), topologia, DHCP fixo, DNS e firewall.',
     ],
   },
   {
@@ -268,17 +268,17 @@ const NODES: ArchNode[] = [
   },
   {
     id: 'tab_browser',
-    label: 'Navegador Remoto',
-    file: 'RemoteBrowserTab.tsx',
+    label: 'Navegador & Câmeras IP',
+    file: 'RemoteBrowserTab • CamerasTab',
     layer: 'ui',
     x: 40,
     y: 428,
     w: 182,
     h: 64,
-    summary: 'Viewport interativo com streaming ao vivo de uma sessão Chromium controlada no servidor.',
+    summary: 'Streaming Chromium remoto (CDP) e câmeras IP RTSP/ONVIF ao vivo sob demanda.',
     details: [
-      'Usa browserApi.ts para abrir sessão REST e conectar ao stream WS (/browser-ws).',
-      'Encaminha cliques, teclado, scroll e navegação de URLs.',
+      'RemoteBrowserTab abre sessão REST e stream WebSocket (/browser-ws).',
+      'CamerasTab exibe MJPEG via ffmpeg, áudio live, controles PTZ ONVIF e status LED/SD.',
     ],
   },
   {
@@ -298,17 +298,17 @@ const NODES: ArchNode[] = [
   },
   {
     id: 'tab_local',
-    label: 'Ferramentas Web & Docs',
+    label: 'Terminal & Docs',
     file: 'CommandsTab • DocumentationTab',
     layer: 'ui',
     x: 444,
     y: 428,
     w: 182,
     h: 64,
-    summary: 'Utilitários locais no navegador (sem chamada de shell/API) e manual técnico interativo.',
+    summary: 'Terminal bash interativo no servidor (admin) e manual técnico com diagrama vivo.',
     details: [
-      'CommandsTab ("Ferramentas Web") executa cálculos/conversões 100% no cliente.',
-      'DocumentationTab consolida arquitetura, manual das 17 abas e runbooks.',
+      'CommandsTab executa shell interativo no host via POST /api/terminal/exec.',
+      'DocumentationTab consolida arquitetura, manual das 19 abas e runbooks.',
     ],
   },
 
@@ -424,17 +424,17 @@ const NODES: ArchNode[] = [
   },
   {
     id: 'ts_net_logs',
-    label: 'Ping, Trace & Histórico',
-    file: 'pingMonitor • metricsHistory • logsMonitor',
+    label: 'Ping, Trace, Logs & MikroTik',
+    file: 'pingMonitor • logsMonitor • mikrotik',
     layer: 'server',
     x: 904,
     y: 252,
     w: 180,
     h: 64,
-    summary: 'Executa ICMP/MTR streaming, mantém série temporal de métricas e lê logs.',
+    summary: 'Executa ICMP/MTR streaming, coleta logs/journalctl e integra RouterOS API 8728.',
     details: [
-      'pingMonitor.ts transmite saltos progressivos via SSE.',
-      'metricsHistory.ts e logsMonitor.ts fornecem histórico e journalctl.',
+      'pingMonitor.ts transmite saltos via SSE; logsMonitor.ts lê journalctl/syslog.',
+      'mikrotik.ts e mikrotikMonitor.ts consultam interfaces, DHCP, Wi-Fi, firewall e banda.',
     ],
   },
   {
@@ -515,17 +515,17 @@ const NODES: ArchNode[] = [
   },
   {
     id: 'ts_browser',
-    label: 'Motor Playwright CDP',
-    file: 'browserSession.ts',
+    label: 'CDP, Terminal & Câmeras',
+    file: 'browserSession • terminalRunner • cameras',
     layer: 'server',
     x: 1000,
     y: 428,
     w: 280,
     h: 64,
-    summary: 'Gerencia instâncias Chromium headless via Playwright e streaming screencast CDP.',
+    summary: 'Gerencia Chromium CDP (/browser-ws), execução bash e streaming RTSP/ONVIF.',
     details: [
-      'Emite frames em tempo real pelo WebSocket /browser-ws.',
-      'Traduz eventos de mouse/teclado da UI para a página remota.',
+      'browserSession.ts emite frames JPEG e traduz mouse/teclado; terminalRunner.ts roda comandos admin.',
+      'cameras.ts e telegramBot.ts entregam MJPEG/áudio, PTZ ONVIF e notificações no Telegram.',
     ],
   },
 
@@ -541,7 +541,7 @@ const NODES: ArchNode[] = [
     h: 64,
     summary: 'Camada base do Ubuntu 26.04.1 LTS (samuelserver, kernel 7.0.0) lida pelo backend.',
     details: [
-      'Fornece telemetria de CPU, sensores térmicos, sockets, Wi-Fi e logs do sistema.',
+      'Fornece telemetria de CPU, sensores térmicos, partições, Wi-Fi e logs do sistema.',
       'Gerencia serviços via systemd (server-panel, AdGuardHome, nginx, tailscaled).',
     ],
   },
@@ -562,8 +562,8 @@ const NODES: ArchNode[] = [
   },
   {
     id: 'host_ai_browser',
-    label: 'Opencode CLI & Chromium',
-    file: 'binário opencode • Playwright Chromium',
+    label: 'Opencode, Chromium & ffmpeg',
+    file: 'opencode CLI • Playwright • ffmpeg/ONVIF',
     layer: 'host',
     x: 708,
     y: 702,
@@ -571,23 +571,23 @@ const NODES: ArchNode[] = [
     h: 64,
     summary: 'Executáveis locais acionados sob demanda pelo servidor Node.js.',
     details: [
-      'CLI `opencode` processa prompts e lista modelos disponíveis.',
-      'Chromium headless rende páginas remotas controladas pela aba Navegador Remoto.',
+      'CLI `opencode` processa prompts; Chromium headless atende o Navegador Remoto.',
+      'ffmpeg converte RTSP para MJPEG/áudio ao vivo sob demanda para CamerasTab.',
     ],
   },
   {
     id: 'host_external',
-    label: 'Persistência & API Externa',
-    file: 'data/*.json • api.macvendors.com',
+    label: 'Banco Local, MikroTik & APIs',
+    file: 'data/*.db/*.json • RouterOS 8728 • RTSP',
     layer: 'host',
     x: 1000,
     y: 702,
     w: 280,
     h: 64,
-    summary: 'Armazenamento local em disco e consulta externa de fabricantes MAC.',
+    summary: 'Persistência local SQLite/JSON, roteador RB951G-2HnD e serviços externos.',
     details: [
-      'data/ guarda sessões Opencode, tokens e análises persistidas.',
-      'api.macvendors.com resolve OUI de dispositivos na rede LAN.',
+      'data/ guarda histórico MikroTik, sessões Opencode, análises DNS e auditoria.',
+      'Integra RouterOS API 8728, câmeras RTSP/ONVIF, Bot Telegram e api.macvendors.com.',
     ],
   },
   {
@@ -888,14 +888,14 @@ const MERMAID_SOURCE = `flowchart TD
     login["Tela de Login\\n[LoginScreen.tsx]"]
     vault["Cofre & Ajustes\\n[SecurityVaultContext • SettingsModal]"]
     overview["Visão Geral & Monitor\\n[OverviewTab • MonitoringTab]"]
-    network["Rede, Ping & Trace\\n[NetworkTab • PingTab]"]
+    network["Rede, Ping & MikroTik\\n[NetworkTab • PingTab • MikroTikTab]"]
     system["Sistema, Serviços & Procs\\n[SystemTab • ServicesTab • ProcessesTab]"]
     adguard_ui["AdGuard DNS & IA\\n[AdGuardHomeTab • AdGuardAiDashboard]"]
     logs_n8n["Logs & Workflows\\n[LogsTab • N8nTab]"]
     opencode_ui["Lux e Opencode\\n[OpencodeTab.tsx]"]
-    browser_ui["Navegador Remoto\\n[RemoteBrowserTab.tsx]"]
+    browser_ui["Navegador & Câmeras IP\\n[RemoteBrowserTab • CamerasTab]"]
     sec_files["Arquivos, Seg. & Senhas\\n[FilesTab • SecurityTab • CredentialsTab]"]
-    local_ui["Ferramentas Web & Docs\\n[CommandsTab • DocumentationTab]"]
+    local_ui["Terminal & Docs\\n[CommandsTab • DocumentationTab]"]
   end
 
   subgraph group_client["Serviços Frontend (src/services/)"]
@@ -909,20 +909,20 @@ const MERMAID_SOURCE = `flowchart TD
   subgraph group_server["Servidor Node.js / Express (server.ts + server/)"]
     ts_api["HTTP / SSE / WS Server (:3000)\\n[server.ts • requireAdminAuth]"]
     ts_sys["Sistema, Procs & Wi-Fi\\n[systemMonitor • servicesMonitor • wifiMonitor]"]
-    ts_net["Ping, Trace & Histórico\\n[pingMonitor • metricsHistory • logsMonitor]"]
+    ts_net["Ping, Trace, Logs & MikroTik\\n[pingMonitor • logsMonitor • mikrotik • mikrotikMonitor]"]
     ts_sec["Cofre, Audit & Segurança\\n[credentialsManager • auditLog • securityMonitor]"]
     ts_files["Explorador de Arquivos\\n[fileExplorer.ts]"]
     ts_opencode["Agente Lux / Opencode\\n[opencode.ts]"]
-    ts_db[("Banco Análises DNS\\n[db.ts]")]
-    ts_integ["Clientes AdGuard & n8n\\n[adguardClient.ts • n8nClient.ts]"]
-    ts_browser["Motor Playwright CDP\\n[browserSession.ts]"]
+    ts_db[("SQLite Análises & MikroTik\\n[db.ts]")]
+    ts_integ["AdGuard, n8n & Telegram\\n[adguardClient • n8nClient • telegramBot]"]
+    ts_browser["CDP, Terminal & Câmeras\\n[browserSession • terminalRunner • cameras]"]
   end
 
   subgraph group_host["Host Ubuntu (samuelserver), Daemons & Fallback"]
     linux["Kernel & Daemons Linux\\n[/proc • systemctl • journalctl • ufw • ss]"]
     daemons["AdGuard Home & n8n Docker\\n[AdGuard :53/:8081 • n8n :5678]"]
-    cli_bin["Opencode CLI & Chromium\\n[binário opencode • Playwright]"]
-    ext[("Persistência & API Externa\\n[data/*.json • api.macvendors.com]")]
+    cli_bin["Opencode, Chromium & ffmpeg\\n[opencode • Playwright • RTSP/ONVIF]"]
+    ext[("Persistência, MikroTik & APIs\\n[data/*.db/*.json • RouterOS 8728 • macvendors]")]
     py_api["FastAPI Fallback Opcional (:8000)\\n[backend/ main.py • auth • monitor • adguard • n8n]"]
   end
 
@@ -1123,7 +1123,7 @@ export const ArchitectureDiagram: React.FC = () => {
               Diagrama de Arquitetura do Painel (samuelserver)
             </h3>
             <p className="text-xs text-[#4A4A68] font-medium">
-              Mapeamento fiel do código atual: Proxy Nginx, 17 abas React, serviços client, servidor Node.js (:3000) e daemons Ubuntu.
+              Mapeamento fiel do código atual: Proxy Nginx, 19 abas React, serviços client, servidor Node.js (:3000) e daemons Ubuntu.
             </p>
           </div>
         </div>
@@ -1273,11 +1273,11 @@ export const ArchitectureDiagram: React.FC = () => {
               strokeWidth="2"
             />
             <text x="40" y="139" fill="#FFFFFF" fontSize="12" fontWeight="800" fontFamily="Bricolage Grotesque, sans-serif">
-              DASHBOARD UI — 17 ABAS REAIS [src/]
+              DASHBOARD UI — 19 ABAS REAIS [src/]
             </text>
             <rect x="40" y="506" width="584" height="24" rx="6" fill="#E0F4FE" stroke="#1A1A2E" strokeWidth="1.5" />
             <text x="332" y="522" textAnchor="middle" fill="#026AA2" fontSize="10.5" fontWeight="700" fontFamily="IBM Plex Sans, sans-serif">
-              Nota: CommandsTab ("Ferramentas Web") executa 100% local no navegador sem chamada de API/shell
+              Terminal & Shell (CommandsTab) envia comandos via POST /api/terminal/exec (admin)
             </text>
           </g>
 

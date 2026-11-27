@@ -391,9 +391,9 @@ export function createApp() {
     let tempC: number | null = null;
     let uptimeHuman = '';
     let uptimeSeconds = 0;
-    let ipv4 = '192.168.100.23';
-    let ipv6 = '2804:2d5c:a2:512d:5ecd:5bff:fe5a:7445';
-    let primaryInterface = 'wlo1';
+    let ipv4 = '';
+    let ipv6 = '';
+    let primaryInterface = '';
     let osName = 'Linux';
     let osVersion = '';
 
@@ -496,7 +496,7 @@ export function createApp() {
     res.json({ success: true, config: updated });
   });
 
-  // MikroTik (read-only + inventário)
+  // MikroTik (leitura, diagnósticos e controle de dispositivos)
   app.get('/api/mikrotik/status', requireUserOrAdminAuth, async (_req, res) => {
     try { const live = await mikrotikGetStatus(); res.json({ ...live, devices: listMikrotikDevices(), events: listMikrotikEvents(50), snapshots: listMikrotikSnapshots(60) }); }
     catch (e:any) { const cached = getMikrotikCached(); if (cached) return res.json({ ...cached, stale:true, error:e?.message }); res.status(500).json({ ok:false, error: e?.message || String(e) }); }
@@ -506,19 +506,21 @@ export function createApp() {
   app.get('/api/mikrotik/devices', requireUserOrAdminAuth, (_req,res)=> res.json({ ok:true, devices:listMikrotikDevices() }));
   app.get('/api/mikrotik/events', requireUserOrAdminAuth, (req,res)=> res.json({ ok:true, events:listMikrotikEvents(Math.min(500, Number(req.query.limit)||100)) }));
   app.get('/api/mikrotik/snapshots', requireUserOrAdminAuth, (req,res)=> res.json({ ok:true, snapshots:listMikrotikSnapshots(Math.min(500, Number(req.query.limit)||120)) }));
-  app.post('/api/mikrotik/devices/:mac/nickname', requireAdminAuth, (req,res)=>{ try { setMikrotikDeviceNickname(req.params.mac, String(req.body?.nickname||'')); logAudit({ actor: (req as any).user || 'admin', action: 'mikrotik.nickname', target: req.params.mac, details: String(req.body?.nickname||''), status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json({ok:true}); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
-  app.post('/api/mikrotik/devices/:mac/block', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikBlockDevice(req.params.mac); addMikrotikEvent({ event_type:'block', mac:req.params.mac, details:'Bloqueado via painel' }); logAudit({ actor:(req as any).user||'admin', action:'mikrotik.block', target:req.params.mac, details:'block', status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
-  app.post('/api/mikrotik/devices/:mac/unblock', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikUnblockDevice(req.params.mac); addMikrotikEvent({ event_type:'unblock', mac:req.params.mac, details:'Desbloqueado via painel' }); logAudit({ actor:(req as any).user||'admin', action:'mikrotik.unblock', target:req.params.mac, details:'unblock', status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/devices/:mac/nickname', requireAdminAuth, (req,res)=>{ try { const actor = (req as any).user?.username || 'admin'; const role = (req as any).user?.role || 'admin'; setMikrotikDeviceNickname(req.params.mac, String(req.body?.nickname||'')); logAudit({ actor, action: 'mikrotik.nickname', target: req.params.mac, details: String(req.body?.nickname||''), status:'success', role, ip:req.ip||'' }); res.json({ok:true}); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/devices/:mac/block', requireAdminAuth, async (req,res)=>{ try { const actor = (req as any).user?.username || 'admin'; const role = (req as any).user?.role || 'admin'; const r=await mikrotikBlockDevice(req.params.mac); addMikrotikEvent({ event_type:'block', mac:req.params.mac, details:'Bloqueado via painel' }); logAudit({ actor, action:'mikrotik.block', target:req.params.mac, details:'block', status:'success', role, ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/devices/:mac/unblock', requireAdminAuth, async (req,res)=>{ try { const actor = (req as any).user?.username || 'admin'; const role = (req as any).user?.role || 'admin'; const r=await mikrotikUnblockDevice(req.params.mac); addMikrotikEvent({ event_type:'unblock', mac:req.params.mac, details:'Desbloqueado via painel' }); logAudit({ actor, action:'mikrotik.unblock', target:req.params.mac, details:'unblock', status:'success', role, ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
   app.post('/api/mikrotik/ping', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikRunPing(String(req.body?.target||''), Number(req.body?.count||4)); res.json(r); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
   app.post('/api/mikrotik/traceroute', requireAdminAuth, async (req,res)=>{ try { res.json(await mikrotikTraceroute(String(req.body?.target||''))); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
   app.post('/api/mikrotik/dns', requireAdminAuth, async (req,res)=>{ try { res.json(await mikrotikDnsLookup(String(req.body?.name||''))); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
   app.get('/api/mikrotik/dns-settings', requireUserOrAdminAuth, async (_req,res)=>{ try { res.json(await mikrotikGetDnsSettings()); } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)});} });
   app.post('/api/mikrotik/dns-settings', requireAdminAuth, async (req,res)=>{
     try {
+      const actor = (req as any).user?.username || 'admin';
+      const role = (req as any).user?.role || 'admin';
       const servers = Array.isArray(req.body?.servers) ? req.body.servers.map((s:any)=>String(s)) : String(req.body?.servers||'').split(',').map(s=>s.trim()).filter(Boolean);
       const r = await mikrotikSetDnsServers(servers, { dhcpDns: String(req.body?.dhcpDns||''), applyDhcp: req.body?.applyDhcp !== false });
       addMikrotikEvent({ event_type:'dns_config', details:`DNS do roteador -> ${servers.join(',')}` });
-      logAudit({ actor:(req as any).user||'admin', action:'mikrotik.dns_config', target:'dns', details:`servers=${servers.join(',')} previous=${r.previous?.servers||''}`, status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' });
+      logAudit({ actor, action:'mikrotik.dns_config', target:'dns', details:`servers=${servers.join(',')} previous=${r.previous?.servers||''}`, status:'success', role, ip:req.ip||'' });
       res.json(r);
     } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)}); }
   });
@@ -533,76 +535,7 @@ export function createApp() {
       res.json(payload);
     } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)}); }
   });
-  app.get('/api/mikrotik/export', requireUserOrAdminAuth, async (req,res)=>{
-    try {
-      const format = String(req.query.format||'json').toLowerCase() === 'csv' ? 'csv' : 'json';
-      const scope = String(req.query.scope||'devices').toLowerCase();
-      let live: any;
-      let stale = false;
-      try { live = await mikrotikGetStatus(); }
-      catch (e:any) { live = getMikrotikCached(); if (!live) throw e; stale = true; }
-      const report: any = {
-        ok: true,
-        generatedAt: new Date().toISOString(),
-        host: live.host,
-        identity: live.identity,
-        resource: live.resource,
-        routerboard: live.routerboard,
-        addresses: live.addresses || [],
-        interfaces: live.interfaces || [],
-        leases: live.leases || [],
-        arp: live.arp || [],
-        wifi: live.wifi || [],
-        firewall: live.firewall || [],
-        routes: live.routes || [],
-        nat: live.nat || [],
-        dhcpServers: live.dhcpServers || [],
-        bridgePorts: live.bridgePorts || [],
-        bridgeHosts: live.bridgeHosts || [],
-        services: live.services || [],
-        dns: live.dns,
-        devices: listMikrotikDevices(),
-        events: listMikrotikEvents(500),
-        snapshots: listMikrotikSnapshots(120).map((s:any) => {
-          const res = s.resource || {};
-          const total = Number(res['total-memory'] || 0);
-          const free = Number(res['free-memory'] || 0);
-          const ifs = Array.isArray(s.interfaces) ? s.interfaces : [];
-          const rx = ifs.reduce((a:number, i:any) => a + Number(i['rx-byte'] || 0), 0);
-          const tx = ifs.reduce((a:number, i:any) => a + Number(i['tx-byte'] || 0), 0);
-          return {
-            ts: s.ts,
-            cpu_load: Number(res['cpu-load'] || 0),
-            ram_pct: total ? Math.round(((total - free) / total) * 100) : 0,
-            wifi_clients: (s.wifi || []).length,
-            dhcp_leases: (s.leases || []).length,
-            arp_entries: (s.arp || []).length,
-            rx_bytes: rx,
-            tx_bytes: tx
-          };
-        }),
-        stale
-      };
-      const stamp = new Date().toISOString().slice(0, 10);
-      const role = (req as any).auth?.role || 'user';
-      logAudit({ actor: (req as any).user || role, action: 'mikrotik.export', target: scope, details: `format=${format}${stale ? ' (stale)' : ''}`, status: 'success', role, ip: req.ip || '' });
-      if (format === 'csv') {
-        const scopeMap: Record<string,string> = { devices:'devices', leases:'leases', arp:'arp', wifi:'wifi', interfaces:'interfaces', firewall:'firewall', routes:'routes', nat:'nat', dhcp:'dhcpServers', dhcpservers:'dhcpServers', events:'events', snapshots:'snapshots', bridgeports:'bridgePorts', bridgehosts:'bridgeHosts', services:'services' };
-        const key = scopeMap[scope] || 'devices';
-        const rows: any[] = Array.isArray(report[key]) ? report[key] : [];
-        const headers = Array.from(new Set(rows.flatMap((r:any) => Object.keys(r || {}))));
-        const esc = (v:any) => { const s = v == null ? '' : String(v); return /[",\r\n;]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
-        const csv = [headers.join(','), ...rows.map((r:any) => headers.map(h => esc(r?.[h])).join(','))].join('\r\n');
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename="mikrotik-${key}-${stamp}.csv"`);
-        return res.send(csv);
-      }
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="mikrotik-report-${stamp}.json"`);
-      return res.send(JSON.stringify(report, null, 2));
-    } catch(e:any){ res.status(500).json({ok:false,error:e?.message||String(e)}); }
-  });
-  app.post('/api/mikrotik/devices/:mac/make-static', requireAdminAuth, async (req,res)=>{ try { const r=await mikrotikMakeLeaseStatic(req.params.mac, String(req.body?.address||''), String(req.body?.comment||'')); addMikrotikEvent({ event_type:'dhcp_static', mac:req.params.mac, ip:req.body?.address, details:'Lease tornado estático' }); logAudit({ actor:(req as any).user||'admin', action:'mikrotik.dhcp_static', target:req.params.mac, details:String(req.body?.address||''), status:'success', role:(req as any).auth?.role||'admin', ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
+  app.post('/api/mikrotik/devices/:mac/make-static', requireAdminAuth, async (req,res)=>{ try { const actor = (req as any).user?.username || 'admin'; const role = (req as any).user?.role || 'admin'; const r=await mikrotikMakeLeaseStatic(req.params.mac, String(req.body?.address||''), String(req.body?.comment||'')); addMikrotikEvent({ event_type:'dhcp_static', mac:req.params.mac, ip:req.body?.address, details:'Lease tornado estático' }); logAudit({ actor, action:'mikrotik.dhcp_static', target:req.params.mac, details:String(req.body?.address||''), status:'success', role, ip:req.ip||'' }); res.json(r); } catch(e:any){ res.status(400).json({ok:false,error:e?.message||String(e)});} });
 
   // Câmeras (ao vivo, sem gravação no servidor)
   app.get('/api/cameras', requireUserOrAdminAuth, async (_req, res) => {
@@ -2074,7 +2007,9 @@ export function createApp() {
       '/api/security',
       '/api/telegram',
       '/api/terminal',
-      '/api/browser'
+      '/api/browser',
+      '/api/mikrotik',
+      '/api/cameras'
     ];
     if (internalPaths.some(p => req.path.startsWith(p))) {
       return next();
@@ -2237,7 +2172,7 @@ export function createApp() {
       return res.json(getNetworkInfo());
     }
     if (subPath === 'processes') {
-      const sortBy = (req.query.sort as string) || 'cpu';
+      const sortBy = (req.query.sort_by as string) || (req.query.sort as string) || 'cpu';
       const limit = Math.min(500, Math.max(1, parseInt((req.query.limit as string) || '30', 10) || 30));
       const resData = getProcessesList(sortBy, limit);
       const procsList = Array.isArray(resData) ? resData : (resData.processes || []);

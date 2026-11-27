@@ -25,7 +25,7 @@ import {
 import { NetworkTelemetry, lookupMacVendor, getWifiInfo, scanWifi, connectWifi, WifiInfoResponse } from '../../services/api';
 import { HistoryPoint, ActiveNetworkClient } from '../../types';
 import { SparklineChart } from '../SparklineChart';
-import { SERVER_IPV4, SERVER_IPV6, SSH_USER, getDynamicSshCommand } from '../../config';
+import { SSH_USER, getDynamicSshCommand } from '../../config';
 import { getAdGuardStats } from '../../services/adguardService';
 
 interface NetworkTabProps {
@@ -68,6 +68,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPass, setWifiPass] = useState('');
   const [wifiBusy, setWifiBusy] = useState(false);
+  const [wifiConfirmOpen, setWifiConfirmOpen] = useState(false);
 
   // Cache de fabricantes de MAC resolvidos automaticamente via API pública (api.macvendors.com)
   const [vendorMap, setVendorMap] = useState<Record<string, { vendor: string; isRandomized: boolean; status: 'loading' | 'found' | 'not_found' }>>({
@@ -108,7 +109,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                   ipv4: validIp,
                   status: 'ONLINE',
                   consultas: Number(c.count || 0),
-                  interface: 'enp2s0'
+                  interface: undefined
                 });
               } else {
                 // Caso 2: dicionário chave-valor { "192.168.100.x": 17 }
@@ -129,7 +130,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                     ipv4: ip,
                     status: 'ONLINE',
                     consultas: Number(count),
-                    interface: 'enp2s0'
+                    interface: undefined
                   });
                 }
               }
@@ -165,9 +166,13 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
 
   useEffect(() => { fetchWifi(false); const t = setInterval(() => fetchWifi(false), 30000); return () => clearInterval(t); }, []);
 
-  const handleWifiConnect = async () => {
+  const handleWifiConnect = () => {
     if (!wifiSsid.trim()) { setWifiMsg('Informe o SSID.'); return; }
-    if (!confirm(`Salvar e aplicar Wi-Fi "${wifiSsid}" via netplan? Se você estiver acessando pelo Wi-Fi, a conexão pode cair brevemente. Se o Wi-Fi não subir, conecte o cabo Ethernet (enp1s0, DHCP) para acessar o painel e ajustar.`)) return;
+    setWifiConfirmOpen(true);
+  };
+
+  const executeWifiConnect = async () => {
+    setWifiConfirmOpen(false);
     try {
       setWifiBusy(true); setWifiMsg(null);
       const res = await connectWifi(wifiSsid.trim(), wifiPass);
@@ -183,11 +188,11 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
   const netDownHistory = useMemo(() => history.map(h => h.netDown || 0), [history]);
   const netUpHistory = useMemo(() => history.map(h => h.netUp || 0), [history]);
 
-  // IPs dinâmicos do servidor (nunca fixa o IPv6 antigo)
-  const serverIpv4 = network?.primaryIp || SERVER_IPV4;
-  const serverIpv6 = network?.primaryIpv6 || (interfaces.find(i => i.ipv6)?.ipv6) || SERVER_IPV6;
-  const sshIpv4Command = `ssh ${SSH_USER}@${serverIpv4}`;
-  const sshIpv6Command = getDynamicSshCommand(serverIpv6);
+  // IPs dinâmicos do servidor
+  const serverIpv4 = network?.primaryIp || interfaces.find(i => i.status === 'UP' && i.ipv4 && i.ipv4 !== '127.0.0.1')?.ipv4 || '';
+  const serverIpv6 = network?.primaryIpv6 || (interfaces.find(i => i.ipv6)?.ipv6) || '';
+  const sshIpv4Command = serverIpv4 ? `ssh ${SSH_USER}@${serverIpv4}` : '';
+  const sshIpv6Command = serverIpv6 ? getDynamicSshCommand(serverIpv6) : '';
 
   const copyTextSafe = async (text: string) => {
     try {
@@ -479,21 +484,23 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                 IPv4 atual do servidor
               </span>
               <button
-                onClick={() => copyToClipboard(serverIpv4, 'ipv4-addr')}
-                className="p-1 rounded bg-white text-[#1A1A2E] hover:bg-[#FF5A36] hover:text-white border border-[#1A1A2E] transition"
+                onClick={() => serverIpv4 && copyToClipboard(serverIpv4, 'ipv4-addr')}
+                disabled={!serverIpv4}
+                className="p-1 rounded bg-white text-[#1A1A2E] hover:bg-[#FF5A36] hover:text-white border border-[#1A1A2E] transition disabled:opacity-40"
                 title="Copiar IPv4"
               >
                 {copiedKey === 'ipv4-addr' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
             </div>
-            <div className="text-base font-bold text-[#1A1A2E] font-mono select-all tabular-nums">{serverIpv4}</div>
+            <div className="text-base font-bold text-[#1A1A2E] font-mono select-all tabular-nums">{serverIpv4 || 'Não disponível'}</div>
             
             {/* Comando SSH IPv4 */}
             <div className="pt-2 border-t border-[#1A1A2E]/20 flex items-center justify-between gap-2">
-              <code className="text-xs text-[#FF5A36] font-mono font-bold truncate">{sshIpv4Command}</code>
+              <code className="text-xs text-[#FF5A36] font-mono font-bold truncate">{sshIpv4Command || 'SSH IPv4 indisponível'}</code>
               <button
-                onClick={() => copyToClipboard(sshIpv4Command, 'ssh-ipv4')}
-                className="p-1 text-[#1A1A2E] hover:text-[#FF5A36] shrink-0"
+                onClick={() => sshIpv4Command && copyToClipboard(sshIpv4Command, 'ssh-ipv4')}
+                disabled={!sshIpv4Command}
+                className="p-1 text-[#1A1A2E] hover:text-[#FF5A36] shrink-0 disabled:opacity-40"
                 title="Copiar comando SSH IPv4"
               >
                 {copiedKey === 'ssh-ipv4' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
@@ -511,21 +518,23 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                 <span className="text-[11px] text-[#4A4A68] font-semibold">(dinâmico)</span>
               </div>
               <button
-                onClick={() => copyToClipboard(serverIpv6, 'ipv6-addr')}
-                className="p-1 rounded bg-white text-[#1A1A2E] hover:bg-[#FF5A36] hover:text-white border border-[#1A1A2E] transition"
+                onClick={() => serverIpv6 && copyToClipboard(serverIpv6, 'ipv6-addr')}
+                disabled={!serverIpv6}
+                className="p-1 rounded bg-white text-[#1A1A2E] hover:bg-[#FF5A36] hover:text-white border border-[#1A1A2E] transition disabled:opacity-40"
                 title="Copiar IPv6"
               >
                 {copiedKey === 'ipv6-addr' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
             </div>
-            <div className="text-xs font-bold text-[#00A6FB] font-mono break-all select-all tabular-nums">{serverIpv6}</div>
+            <div className="text-xs font-bold text-[#00A6FB] font-mono break-all select-all tabular-nums">{serverIpv6 || 'Não disponível'}</div>
 
             {/* Comando SSH IPv6 */}
             <div className="pt-2 border-t border-[#1A1A2E]/20 flex items-center justify-between gap-2">
-              <code className="text-[11px] text-[#00A6FB] font-mono font-bold truncate">{sshIpv6Command}</code>
+              <code className="text-[11px] text-[#00A6FB] font-mono font-bold truncate">{sshIpv6Command || 'SSH IPv6 indisponível'}</code>
               <button
-                onClick={() => copyToClipboard(sshIpv6Command, 'ssh-ipv6')}
-                className="p-1 text-[#1A1A2E] hover:text-[#FF5A36] shrink-0"
+                onClick={() => sshIpv6Command && copyToClipboard(sshIpv6Command, 'ssh-ipv6')}
+                disabled={!sshIpv6Command}
+                className="p-1 text-[#1A1A2E] hover:text-[#FF5A36] shrink-0 disabled:opacity-40"
                 title="Copiar comando SSH IPv6"
               >
                 {copiedKey === 'ssh-ipv6' ? <Check className="w-3.5 h-3.5 text-[#12B76A]" /> : <Copy className="w-3.5 h-3.5" />}
@@ -776,7 +785,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
           <ul className="text-xs text-[#4A4A68] space-y-1 list-disc pl-5">
             <li>Gerenciador: <b>{wifiInfo?.reconnection?.manager || 'wpa_supplicant + systemd-networkd (netplan)'}</b>. Wi-Fi persistido no netplan: <b>{wifiInfo?.reconnection?.netplan_persistent ? 'sim' : 'verificar'}</b> — se o sinal cair, o cliente Wi-Fi tenta reconectar automaticamente.</li>
             <li>Ethernet <b>enp1s0</b> com DHCP opcional no netplan: estado atual {wifiInfo?.ethernet?.connected ? 'CONECTADO (cabo ativo)' : 'sem cabo/link'}. Se o Wi-Fi falhar, conecte o cabo no roteador/switch: a interface cabeada sobe por DHCP e você acessa o painel para ajustar o Wi-Fi.</li>
-            <li>Fluxo seguro: conecte o cabo → acesse <b>http://192.168.100.23</b> (ou Tailscale) → selecione SSID e senha abaixo → aplique → confirme conexão → remova o cabo. Aplicar pode causar breve queda se você estiver no Wi-Fi.</li>
+            <li>Fluxo seguro: conecte o cabo → acesse o painel pelo IP da LAN (ou Tailscale) → selecione SSID e senha abaixo → aplique → confirme conexão → remova o cabo. Aplicar pode causar breve queda se você estiver no Wi-Fi.</li>
           </ul>
         </div>
 
@@ -787,6 +796,17 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
             <input value={wifiPass} onChange={e=>setWifiPass(e.target.value)} placeholder="Senha Wi-Fi" type="password" className="px-3 py-2 rounded-md bg-[#FFF7E8]/50 border-2 border-[#1A1A2E] text-xs font-mono" />
             <button onClick={handleWifiConnect} disabled={wifiBusy} className="px-3 py-2 rounded-md bg-[#00A6FB] text-white font-bold text-xs border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] hover:bg-[#0284c7] disabled:opacity-50">{wifiBusy ? 'Aplicando...' : 'Salvar e conectar'}</button>
           </div>
+          {wifiConfirmOpen && (
+            <div className="p-3 rounded-lg bg-[#FEF0C7] border-2 border-[#1A1A2E] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-[#7A2E0E]">
+                Aplicar Wi-Fi <b>"{wifiSsid}"</b> via netplan? Se você estiver acessando pelo Wi-Fi, a conexão pode cair brevemente.
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button type="button" onClick={() => setWifiConfirmOpen(false)} className="px-2.5 py-1 rounded bg-white border border-[#1A1A2E] font-bold">Cancelar</button>
+                <button type="button" onClick={executeWifiConnect} className="px-2.5 py-1 rounded bg-[#FF5A36] text-white border border-[#1A1A2E] font-bold">Confirmar e aplicar</button>
+              </div>
+            </div>
+          )}
           <p className="text-[11px] text-[#4A4A68]">Dica: escolha uma rede vizinha listada abaixo para preencher o SSID. A senha não é exibida nem armazenada em logs/commits pelo painel.</p>
           {wifiMsg && <div className="text-xs font-mono p-2 rounded bg-[#FFF7E8] border border-[#1A1A2E]">{wifiMsg}</div>}
         </div>
@@ -974,7 +994,7 @@ export const NetworkTab: React.FC<NetworkTabProps> = ({
                         )}
                       </td>
                       <td className="py-2.5 px-3 text-[#4A4A68] font-semibold">
-                        {client.interface || 'enp2s0'}
+                        {client.interface || '—'}
                       </td>
                       <td className="py-2.5 px-3 text-right font-bold text-[#FF5A36] tabular-nums">
                         {client.consultas !== undefined ? client.consultas.toLocaleString() : '--'}

@@ -45,8 +45,8 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
   const tempHistory = useMemo(() => history.map(h => h.temp || 0).filter(t => t > 0), [history]);
 
   const cpuPercent = server?.cpu?.uso_percentual ?? 0;
-  const cpuPhysical = server?.cpu?.nucleos_fisicos ?? 2;
-  const cpuLogical = server?.cpu?.nucleos_logicos ?? 4;
+  const cpuPhysical = server?.cpu?.nucleos_fisicos ?? 0;
+  const cpuLogical = server?.cpu?.nucleos_logicos ?? 0;
   const cpuFreq = server?.cpu?.frequencia_mhz;
   const load1 = server?.carga?.["1_minuto"] ?? 0;
   const load5 = server?.carga?.["5_minutos"] ?? 0;
@@ -282,7 +282,7 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs font-bold text-[#1A1A2E] flex items-center gap-1.5 font-sans">
               <Cpu className="w-3.5 h-3.5 text-[#FF5A36]" />
-              Processamento por Núcleo Individual ({server?.cpu?.nucleos_uso?.length || cpuLogical} núcleos):
+              Processamento por Núcleo Individual ({server?.cpu?.nucleos_uso?.length || cpuLogical || 0} núcleos):
             </span>
             <span className="text-[11px] font-mono text-[#4A4A68]">
               Média global: {cpuPercent.toFixed(1)}%
@@ -298,48 +298,57 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
             height={186}
           />
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-mono text-xs">
-            {Array.from({ length: Math.max(server?.cpu?.nucleos_uso?.length || 0, coresList.length, cpuLogical || 4) }).map((_, idx) => {
-              const coreUsage = server?.cpu?.nucleos_uso && server.cpu.nucleos_uso[idx] !== undefined
-                ? server.cpu.nucleos_uso[idx]
-                : Math.min(100, Math.max(0, Math.round((cpuPercent + (idx % 2 === 0 ? (idx * 2) : -(idx * 1.5))) * 10) / 10));
-              
-              const coreTempObj = coresList.find(c => c.coreIndex === idx || c.nome.toLowerCase() === `core ${idx}`);
-              const coreTemp = coreTempObj ? coreTempObj.temperatura_c : (tempCurrent ? Math.round((tempCurrent + (idx * 0.8)) * 10) / 10 : null);
-
-              const usageColor = coreUsage >= 85 ? 'bg-[#F04438]' : coreUsage >= 65 ? 'bg-[#F79009]' : 'bg-[#FF5A36]';
-              const tempBadgeColor = coreTemp !== null
-                ? (coreTemp >= 75 ? 'bg-[#FEE4E2] text-[#F04438]' : coreTemp >= 60 ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#12B76A]')
-                : 'bg-white text-[#4A4A68]';
-
+          {(() => {
+            const totalCores = Math.max(server?.cpu?.nucleos_uso?.length || 0, coresList.length, cpuLogical || 0);
+            if (!isConnected || totalCores === 0) {
               return (
-                <div key={idx} className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex flex-col justify-between gap-1.5 shadow-[2px_2px_0px_#1A1A2E]">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-[#1A1A2E] text-xs">Core {idx}</span>
-                    {coreTemp !== null && (
-                      <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border border-[#1A1A2E] ${tempBadgeColor}`}>
-                        {coreTemp.toFixed(1)}°C
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-baseline justify-between text-[11px]">
-                      <span className="text-[#4A4A68] text-[10px]">Uso</span>
-                      <span className="font-bold text-[#1A1A2E] tabular-nums">{coreUsage.toFixed(1)}%</span>
-                    </div>
-                    {/* Barra de progresso do núcleo */}
-                    <div className="w-full bg-white h-2 rounded-full border border-[#1A1A2E] overflow-hidden p-0.5">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-300 ${usageColor}`}
-                        style={{ width: `${Math.min(100, Math.max(2, coreUsage))}%` }}
-                      />
-                    </div>
-                  </div>
+                <div className="p-3 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] text-xs text-[#4A4A68] text-center font-medium">
+                  Leitura por núcleo indisponível no momento.
                 </div>
               );
-            })}
-          </div>
+            }
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 font-mono text-xs">
+                {Array.from({ length: totalCores }).map((_, idx) => {
+                  const hasCoreUsage = Boolean(server?.cpu?.nucleos_uso && server.cpu.nucleos_uso[idx] !== undefined);
+                  const coreUsage = hasCoreUsage ? server!.cpu!.nucleos_uso![idx] : cpuPercent;
+                  const coreTempObj = coresList.find(c => c.coreIndex === idx || c.nome.toLowerCase() === `core ${idx}`);
+                  const coreTemp = coreTempObj ? coreTempObj.temperatura_c : null;
+
+                  const usageColor = coreUsage >= 85 ? 'bg-[#F04438]' : coreUsage >= 65 ? 'bg-[#F79009]' : 'bg-[#FF5A36]';
+                  const tempBadgeColor = coreTemp !== null
+                    ? (coreTemp >= 75 ? 'bg-[#FEE4E2] text-[#F04438]' : coreTemp >= 60 ? 'bg-[#FEF0C7] text-[#B54708]' : 'bg-[#D1FADF] text-[#12B76A]')
+                    : 'bg-white text-[#4A4A68]';
+
+                  return (
+                    <div key={idx} className="p-2.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] flex flex-col justify-between gap-1.5 shadow-[2px_2px_0px_#1A1A2E]">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#1A1A2E] text-xs">Core {idx}</span>
+                        {coreTemp !== null && (
+                          <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border border-[#1A1A2E] ${tempBadgeColor}`}>
+                            {coreTemp.toFixed(1)}°C
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex items-baseline justify-between text-[11px]">
+                          <span className="text-[#4A4A68] text-[10px]">{hasCoreUsage ? 'Uso' : 'Uso (global)'}</span>
+                          <span className="font-bold text-[#1A1A2E] tabular-nums">{coreUsage.toFixed(1)}%</span>
+                        </div>
+                        <div className="w-full bg-white h-2 rounded-full border border-[#1A1A2E] overflow-hidden p-0.5">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-300 ${usageColor}`}
+                            style={{ width: `${Math.min(100, Math.max(2, coreUsage))}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -521,26 +530,29 @@ export const MonitoringTab: React.FC<MonitoringTabProps> = ({
             </thead>
             <tbody className="divide-y border-[#1A1A2E]/20 bg-white">
               {isConnected ? (
-                <>
+                (server?.disco?.partitions && server.disco.partitions.length > 0) ? (
+                  server.disco.partitions.map((part, idx) => (
+                    <tr key={`${part.device}-${part.mount_point}-${idx}`} className="hover:bg-[#FFF7E8]/50 transition-colors">
+                      <td className="py-2.5 px-3 font-bold text-[#1A1A2E]">{part.device || '—'}</td>
+                      <td className="py-2.5 px-3 font-semibold text-[#FF5A36]">{part.mount_point || '/'}</td>
+                      <td className="py-2.5 px-3">{part.fs_type || '—'}</td>
+                      <td className="py-2.5 px-3 tabular-nums">{part.total_gb.toFixed(1)} GB</td>
+                      <td className="py-2.5 px-3 tabular-nums">{part.used_gb.toFixed(1)} GB</td>
+                      <td className="py-2.5 px-3 text-[#12B76A] font-bold tabular-nums">{part.free_gb.toFixed(1)} GB</td>
+                      <td className="py-2.5 px-3 font-bold text-[#1A1A2E] tabular-nums">{part.percent.toFixed(1)}%</td>
+                    </tr>
+                  ))
+                ) : (
                   <tr className="hover:bg-[#FFF7E8]/50 transition-colors">
-                    <td className="py-2.5 px-3 font-bold text-[#1A1A2E]">/dev/sda2</td>
-                    <td className="py-2.5 px-3 font-semibold text-[#FF5A36]">/</td>
-                    <td className="py-2.5 px-3">ext4</td>
+                    <td className="py-2.5 px-3 font-bold text-[#1A1A2E]">{server?.disco?.root?.device || '—'}</td>
+                    <td className="py-2.5 px-3 font-semibold text-[#FF5A36]">{server?.disco?.root?.mount_point || '/'}</td>
+                    <td className="py-2.5 px-3">{server?.disco?.root?.fs_type || '—'}</td>
                     <td className="py-2.5 px-3 tabular-nums">{diskTotal.toFixed(1)} GB</td>
                     <td className="py-2.5 px-3 tabular-nums">{diskUsed.toFixed(1)} GB</td>
                     <td className="py-2.5 px-3 text-[#12B76A] font-bold tabular-nums">{diskFree.toFixed(1)} GB</td>
                     <td className="py-2.5 px-3 font-bold text-[#1A1A2E] tabular-nums">{diskPercent.toFixed(1)}%</td>
                   </tr>
-                  <tr className="hover:bg-[#FFF7E8]/50 transition-colors">
-                    <td className="py-2.5 px-3 font-bold text-[#1A1A2E]">/dev/sda1</td>
-                    <td className="py-2.5 px-3 font-semibold text-[#FF5A36]">/boot/efi</td>
-                    <td className="py-2.5 px-3">vfat</td>
-                    <td className="py-2.5 px-3 tabular-nums">1.0 GB</td>
-                    <td className="py-2.5 px-3 tabular-nums">0.05 GB</td>
-                    <td className="py-2.5 px-3 text-[#12B76A] font-bold tabular-nums">0.95 GB</td>
-                    <td className="py-2.5 px-3 font-bold text-[#1A1A2E] tabular-nums">5.0%</td>
-                  </tr>
-                </>
+                )
               ) : (
                 <tr>
                   <td colSpan={7} className="py-5 text-center text-[#4A4A68] font-sans font-semibold">

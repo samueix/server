@@ -113,6 +113,11 @@ export interface ApiSystemInfo {
   arquitetura: string;
   hostname: string;
   kernel?: string;
+  timezone?: string;
+  firmware?: string;
+  hardware_vendor?: string;
+  hardware_model?: string;
+  ntp_synced?: boolean;
 }
 
 export interface ApiUptime {
@@ -148,11 +153,31 @@ export interface ApiMemoria {
   swap_percentual?: number;
 }
 
+export interface ApiDiscoPartition {
+  device: string;
+  mount_point: string;
+  fs_type: string;
+  total_gb: number;
+  used_gb: number;
+  free_gb: number;
+  percent: number;
+}
+
 export interface ApiDisco {
   total_gb: number;
   usado_gb: number;
   livre_gb: number;
   uso_percentual: number;
+  root?: {
+    device?: string | null;
+    fs_type?: string | null;
+    mount_point?: string;
+    total_gb?: number;
+    used_gb?: number;
+    free_gb?: number;
+    percent?: number;
+  };
+  partitions?: ApiDiscoPartition[];
 }
 
 export interface ApiTemperatureSensor {

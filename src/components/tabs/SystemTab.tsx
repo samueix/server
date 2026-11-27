@@ -1,22 +1,12 @@
 import React, { useMemo } from 'react';
 import { 
   Server, 
-  Code, 
-  Terminal, 
   Cpu, 
   Layers, 
-  HardDrive, 
-  Clock, 
-  CheckCircle2,
-  Calendar,
-  Globe,
-  Radio,
-  Shield,
-  Zap,
-  Power
+  Clock
 } from 'lucide-react';
 import { ApiServerResponse } from '../../types';
-import { SERVER_IPV4, SERVER_IPV6 } from '../../config';
+import { getStoredAuth } from '../../services/authService';
 
 interface SystemTabProps {
   server: ApiServerResponse | null;
@@ -31,10 +21,10 @@ export const SystemTab: React.FC<SystemTabProps> = ({
   isConnected,
   onOpenCodeViewer
 }) => {
-  const hostname = server?.sistema?.hostname || server?.servidor || 'samuelserver';
+  const hostname = server?.sistema?.hostname || server?.servidor || 'Não disponível';
   const osName = server?.sistema?.nome || (isConnected ? 'Linux' : 'Não disponível');
   const osVersion = server?.sistema?.versao || (isConnected ? '—' : 'Não disponível');
-  const arch = server?.sistema?.arquitetura || (isConnected ? 'x86_64' : 'Não disponível');
+  const arch = server?.sistema?.arquitetura || 'Não disponível';
   const kernel = server?.sistema?.kernel || (isConnected ? '—' : 'Não disponível');
 
   const cpuPhysical = server?.cpu?.nucleos_fisicos || 0;
@@ -138,8 +128,13 @@ export const SystemTab: React.FC<SystemTabProps> = ({
             </div>
 
             <div className="flex justify-between py-2.5">
-              <span className="text-[#4A4A68] font-sans font-bold">Usuário administrativo</span>
-              <span className="text-[#FF5A36] font-bold">samuel (sudoer)</span>
+              <span className="text-[#4A4A68] font-sans font-bold">Sessão administrativa</span>
+              <span className="text-[#FF5A36] font-bold">
+                {(() => {
+                  const auth = getStoredAuth();
+                  return auth?.user ? `${auth.user} (${auth.role})` : 'Não disponível';
+                })()}
+              </span>
             </div>
           </div>
         </div>
@@ -177,7 +172,7 @@ export const SystemTab: React.FC<SystemTabProps> = ({
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Memória RAM instalada</span>
-              <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${ramTotal.toFixed(2)} GB DDR` : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${ramTotal.toFixed(2)} GB` : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5 gap-3">
@@ -187,12 +182,18 @@ export const SystemTab: React.FC<SystemTabProps> = ({
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Armazenamento primário</span>
-              <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${diskTotal.toFixed(1)} GB (ext4)` : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-bold tabular-nums">
+                {isConnected ? `${diskTotal.toFixed(1)} GB${server?.disco?.root?.fs_type ? ` (${server.disco.root.fs_type})` : ''}` : 'Não disponível'}
+              </span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Dispositivo de bloco</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? '/dev/sda2 (Raiz /)' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-semibold">
+                {isConnected
+                  ? (server?.disco?.root?.device ? `${server.disco.root.device} (${server.disco.root.mount_point || '/'})` : (server?.disco?.root?.mount_point || '/'))
+                  : 'Não disponível'}
+              </span>
             </div>
           </div>
         </div>
@@ -211,27 +212,22 @@ export const SystemTab: React.FC<SystemTabProps> = ({
           <div className="divide-y border-[#1A1A2E]/10 font-mono text-xs">
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Modo de firmware</span>
-              <span className="text-[#1A1A2E] font-bold">{isConnected ? 'UEFI (x86_64)' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-bold">{isConnected ? (server?.sistema?.firmware || 'Não disponível') : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Fabricante do hardware</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? (server?.sistema?.hardware_vendor || 'Não disponível') : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Modelo da placa-mãe</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? (server?.sistema?.hardware_model || 'Não disponível') : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
-              <span className="text-[#4A4A68] font-sans font-bold">Segurança de boot</span>
-              <span className="text-[#1A1A2E] font-semibold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
-            </div>
-
-            <div className="flex justify-between py-2.5">
-              <span className="text-[#4A4A68] font-sans font-bold">Inicialização systemd</span>
-              <span className="text-[#12B76A] font-bold">{isConnected ? 'Não disponível' : 'Não disponível'}</span>
+              <span className="text-[#4A4A68] font-sans font-bold">Arquitetura do sistema</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? arch : 'Não disponível'}</span>
             </div>
           </div>
         </div>
@@ -262,12 +258,16 @@ export const SystemTab: React.FC<SystemTabProps> = ({
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Fuso horário (timezone)</span>
-              <span className="text-[#1A1A2E] font-semibold">America/Sao_Paulo (UTC-03:00)</span>
+              <span className="text-[#1A1A2E] font-semibold">{isConnected ? (server?.sistema?.timezone || 'Não disponível') : 'Não disponível'}</span>
             </div>
 
             <div className="flex justify-between py-2.5">
               <span className="text-[#4A4A68] font-sans font-bold">Sincronização NTP</span>
-              <span className="text-[#12B76A] font-bold">{isConnected ? 'systemd-timesyncd Ativo' : 'Não disponível'}</span>
+              <span className={`font-bold ${server?.sistema?.ntp_synced === true ? 'text-[#12B76A]' : 'text-[#4A4A68]'}`}>
+                {isConnected
+                  ? (server?.sistema?.ntp_synced === true ? 'Sincronizado' : server?.sistema?.ntp_synced === false ? 'Não sincronizado' : 'Não disponível')
+                  : 'Não disponível'}
+              </span>
             </div>
 
             <div className="flex justify-between py-2.5">

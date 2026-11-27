@@ -178,27 +178,66 @@ export async function mikrotikTestConnection() {
   catch (e: any) { return { ok: false, error: e?.message || String(e) }; }
 }
 
-export async function mikrotikBlockDevice(mac: string, comment = 'blocked by server-panel') {
-  const m = mac.toUpperCase();
+export async function mikrotikBlockDevice(mac: string, comment = 'NC_BLOCKED') {
+  const m = mac.trim().toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(m)) throw new Error('MAC inválido');
+  const ruleComment = `${comment} ${m}`;
   return await withMikrotik(async (c) => {
-    const exists = rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', `?address=${m}`, '?list=NC_BLOCKED'])).length > 0
-      || rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', `?comment=${comment}`, '?list=NC_BLOCKED'])).some(r => String(r.address).toUpperCase()===m || String(r.comment||'').includes(m));
-    if (!exists) await c.talk(['/ip/firewall/address-list/add', '=list=NC_BLOCKED', `=address=${m}`, `=comment=${comment} ${m}`]);
-    const fw = rosRows(await rosSafe(c, ['/ip/firewall/filter/print', '?comment=NC_BLOCKED_DROP']));
-    if (!fw.length) await c.talk(['/ip/firewall/filter/add', '=chain=forward', '=action=drop', '=src-address-list=NC_BLOCKED', '=comment=NC_BLOCKED_DROP', '=place-before=0']);
+    const fw = rosRows(await rosSafe(c, ['/ip/firewall/filter/print']));
+    const hasForward = fw.some(r =>
+      String(r['src-mac-address'] || '').toUpperCase().startsWith(m) ||
+      String(r.comment || '').includes(ruleComment)
+    );
+    if (!hasForward) {
+      await c.talk([
+        '/ip/firewall/filter/add',
+        '=chain=forward',
+        '=action=drop',
+        `=src-mac-address=${m}`,
+        `=comment=${ruleComment}`,
+        '=place-before=0',
+      ]);
+    }
+    const hasInput = fw.some(r =>
+      r.chain === 'input' &&
+      (String(r['src-mac-address'] || '').toUpperCase().startsWith(m) || String(r.comment || '').includes(ruleComment))
+    );
+    if (!hasInput) {
+      await c.talk([
+        '/ip/firewall/filter/add',
+        '=chain=input',
+        '=action=drop',
+        `=src-mac-address=${m}`,
+        `=comment=${ruleComment} input`,
+        '=place-before=0',
+      ]);
+    }
     return { ok: true, mac: m };
   });
 }
 
 export async function mikrotikUnblockDevice(mac: string) {
-  const m = mac.toUpperCase();
+  const m = mac.trim().toUpperCase();
   return await withMikrotik(async (c) => {
+    const fw = rosRows(await rosSafe(c, ['/ip/firewall/filter/print']));
+    for (const f of fw) {
+      const fMac = String(f['src-mac-address'] || '').toUpperCase();
+      const fComment = String(f.comment || '').toUpperCase();
+      if ((fMac.startsWith(m) && fComment.includes('NC_BLOCKED')) || fComment.includes(`NC_BLOCKED ${m}`)) {
+        await c.talk(['/ip/firewall/filter/remove', `=.id=${f['.id']}`]);
+      }
+    }
+    // Limpa eventuais entradas legadas em address-list
     const items = rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', '?list=NC_BLOCKED']));
-    for (const it of items) if (String(it.address||'').toUpperCase()===m || String(it.comment||'').includes(m)) await c.talk(['/ip/firewall/address-list/remove', `=.id=${it['.id']}`]);
+    for (const it of items) {
+      if (String(it.address || '').toUpperCase() === m || String(it.comment || '').toUpperCase().includes(m)) {
+        await c.talk(['/ip/firewall/address-list/remove', `=.id=${it['.id']}`]);
+      }
+    }
     const left = rosRows(await rosSafe(c, ['/ip/firewall/address-list/print', '?list=NC_BLOCKED']));
     if (!left.length) {
-      const fw = rosRows(await rosSafe(c, ['/ip/firewall/filter/print', '?comment=NC_BLOCKED_DROP']));
-      for (const f of fw) await c.talk(['/ip/firewall/filter/remove', `=.id=${f['.id']}`]);
+      const dropRules = rosRows(await rosSafe(c, ['/ip/firewall/filter/print', '?comment=NC_BLOCKED_DROP']));
+      for (const f of dropRules) await c.talk(['/ip/firewall/filter/remove', `=.id=${f['.id']}`]);
     }
     return { ok: true, mac: m };
   });
@@ -219,8 +258,9 @@ export async function mikrotikMakeLeaseStatic(mac: string, address?: string, com
     const lease = leases.find(l => String(l['mac-address']||'').toUpperCase()===m);
     if (!lease) throw new Error('Lease não encontrado para MAC');
     const id = lease['.id'];
-    const words = ['/ip/dhcp-server/lease/make-static', `=.id=${id}`];
-    await c.talk(words);
+    if (lease.dynamic !== 'false') {
+      await c.talk(['/ip/dhcp-server/lease/make-static', `=.id=${id}`]);
+    }
     const setWords = ['/ip/dhcp-server/lease/set', `=.id=${id}`];
     if (address) setWords.push(`=address=${address}`);
     if (comment) setWords.push(`=comment=${comment}`);

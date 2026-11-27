@@ -88,6 +88,7 @@ export const RemoteBrowserTab: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [wsStatus, setWsStatus] = useState<'closed' | 'connecting' | 'open'>('closed');
   const [keyboardHint, setKeyboardHint] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<'reset' | 'forceStop' | null>(null);
 
   const imgRef = useRef<HTMLImageElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -334,7 +335,7 @@ export const RemoteBrowserTab: React.FC = () => {
   };
 
   const handleResetProfile = async () => {
-    if (!window.confirm('Limpar o perfil do navegador? Isso remove cookies, logins salvos e sessões.')) return;
+    setPendingConfirm(null);
     setBusy(true);
     setError(null);
     try {
@@ -354,7 +355,7 @@ export const RemoteBrowserTab: React.FC = () => {
   };
 
   const handleForceStop = async () => {
-    if (!window.confirm('Desligar tudo do navegador remoto? Isso encerra o Chromium e libera recursos.')) return;
+    setPendingConfirm(null);
     setBusy(true);
     setError(null);
     try {
@@ -583,7 +584,7 @@ export const RemoteBrowserTab: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={handleResetProfile}
+            onClick={() => setPendingConfirm('reset')}
             disabled={busy}
             className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-[#FFF7E8] text-[#1A1A2E] text-xs font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-40"
             title="Limpa cookies, logins e sessões salvas do navegador"
@@ -592,7 +593,7 @@ export const RemoteBrowserTab: React.FC = () => {
           </button>
           <button
             type="button"
-            onClick={handleForceStop}
+            onClick={() => setPendingConfirm('forceStop')}
             disabled={busy}
             className="flex items-center gap-1.5 px-3 py-2 rounded-md bg-[#1A1A2E] text-white text-xs font-bold border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] disabled:opacity-40"
             title="Encerra o Chromium e libera recursos do servidor"
@@ -600,6 +601,33 @@ export const RemoteBrowserTab: React.FC = () => {
             <Power className="w-4 h-4" /> Desligar tudo
           </button>
         </div>
+
+        {pendingConfirm && (
+          <div className="p-3 rounded-lg bg-[#FEF0C7] border-2 border-[#1A1A2E] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <span className="font-bold text-[#7A2E0E]">
+              {pendingConfirm === 'reset'
+                ? 'Limpar o perfil do navegador? Isso remove cookies, logins salvos e sessões.'
+                : 'Desligar tudo do navegador remoto? Isso encerra o Chromium e libera recursos.'}
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setPendingConfirm(null)}
+                className="px-2.5 py-1 rounded bg-white border border-[#1A1A2E] font-bold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => (pendingConfirm === 'reset' ? void handleResetProfile() : void handleForceStop())}
+                disabled={busy}
+                className="px-2.5 py-1 rounded bg-[#FF5A36] text-white border border-[#1A1A2E] font-bold disabled:opacity-50"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-start gap-2 p-2 rounded-md bg-[#FEF3F2] border border-[#F04438] text-[11px] font-mono text-[#B42318]">

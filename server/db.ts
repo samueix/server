@@ -571,9 +571,9 @@ export function upsertMikrotikDevices(devices: any[]) {
   const stmt = sqliteDb.prepare(`
     INSERT INTO mikrotik_devices (mac,ip,hostname,vendor,device_type,nickname,interface,connection,ssid,signal_dbm,tx_rate,rx_rate,first_seen,last_seen,last_ip,online,blocked,trusted,notes)
     VALUES (@mac,@ip,@hostname,@vendor,@device_type,@nickname,@interface,@connection,@ssid,@signal_dbm,@tx_rate,@rx_rate,@first_seen,@last_seen,@last_ip,@online,@blocked,@trusted,@notes)
-    ON CONFLICT(mac) DO UPDATE SET ip=excluded.ip, hostname=COALESCE(excluded.hostname,mikrotik_devices.hostname), vendor=COALESCE(excluded.vendor,mikrotik_devices.vendor),
-      device_type=COALESCE(excluded.device_type,mikrotik_devices.device_type), interface=excluded.interface, connection=excluded.connection, ssid=excluded.ssid,
-      signal_dbm=excluded.signal_dbm, tx_rate=excluded.tx_rate, rx_rate=excluded.rx_rate, last_seen=excluded.last_seen, last_ip=excluded.ip, online=excluded.online,
+    ON CONFLICT(mac) DO UPDATE SET ip=COALESCE(excluded.ip,mikrotik_devices.ip), hostname=COALESCE(NULLIF(excluded.hostname,''),mikrotik_devices.hostname), vendor=COALESCE(excluded.vendor,mikrotik_devices.vendor),
+      device_type=COALESCE(excluded.device_type,mikrotik_devices.device_type), interface=COALESCE(excluded.interface,mikrotik_devices.interface), connection=COALESCE(excluded.connection,mikrotik_devices.connection), ssid=COALESCE(excluded.ssid,mikrotik_devices.ssid),
+      signal_dbm=excluded.signal_dbm, tx_rate=excluded.tx_rate, rx_rate=excluded.rx_rate, last_seen=excluded.last_seen, last_ip=COALESCE(excluded.ip,mikrotik_devices.last_ip), online=excluded.online,
       blocked=excluded.blocked
   `);
   for (const d of devices) stmt.run({

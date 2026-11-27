@@ -20,7 +20,6 @@ import {
 import { NetworkTelemetry } from '../../services/api';
 import { SparklineChart } from '../SparklineChart';
 import { CpuCoresChart } from '../CpuCoresChart';
-import { SERVER_IPV4, SERVER_IPV6 } from '../../config';
 
 interface OverviewTabProps {
   server: ApiServerResponse | null;
@@ -43,15 +42,15 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
   history,
   isConnected,
   isStaleData = false,
-  serverIp = SERVER_IPV4
+  serverIp = ''
 }) => {
-  const hostname = server?.sistema?.hostname || server?.servidor || status?.servidor || (isConnected ? 'samuelserver' : 'Servidor');
+  const hostname = server?.sistema?.hostname || server?.servidor || status?.servidor || 'Servidor';
   const osName = server?.sistema?.nome || (isConnected ? 'Linux' : 'Não disponível');
   const osVersion = server?.sistema?.versao || (isConnected ? '—' : 'Não disponível');
   const kernel = server?.sistema?.kernel || (isConnected ? '—' : 'Não disponível');
   
-  const currentIpv4 = network?.primaryIp || serverIp || SERVER_IPV4;
-  const currentIpv6 = network?.primaryIpv6 || (network?.interfaces?.find(i => i.ipv6)?.ipv6) || SERVER_IPV6;
+  const currentIpv4 = network?.primaryIp || serverIp || '';
+  const currentIpv6 = network?.primaryIpv6 || (network?.interfaces?.find(i => i.ipv6)?.ipv6) || '';
   
   const uptimeDays = server?.uptime?.dias ?? 0;
   const uptimeHours = server?.uptime?.horas ?? 0;
@@ -95,7 +94,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
     ? temperature.sensores[0].temperatura_c 
     : null;
 
-  const primaryInterface = network?.primaryInterface || (network?.interfaces?.[0]?.nome) || 'enp2s0';
+  const primaryInterface = network?.primaryInterface || network?.interfaces?.find(i => i.status === 'UP' && i.nome !== 'lo')?.nome || network?.interfaces?.[0]?.nome || 'N/D';
   const networkIsUp = isConnected && (network?.interfaces?.some(i => i.status === 'UP') ?? true);
   const downloadSpeed = network?.downloadSpeedFormatted || '0 B/s';
   const uploadSpeed = network?.uploadSpeedFormatted || '0 B/s';
@@ -174,11 +173,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
           <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
             <div className="px-3 py-1.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
               <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">IPv4</span>
-              <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? currentIpv4 : 'Não disponível'}</span>
+              <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected && currentIpv4 ? currentIpv4 : 'Não disponível'}</span>
             </div>
             <div className="px-3 py-1.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E] max-w-xs truncate" title={currentIpv6}>
               <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">IPv6</span>
-              <span className="text-[#00A6FB] font-bold truncate block tabular-nums">{isConnected ? currentIpv6 : 'Não disponível'}</span>
+              <span className="text-[#00A6FB] font-bold truncate block tabular-nums">{isConnected && currentIpv6 ? currentIpv6 : 'Não disponível'}</span>
             </div>
             <div className="px-3 py-1.5 rounded-lg bg-[#FFF7E8] border-2 border-[#1A1A2E] shadow-[2px_2px_0px_#1A1A2E]">
               <span className="text-[#4A4A68] text-[10px] block font-sans font-bold uppercase tracking-wider">Uptime</span>
@@ -204,7 +203,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 <h2 className="text-sm font-bold font-title text-[#1A1A2E]">Processador (CPU)</h2>
               </div>
               <span className="text-xs font-semibold text-[#4A4A68]">
-                {isConnected && cpuCoresPhysical ? `${cpuCoresPhysical} núcleos físicos, ${cpuCoresLogical} lógicos` : '2 núcleos físicos'}
+                {isConnected && cpuCoresPhysical ? `${cpuCoresPhysical} núcleos físicos, ${cpuCoresLogical} lógicos` : 'Não disponível'}
               </span>
             </div>
 
@@ -253,7 +252,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 history={history}
                 currentCores={server?.cpu?.nucleos_uso}
                 fallbackCpuPercent={cpuPercent}
-                coreCount={cpuCoresLogical || 4}
+                coreCount={cpuCoresLogical}
                 isConnected={isConnected}
                 height={148}
                 compact
@@ -349,7 +348,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   <span className="text-[#1A1A2E] font-bold tabular-nums">{isConnected ? `${diskFree.toFixed(1)} GB` : '0 GB'}</span>
                 </div>
                 <div className="col-span-2 text-xs text-[#4A4A68] font-sans font-medium">
-                  Partição raiz: <span className="font-mono font-bold text-[#1A1A2E]">{isConnected ? '/ (ext4)' : 'Não disponível'}</span>
+                  Partição raiz: <span className="font-mono font-bold text-[#1A1A2E]">{isConnected ? `${server?.disco?.root?.mount_point || '/'}${server?.disco?.root?.fs_type ? ` (${server.disco.root.fs_type})` : ''}` : 'Não disponível'}</span>
                 </div>
               </div>
             </div>

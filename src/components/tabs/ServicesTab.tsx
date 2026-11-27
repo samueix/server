@@ -61,14 +61,6 @@ const KNOWN_SERVICES_META: KnownServiceMeta[] = [
     port: '80, 443' 
   },
   { 
-    key: 'mac-vendors-api', 
-    aliases: ['mac-vendors-api', 'macvendors', 'mac-vendors'], 
-    name: 'MAC Vendors API', 
-    desc: 'Serviço externo em nuvem (api.macvendors.com) para lookup de fabricantes OUI', 
-    port: 'HTTPS (443)',
-    isExternal: true 
-  },
-  { 
     key: 'cron', 
     aliases: ['cron', 'crond', 'cron daemon'], 
     name: 'Cron Daemon', 
@@ -278,29 +270,7 @@ export const ServicesTab: React.FC<ServicesTabProps> = ({
         found = map.get(meta.name.toLowerCase()) || map.get(normalizeKey(meta.name));
       }
 
-      if (meta.isExternal) {
-        // Serviço externo independente (api.macvendors.com)
-        result.push({
-          nome: meta.name,
-          status: 'ONLINE',
-          ativo: true,
-          habilitado_boot: true,
-          pid: null,
-          tempo_ativo: 'Cloud API Ativa',
-          ultima_inicializacao: 'Nuvem',
-          descricao: meta.desc,
-          porta: meta.port,
-          desc: meta.desc,
-          port: meta.port,
-          cpu: 'N/A',
-          memory: 'N/A',
-          uptime: 'Cloud',
-          isFuture: false,
-          isExternal: true,
-          installed: true,
-          canonicalUnit: meta.key
-        });
-      } else if (found) {
+      if (found) {
         matchedServiceNames.add(found.nome.toLowerCase());
         matchedServiceNames.add(normalizeKey(found.nome));
         const isOnline = found.status === 'ONLINE' || found.ativo === true;

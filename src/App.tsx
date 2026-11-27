@@ -621,8 +621,14 @@ export default function App() {
   };
 
   // Extract friendly hostname and IP
-  const hostname = serverData?.sistema?.hostname || serverData?.servidor || statusData?.servidor || 'samuelserver';
-  const serverIp = SERVER_IPV4;
+  const hostname = serverData?.sistema?.hostname || serverData?.servidor || statusData?.servidor || 'Servidor';
+  const liveIpv4 =
+    networkData?.primaryIp ||
+    networkData?.interfaces?.find((i) => {
+      const addr = i.ipv4 || i.ip;
+      return addr && !addr.startsWith('127.') && addr !== '--' && addr !== 'N/D';
+    })?.ipv4;
+  const serverIp = (liveIpv4 && liveIpv4 !== '--' && liveIpv4 !== 'N/D') ? liveIpv4 : SERVER_IPV4;
 
   // Format uptime for header
   const uptimeFormatted = serverData?.uptime 
