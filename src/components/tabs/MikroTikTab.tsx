@@ -68,14 +68,17 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   const lanPrefix = String(lanAddr).split('/')[0].split('.').slice(0, 3).join('.') + '.';
   const wanPrefix = String(wanAddr).split('/')[0].split('.').slice(0, 3).join('.') + '.';
   const ipOf = (d: any) => String(d.ip || d.last_ip || '');
+  const isVpnIp = (ip:string)=> ip.startsWith('100.') || ip.startsWith('fd7a:115c:a1e0:');
   const wanDevices = devices.filter(d => {
     const ip = ipOf(d);
+    if (isVpnIp(ip)) return false;
     if (ip && ip === String(gw)) return false;
     if (ip.startsWith(lanPrefix)) return false;
     if (ip.startsWith(wanPrefix)) return true;
     return ifaceOf(d) === 'ether1';
   });
-  const lanDevices = devices.filter(d => !wanDevices.includes(d) && ipOf(d) !== String(gw));
+  const vpnDevices = devices.filter(d => isVpnIp(ipOf(d)));
+  const lanDevices = devices.filter(d => !wanDevices.includes(d) && !vpnDevices.includes(d) && ipOf(d) !== String(gw));
   const ifaceMap = new Map<string, any>(interfaces.map((i: any) => [String(i.name), i]));
   const ethMap = new Map<string, any>(ethernet.map((e: any) => [String(e.name), e]));
   const portInfo = (name: string) => {
@@ -107,6 +110,7 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
         ...wanDevices.map(devNode),
       ] },
       { label: 'LAN · bridge-LAN', sub: lanAddr, kind: 'lan', children: lanChildren },
+      { label: 'VPN / Tailscale', sub: 'externo à LAN (acesso remoto)', kind: 'wan', children: vpnDevices.length ? vpnDevices.map(devNode) : [{ label:'Nenhum dispositivo VPN inventariado', sub:'Rotas/peers podem existir fora do inventário MikroTik', kind:'gateway', online:false }] },
     ],
   };
 }
