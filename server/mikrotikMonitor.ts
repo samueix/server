@@ -38,7 +38,7 @@ export async function pollMikrotikOnce() {
     const mac = String(a['mac-address']||'').toUpperCase(); if (!mac) continue;
     const prev: any = byMac.get(mac) || ({} as any); prev.mac=mac;
     const arpStatus = String(a.status||'').toLowerCase();
-    const arpOnline = a.complete==='true' || ['reachable','delay','probe','permanent'].includes(arpStatus);
+    const arpOnline = ['reachable','delay','probe','permanent'].includes(arpStatus);
     byMac.set(mac, { ...prev, ip: prev.ip || a.address, interface: prev.interface || (prev.connection ? undefined : a.interface), online: Boolean((prev as any).online) || arpOnline });
   }
   for (const d of byMac.values()) { const ip=String(d.ip||''); const p=pingState.get(ip); if (p && Date.now()-p.ts < 10*60*1000 && p.ok) d.online = true; }
