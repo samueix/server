@@ -551,7 +551,7 @@ function initMikrotikTables(db: any) {
         nickname TEXT, interface TEXT, connection TEXT, ssid TEXT, signal_dbm REAL,
         tx_rate TEXT, rx_rate TEXT, first_seen TEXT, last_seen TEXT, last_ip TEXT,
         online INTEGER DEFAULT 0, blocked INTEGER DEFAULT 0, trusted INTEGER DEFAULT 0,
-        total_uptime_seconds INTEGER DEFAULT 0, notes TEXT
+        total_uptime_seconds INTEGER DEFAULT 0, notes TEXT, icon TEXT
       );
       CREATE TABLE IF NOT EXISTS mikrotik_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, event_type TEXT, mac TEXT, ip TEXT, hostname TEXT, details TEXT
@@ -562,6 +562,7 @@ function initMikrotikTables(db: any) {
       CREATE INDEX IF NOT EXISTS idx_mt_events_ts ON mikrotik_events(ts);
       CREATE INDEX IF NOT EXISTS idx_mt_snap_ts ON mikrotik_snapshots(ts);
     `);
+    try { db.exec(`ALTER TABLE mikrotik_devices ADD COLUMN icon TEXT`); } catch {}
   } catch (e) { console.warn('[MikroTik DB] init failed', e); }
 }
 
@@ -569,8 +570,8 @@ export function upsertMikrotikDevices(devices: any[]) {
   if (!sqliteDb) return;
   const now = new Date().toISOString();
   const stmt = sqliteDb.prepare(`
-    INSERT INTO mikrotik_devices (mac,ip,hostname,vendor,device_type,nickname,interface,connection,ssid,signal_dbm,tx_rate,rx_rate,first_seen,last_seen,last_ip,online,blocked,trusted,notes)
-    VALUES (@mac,@ip,@hostname,@vendor,@device_type,@nickname,@interface,@connection,@ssid,@signal_dbm,@tx_rate,@rx_rate,@first_seen,@last_seen,@last_ip,@online,@blocked,@trusted,@notes)
+    INSERT INTO mikrotik_devices (mac,ip,hostname,vendor,device_type,nickname,interface,connection,ssid,signal_dbm,tx_rate,rx_rate,first_seen,last_seen,last_ip,online,blocked,trusted,notes,icon)
+    VALUES (@mac,@ip,@hostname,@vendor,@device_type,@nickname,@interface,@connection,@ssid,@signal_dbm,@tx_rate,@rx_rate,@first_seen,@last_seen,@last_ip,@online,@blocked,@trusted,@notes,@icon)
     ON CONFLICT(mac) DO UPDATE SET ip=COALESCE(excluded.ip,mikrotik_devices.ip), hostname=COALESCE(NULLIF(excluded.hostname,''),mikrotik_devices.hostname), vendor=COALESCE(excluded.vendor,mikrotik_devices.vendor),
       device_type=COALESCE(excluded.device_type,mikrotik_devices.device_type), interface=COALESCE(excluded.interface,mikrotik_devices.interface), connection=COALESCE(excluded.connection,mikrotik_devices.connection), ssid=COALESCE(excluded.ssid,mikrotik_devices.ssid),
       signal_dbm=excluded.signal_dbm, tx_rate=excluded.tx_rate, rx_rate=excluded.rx_rate, last_seen=excluded.last_seen, last_ip=COALESCE(excluded.ip,mikrotik_devices.last_ip), online=excluded.online,
@@ -596,6 +597,7 @@ export function upsertMikrotikDevices(devices: any[]) {
     blocked: d.blocked ? 1 : 0,
     trusted: d.trusted ? 1 : 0,
     notes: d.notes ?? null,
+    icon: d.icon ?? null,
   });
 }
 export function listMikrotikDevices() {
@@ -625,4 +627,8 @@ function safeJson(v:string){ try{return JSON.parse(v||'null')}catch{return null}
 export function setMikrotikDeviceNickname(mac:string, nickname:string) {
   if (!sqliteDb) return;
   sqliteDb.prepare('UPDATE mikrotik_devices SET nickname=? WHERE mac=?').run(nickname, mac.toUpperCase());
+}
+export function setMikrotikDeviceIcon(mac:string, icon:string) {
+  if (!sqliteDb) return;
+  sqliteDb.prepare('UPDATE mikrotik_devices SET icon=? WHERE mac=?').run(icon, mac.toUpperCase());
 }

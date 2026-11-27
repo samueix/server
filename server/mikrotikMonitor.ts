@@ -6,7 +6,7 @@ const execFileAsync = promisify(execFile);
 
 const OUI: Record<string,string> = { 'D0:39:57':'Liteon/PC', '2C:C8:1B':'MikroTik', 'C4:3C:B0':'Yoosee/IPC', '5C:CD:5B':'Intel', '1C:EF:03':'ISP/Router' };
 function vendor(mac=''){ const p=mac.toUpperCase().split(':').slice(0,3).join(':'); return OUI[p] || 'Desconhecido'; }
-function typeGuess(host='', vendorName=''){ const h=host.toLowerCase(), v=vendorName.toLowerCase(); if(/iphone|android|samsung|xiaomi|moto/.test(h)) return 'mobile'; if(/tv|roku|chromecast/.test(h)) return 'tv'; if(/cam|ipc|yoosee/.test(h+v)) return 'camera'; if(/printer|hp|epson/.test(h)) return 'printer'; if(/mikrotik/.test(v)) return 'router'; return h? 'host':'unknown'; }
+function typeGuess(host='', vendorName='', mac='', ip=''){ const h=host.toLowerCase(), v=vendorName.toLowerCase(), m=String(mac||'').toUpperCase(); if(/iphone|android|samsung|xiaomi|moto|galaxy/.test(h)) return 'mobile'; if(/tv|roku|chromecast|firetv/.test(h)) return 'tv'; if(/cam|ipc|yoosee/.test(h+v) || ['C4:3C:B0'].includes(m.slice(0,8))) return 'camera'; if(/printer|hp|epson/.test(h)) return 'printer'; if(/mikrotik/.test(v)) return 'router'; if(/pc|desktop|laptop|notebook|samuel/.test(h) || /liteon|intel/.test(v)) return 'computer'; if(ip==='192.168.100.1' || /isp|gateway|modem/.test(h+v)) return 'gateway'; return h? 'host':'unknown'; }
 function parseLeaseLastSeen(s: string): number { const m=String(s||'').match(/(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?/); if(!m) return Number.MAX_SAFE_INTEGER; const [_,w,d,h,min,sec]=m; return (((Number(w||0)*7+Number(d||0))*24+Number(h||0))*60+Number(min||0))*60+Number(sec||0); }
 
 let last: any = null;
@@ -42,7 +42,7 @@ export async function pollMikrotikOnce() {
     byMac.set(mac, { ...prev, ip: prev.ip || a.address, interface: prev.interface || (prev.connection ? undefined : a.interface), online: Boolean((prev as any).online) || arpOnline });
   }
   for (const d of byMac.values()) { const ip=String(d.ip||''); const p=pingState.get(ip); if (p && Date.now()-p.ts < 10*60*1000 && p.ok) d.online = true; }
-  const devices = [...byMac.values()].map(d => { const v=vendor(d.mac); const { last_seen_sec, ...rest } = d as any; return { ...rest, online: d.online?1:0, vendor:v, device_type:typeGuess(d.hostname, v), nickname:null, trusted:false, notes:null, first_seen: now, last_ip:d.ip }; });
+  const devices = [...byMac.values()].map(d => { const v=vendor(d.mac); const { last_seen_sec, ...rest } = d as any; return { ...rest, online: d.online?1:0, vendor:v, device_type:typeGuess(d.hostname, v, d.mac, d.ip), nickname:null, trusted:false, notes:null, icon:null, first_seen: now, last_ip:d.ip }; });
   const prevList = listMikrotikDevices();
   const prevByMac = new Map<string, any>(prevList.map((d:any)=>[String(d.mac).toUpperCase(), d]));
   for (const d of devices) {

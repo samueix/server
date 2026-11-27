@@ -36,7 +36,36 @@ function Table({ cols, rows }: { cols: string[]; rows: React.ReactNode[][] }) {
 }
 
 type TopoKind = 'router' | 'wan' | 'lan' | 'port' | 'device' | 'gateway';
-interface TopoNode { label: string; sub?: string; kind: TopoKind; online?: boolean; children?: TopoNode[]; }
+type DeviceIcon = 'auto' | 'camera' | 'computer' | 'router' | 'mobile' | 'tv' | 'printer' | 'server' | 'gateway' | 'unknown';
+interface TopoNode { label: string; sub?: string; kind: TopoKind; online?: boolean; children?: TopoNode[]; icon?: DeviceIcon; mac?: string; ip?: string; }
+
+const DEVICE_ICONS: { id: DeviceIcon; label: string }[] = [
+  { id: 'auto', label: 'Auto' }, { id: 'camera', label: 'Câmera' }, { id: 'computer', label: 'Computador' }, { id: 'router', label: 'Roteador' },
+  { id: 'mobile', label: 'Celular' }, { id: 'tv', label: 'TV' }, { id: 'printer', label: 'Impressora' }, { id: 'server', label: 'Servidor' },
+  { id: 'gateway', label: 'Gateway' }, { id: 'unknown', label: 'Desconhecido' },
+];
+function iconForDevice(d: any): DeviceIcon {
+  const manual = String(d.icon || '').toLowerCase() as DeviceIcon;
+  if (manual && DEVICE_ICONS.some(x=>x.id===manual) && manual !== 'auto') return manual;
+  const t = String(d.device_type || '').toLowerCase();
+  if (t === 'camera') return 'camera'; if (t === 'computer' || t === 'host') return 'computer'; if (t === 'router') return 'router';
+  if (t === 'mobile') return 'mobile'; if (t === 'tv') return 'tv'; if (t === 'printer') return 'printer'; if (t === 'gateway') return 'gateway';
+  if (t === 'server') return 'server';
+  const ip = String(d.ip || d.last_ip || '');
+  if (ip === '192.168.100.1') return 'gateway';
+  return 'unknown';
+}
+function DeviceGlyph({ icon, className='w-3 h-3' }: { icon?: DeviceIcon; className?: string }) {
+  if (icon === 'camera') return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>;
+  if (icon === 'computer') return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>;
+  if (icon === 'router') return <Router className={className} />;
+  if (icon === 'mobile') return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg>;
+  if (icon === 'tv') return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="7" width="20" height="13" rx="2"/><path d="M17 2l-5 5-5-5"/></svg>;
+  if (icon === 'printer') return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9V2h12v7"/><rect x="6" y="14" width="12" height="8"/><rect x="2" y="9" width="20" height="7" rx="2"/></svg>;
+  if (icon === 'server') return <Server className={className} />;
+  if (icon === 'gateway') return <ArrowRight className={className} />;
+  return <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9 9a3 3 0 115.12 2.12c-.72.72-1.62 1.08-2.12 1.88V15"/><path d="M12 18h.01"/></svg>;
+}
 
 function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   if (!data?.ok) return null;
@@ -50,7 +79,7 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   const ethernet = (data.ethernet || []) as any[];
   const wanAddr = addresses.find(a => a.interface === 'ether1')?.address || 'WAN';
   const lanAddr = addresses.find(a => String(a.interface || '').startsWith('bridge'))?.address || 'LAN';
-  const gw = routes.find(r => r['dst-address'] === '0.0.0.0/0')?.gateway || 'gateway';
+  const gw = routes.find(r => r['dst-address'] === '0.0.0.0/0')?.gateway || '192.168.100.1';
   const onIface = new Map<string, string>();
   for (const h of bridgeHosts) if (h['mac-address']) onIface.set(String(h['mac-address']).toUpperCase(), h['on-interface'] || h.interface || '');
   const ifaceOf = (d: any) => {
@@ -63,7 +92,7 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   const devNode = (d: any): TopoNode => ({
     label: d.nickname || d.hostname || d.mac,
     sub: `${d.ip || d.last_ip || 'sem IP'} · ${d.mac}${d.signal_dbm ? ` · ${d.signal_dbm} dBm` : ''}`,
-    kind: 'device', online: Boolean(Number(d.online)),
+    kind: 'device', online: Boolean(Number(d.online)), icon: iconForDevice(d), mac: d.mac, ip: d.ip || d.last_ip,
   });
   const lanPrefix = String(lanAddr).split('/')[0].split('.').slice(0, 3).join('.') + '.';
   const wanPrefix = String(wanAddr).split('/')[0].split('.').slice(0, 3).join('.') + '.';
@@ -100,30 +129,43 @@ function buildTopology(data: MikrotikStatus | null): TopoNode | null {
   const mapped = new Set(portNames.flatMap(p => lanDevices.filter(d => portOf(d) === p).map(d => d.mac)));
   const otherLan = lanDevices.filter(d => !mapped.has(d.mac));
   if (otherLan.length) lanChildren.push({ label: 'DHCP / ARP (sem porta física)', sub: `${otherLan.length} dispositivo(s)`, kind: 'port', children: otherLan.map(devNode) });
+  const gwDevice = devices.find(d => String(d.ip || d.last_ip || '') === String(gw));
+  const wanNeighbors = wanDevices.filter(d => String(d.ip || d.last_ip || '') !== String(gw));
   return {
-    label: data.identity?.name || 'MikroTik',
-    sub: `${data.resource?.['board-name'] || ''} · ${data.resource?.version || ''}`,
-    kind: 'router',
+    label: `Upstream ${gw}`,
+    sub: 'gateway/modem da operadora · antes do MikroTik',
+    kind: 'gateway',
+    online: true,
+    icon: 'gateway',
     children: [
-      { label: 'WAN · ether1', sub: wanAddr, kind: 'wan', children: [
-        { label: `Upstream ${gw}`, sub: 'gateway padrão', kind: 'gateway', online: true },
-        ...wanDevices.map(devNode),
-      ] },
-      { label: 'LAN · bridge-LAN', sub: lanAddr, kind: 'lan', children: lanChildren },
-      { label: 'VPN / Tailscale', sub: 'externo à LAN (acesso remoto)', kind: 'wan', children: vpnDevices.length ? vpnDevices.map(devNode) : [{ label:'Nenhum dispositivo VPN inventariado', sub:'Rotas/peers podem existir fora do inventário MikroTik', kind:'gateway', online:false }] },
+      {
+        label: data.identity?.name || 'MikroTik',
+        sub: `${data.resource?.['board-name'] || ''} · ${data.resource?.version || ''} · WAN ${wanAddr}`,
+        kind: 'router',
+        children: [
+          { label: 'LAN · bridge-LAN', sub: lanAddr, kind: 'lan', children: lanChildren },
+          { label: 'VPN / Tailscale', sub: 'externo à LAN (acesso remoto)', kind: 'wan', children: vpnDevices.length ? vpnDevices.map(devNode) : [{ label:'Nenhum dispositivo VPN inventariado', sub:'Rotas/peers podem existir fora do inventário MikroTik', kind:'gateway', online:false, icon:'unknown' }] },
+        ],
+      },
+      ...wanNeighbors.map(devNode),
+      ...(gwDevice ? [] : []),
     ],
   };
 }
 
+function NodeIcon({ node }: { node: TopoNode }) {
+  if (node.kind === 'device' || node.icon) return <DeviceGlyph icon={node.icon || (node.kind==='gateway'?'gateway':'unknown')} />;
+  const Icon = node.kind === 'router' ? Router : node.kind === 'wan' ? Globe : node.kind === 'lan' ? Network : node.kind === 'port' ? Cable : node.kind === 'gateway' ? ArrowRight : Server;
+  return <Icon className="w-3 h-3" />;
+}
 function Tree({ node, depth = 0 }: { node: TopoNode; depth?: number }) {
   const [collapsed, setCollapsed] = useState(depth > 1);
-  const Icon = node.kind === 'router' ? Router : node.kind === 'wan' ? Globe : node.kind === 'lan' ? Network : node.kind === 'port' ? Cable : node.kind === 'gateway' ? ArrowRight : Server;
   const hasChildren = Boolean(node.children?.length);
   return (
     <div className={depth ? 'ml-3 border-l-2 border-[#1A1A2E]/20 pl-3' : ''}>
       <div className="flex items-center gap-1.5 py-0.5 flex-wrap">
         {hasChildren ? <button onClick={()=>setCollapsed(v=>!v)} className="inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] bg-white hover:bg-[#FFF7E8]">{collapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}</button> : <span className="w-5" />}
-        <span className={`inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] ${node.kind === 'router' ? 'bg-[#FF5A36] text-white' : node.kind === 'wan' ? 'bg-[#E0F4FE]' : node.kind === 'lan' ? 'bg-[#ECFDF3]' : 'bg-[#FFF7E8]'}`}><Icon className="w-3 h-3" /></span>
+        <span className={`inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] ${node.kind === 'router' ? 'bg-[#FF5A36] text-white' : node.kind === 'wan' ? 'bg-[#E0F4FE]' : node.kind === 'lan' ? 'bg-[#ECFDF3]' : 'bg-[#FFF7E8]'}`}><NodeIcon node={node} /></span>
         <span className="font-bold text-xs">{node.label}</span>
         {node.sub && <span className="text-[10px] font-mono text-[#4A4A68]">{node.sub}</span>}
         {node.online !== undefined && <span className={`text-[10px] font-bold ${node.online ? 'text-[#027A48]' : 'text-[#B42318]'}`}>{node.online ? 'online' : 'offline'}</span>}
@@ -160,10 +202,10 @@ function TopologyMap({ root, pos, onMove }: { root: TopoNode; pos: Record<string
         <svg className="absolute top-0 left-0 pointer-events-none" width={1400} height={900}>
           {flat.filter(f=>f.parentId).map(f=>{ const a=getPos(byId.get(f.parentId!)); const b=getPos(f); if(!a||!b) return null; return <line key={f.id} x1={a.x+210} y1={a.y+28} x2={b.x} y2={b.y+28} stroke="#1A1A2E" strokeOpacity="0.35" strokeWidth="2" />; })}
         </svg>
-        {flat.map(f=>{ const p=getPos(f); const Icon = f.node.kind==='router'?Router:f.node.kind==='wan'?Globe:f.node.kind==='lan'?Network:f.node.kind==='port'?Cable:f.node.kind==='gateway'?ArrowRight:Server;
+        {flat.map(f=>{ const p=getPos(f);
           return <div key={f.id} data-node onMouseDown={(e)=>{ e.preventDefault(); e.stopPropagation(); setDrag({id:f.id,ox:p.x,oy:p.y,sx:e.clientX,sy:e.clientY}); }}
             className="absolute cursor-grab active:cursor-grabbing select-none bg-white border-2 border-[#1A1A2E] rounded-lg shadow-[2px_2px_0px_#1A1A2E] px-2 py-1.5" style={{left:p.x,top:p.y,width:210}}>
-            <div className="flex items-center gap-1 text-xs font-bold"><Icon className="w-3.5 h-3.5" /><span className="truncate">{f.node.label}</span></div>
+            <div className="flex items-center gap-1 text-xs font-bold"><NodeIcon node={f.node} /><span className="truncate">{f.node.label}</span></div>
             {f.node.sub && <div className="text-[10px] font-mono text-[#4A4A68] truncate">{f.node.sub}</div>}
             {f.node.online!==undefined && <div className={`text-[10px] font-bold ${f.node.online?'text-[#027A48]':'text-[#B42318]'}`}>{f.node.online?'online':'offline'}</div>}
           </div>; })}
@@ -192,6 +234,15 @@ export const MikroTikTab: React.FC = () => {
   const [dnsMsg, setDnsMsg] = useState<string|null>(null);
   const [topoView, setTopoView] = useState<'tree'|'map'>(() => (localStorage.getItem('mikrotik_topo_view') as any) || 'tree');
   const [topoPos, setTopoPos] = useState<Record<string,{x:number;y:number}>>(()=>{ try { return JSON.parse(localStorage.getItem('mikrotik_topo_pos')||'{}'); } catch { return {}; } });
+  const [iconBusy, setIconBusy] = useState<string|null>(null);
+  const setDeviceIcon = async (mac:string, icon:string) => {
+    setIconBusy(mac+icon);
+    try {
+      const res = await fetch(`/api/mikrotik/devices/${encodeURIComponent(mac)}/icon`, { method:'POST', headers:{...getAuthHeaders(),'Content-Type':'application/json'}, body: JSON.stringify({ icon }) });
+      const j = await res.json(); if(!res.ok||j?.ok===false) throw new Error(j?.error||`HTTP ${res.status}`);
+      await refresh();
+    } catch(e:any){ setError(e?.message||String(e)); } finally { setIconBusy(null); }
+  };
   const loadDnsSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/mikrotik/dns-settings', { headers: getAuthHeaders() });
@@ -351,8 +402,14 @@ export const MikroTikTab: React.FC = () => {
 
       <div className="space-y-2"><div className="font-black font-title flex items-center gap-2"><Users className="w-4 h-4 text-[#FF5A36]"/>Inventário de dispositivos</div>
         <Table cols={['Nome/Host','IP','MAC','Tipo/Fabricante','Conexão','Sinal','Último visto','Status','Ações']} rows={devices.map((d:any)=>[
-          <div><div className="font-bold">{d.nickname||d.hostname||'—'}</div><div className="text-[#4A4A68]">{d.hostname||''}</div></div>, d.ip||d.last_ip||'—', d.mac, <div><div>{d.device_type||'unknown'}</div><div className="text-[#4A4A68]">{d.vendor||''}</div></div>, `${d.connection||'—'}${d.interface?` (${d.interface})`:''}`, d.signal_dbm?`${d.signal_dbm} dBm`:'—', d.last_seen?new Date(d.last_seen).toLocaleString():'—', <span className={Number(d.online)?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{Number(d.online)?'online':'offline'}</span>,
-          <div className="flex gap-1 flex-wrap">{Number(d.blocked)?<button disabled={busyMac===d.mac+'unblock'} onClick={()=>act(d.mac,'unblock')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#ECFDF3] text-[11px] font-bold">Desbloquear</button>:<button disabled={busyMac===d.mac+'block'} onClick={()=>act(d.mac,'block')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FEE4E2] text-[11px] font-bold">Bloquear</button>}<button disabled={busyMac===d.mac+'static'} onClick={()=>makeStatic(d.mac,d.ip||d.last_ip)} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FFF7E8] text-[11px] font-bold">DHCP fixo</button></div>
+          <div><div className="font-bold flex items-center gap-1"><span className="inline-flex w-5 h-5 items-center justify-center rounded border border-[#1A1A2E] bg-[#FFF7E8]"><DeviceGlyph icon={iconForDevice(d)} /></span>{d.nickname||d.hostname||'—'}</div><div className="text-[#4A4A68]">{d.hostname||''}</div></div>, d.ip||d.last_ip||'—', d.mac, <div><div>{d.device_type||'unknown'}</div><div className="text-[#4A4A68]">{d.vendor||''}</div></div>, `${d.connection||'—'}${d.interface?` (${d.interface})`:''}`, d.signal_dbm?`${d.signal_dbm} dBm`:'—', d.last_seen?new Date(d.last_seen).toLocaleString():'—', <span className={Number(d.online)?'text-[#027A48] font-bold':'text-[#B42318] font-bold'}>{Number(d.online)?'online':'offline'}</span>,
+          <div className="flex gap-1 flex-wrap items-center">
+            <select value={String(d.icon||'auto')} disabled={iconBusy===d.mac+String(d.icon||'auto')} onChange={e=>setDeviceIcon(d.mac,e.target.value)} className="px-1.5 py-1 border border-[#1A1A2E] rounded bg-white text-[11px] font-bold">
+              {DEVICE_ICONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+            {Number(d.blocked)?<button disabled={busyMac===d.mac+'unblock'} onClick={()=>act(d.mac,'unblock')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#ECFDF3] text-[11px] font-bold">Desbloquear</button>:<button disabled={busyMac===d.mac+'block'} onClick={()=>act(d.mac,'block')} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FEE4E2] text-[11px] font-bold">Bloquear</button>}
+            <button disabled={busyMac===d.mac+'static'} onClick={()=>makeStatic(d.mac,d.ip||d.last_ip)} className="px-2 py-1 border border-[#1A1A2E] rounded bg-[#FFF7E8] text-[11px] font-bold">DHCP fixo</button>
+          </div>
         ])} />
       </div>
 
