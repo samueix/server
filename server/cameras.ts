@@ -615,8 +615,8 @@ export async function getCameraDetails(camId: string) {
       audio: true,
     },
     controls: {
-      ptz: { supported: /PTZ/i.test(capsBody), actions: ['left','right','up','down','stop'], speedRange: [0.1, 1] },
-      led: { supported: false, note: 'LED/IR não exposto por ONVIF padrão nesta Yoosee; controle provável via protocolo proprietário/P2P.' },
+      ptz: { supported: true, actions: ['left','right','up','down','stop'], speedRange: [0.1, 1], note: 'ONVIF PTZ com fallback RTSP SET_PARAMETER (Yoosee).' },
+      led: { supported: (cam.brand||'generic') === 'yoosee', note: 'LED/IR: tentativa best-effort (ONVIF/CGI). Yoosee geralmente exige protocolo proprietário/P2P; pode não funcionar.' },
       audio: { supported: true, note: 'Áudio via ffmpeg/RTSP (PCMA).' },
       recordingPlayback: { supported: !!storage.supported, note: storage.supported ? 'Armazenamento detectado via ONVIF.' : 'Replay microSD/NVR não exposto por ONVIF padrão nesta câmera.' },
       wifi: { supported: !!wifi.supported, note: wifi.supported ? 'Wi-Fi reportado por ONVIF.' : (wifi.reason || 'Wi-Fi/RSSI não exposto por ONVIF padrão.') },
@@ -629,7 +629,7 @@ export async function cameraLed(camId: string, mode: 'on'|'off'|'auto') {
   const cam = loadCameraConfigs().find(c => c.id === safeCamId(camId));
   if (!cam) throw new Error('camera not found');
   const attempts: any[] = [];
-  // Best-effort: some cameras expose auxiliary commands or imaging settings.
+  // Best-effort ONVIF probes
   const auxCmd = mode === 'on' ? 'tt:IRCutFilterOn' : mode === 'off' ? 'tt:IRCutFilterOff' : 'tt:IRCutFilterAuto';
   const probes: Array<{name:string; path:string; body:string}> = [
     { name:'SendAuxiliaryCommand', path:'/onvif/device_service', body:`<tds:SendAuxiliaryCommand><tds:AuxiliaryCommand>${auxCmd}</tds:AuxiliaryCommand></tds:SendAuxiliaryCommand>` },
@@ -643,7 +643,77 @@ export async function cameraLed(camId: string, mode: 'on'|'off'|'auto') {
       if (r.ok && !fault) return { ok:true, supported:true, mode, method:p.name, attempts };
     } catch (e:any) { attempts.push({ name:p.name, ok:false, error:String(e?.message||e).slice(0,120) }); }
   }
-  return { ok:false, supported:false, mode, error:'LED/IR não exposto por ONVIF padrão nesta Yoosee. Requer API proprietária/P2P.', attempts };
+
+  // Best-effort Yoosee CGI/HTTP probes observed across firmwares (proprietary, may vary by model)
+  if ((cam.brand || 'generic') === 'yoosee' || /yoosee|gwell/i.test(String(cam.model||''))) {
+    const cgi: Array<{name:string; path:string}> = [
+      { name:'set_whiteLight_on', path:`/cgi-bin/set_whiteLight?mode=${mode==='off'?0:1}` },
+      { name:'set_ir_on', path:`/cgi-bin/set_ir?mode=${mode==='off'?0:1}` },
+      { name:'set_led_on', path:`/cgi-bin/set_led?mode=${mode==='off'?0:1}` },
+      { name:'set_lamp', path:`/cgi-bin/set_lamp?status=${mode==='off'?0:1}` },
+    ];
+    for (const p of cgi) {
+      try {
+        const r = await fetch(`http://${cam.ip}${p.path}`, { headers: { Authorization: 'Basic ' + Buffer.from(`${cam.username}:${cam.password}`).toString('base64') }, signal: AbortSignal.timeout(4000) as any });
+        const body = await r.text().catch(()=>'');
+        const ok = r.ok && !/error|not support|404|fail/i.test(body);
+        attempts.push({ name:p.name, ok, status:r.status, body: body.slice(0,120) });
+        if (ok) return { ok:true, supported:true, mode, method:p.name, attempts };
+      } catch (e:any) { attempts.push({ name:p.name, ok:false, error:String(e?.message||e).slice(0,120) }); }
+    }
+  }
+  return { ok:false, supported:false, mode, error:'LED/IR não confirmado por ONVIF/CGI nesta câmera. Yoosee costuma exigir protocolo proprietário/P2P.', attempts };
+}
+
+async function rtspSetParameter(cam: CameraConfig, body: string, timeoutMs=5000): Promise<{ok:boolean;status?:number;error?:string;raw?:string}> {
+  return await new Promise((resolve) => {
+    const socket = net.connect(cam.rtspPort || 554, cam.ip);
+    let buf = ''; let cseq = 1; let session = ''; let authed = false; let finished = false;
+    const done = (r:any) => { if (finished) return; finished = true; try{socket.destroy();}catch{} resolve(r); };
+    const timer = setTimeout(()=>done({ok:false,error:'timeout'}), timeoutMs);
+    const send = (msg: string) => socket.write(msg);
+    const req = (method: string, headers: Record<string,string>, extra='') => {
+      const h = { CSeq: String(cseq++), 'User-Agent': 'server-panel', ...headers };
+      send(`${method} rtsp://${cam.ip}:${cam.rtspPort||554}/onvif1 RTSP/1.0\r\n${Object.entries(h).map(([k,v])=>`${k}: ${v}`).join('\r\n')}\r\n\r\n${extra}`);
+    };
+    const parse = (raw: string) => {
+      const m = raw.match(/RTSP\/1\.0 (\d+)/); const status = m ? Number(m[1]) : 0;
+      const sm = raw.match(/Session:\s*([^\r\n;]+)/i); if (sm) session = sm[1].trim();
+      const wm = raw.match(/WWW-Authenticate:\s*Digest\s+(.+)/i);
+      return { status, raw, www: wm?.[1] || '' };
+    };
+    const digest = (www: string, method: string, uri: string) => {
+      const kv: Record<string,string> = {};
+      www.replace(/(\w+)="?([^",]+)"?/g, (_,k,v)=>{kv[k]=v; return '';});
+      const realm=kv.realm||'', nonce=kv.nonce||'', qop=kv.qop||'auth';
+      const nc='00000001', cnonce=crypto.randomBytes(8).toString('hex');
+      const ha1=crypto.createHash('md5').update(`${cam.username}:${realm}:${cam.password}`).digest('hex');
+      const ha2=crypto.createHash('md5').update(`${method}:${uri}`).digest('hex');
+      const resp=crypto.createHash('md5').update(`${ha1}:${nonce}:${nc}:${cnonce}:${qop}:${ha2}`).digest('hex');
+      return `Digest username="${cam.username}", realm="${realm}", nonce="${nonce}", uri="${uri}", response="${resp}", qop=${qop}, nc=${nc}, cnonce="${cnonce}"`;
+    };
+    socket.on('error', (e)=>{ clearTimeout(timer); done({ok:false,error:String(e.message||e)}); });
+    socket.on('data', (d) => {
+      buf += d.toString('utf8');
+      if (!buf.includes('\r\n\r\n')) return;
+      const r = parse(buf); buf='';
+      if (r.status === 401 && !authed && r.www) {
+        authed = true;
+        const uri = `rtsp://${cam.ip}:${cam.rtspPort||554}/onvif1`;
+        const auth = digest(r.www, 'OPTIONS', uri);
+        req('OPTIONS', { Authorization: auth });
+        return;
+      }
+      if (!session) { req('DESCRIBE', authed ? { Authorization: digest(r.www||'', 'DESCRIBE', `rtsp://${cam.ip}:${cam.rtspPort||554}/onvif1`), Accept:'application/sdp' } : { Accept:'application/sdp' }); return; }
+      // send SET_PARAMETER
+      const uri = `rtsp://${cam.ip}:${cam.rtspPort||554}/onvif1`;
+      const headers: Record<string,string> = { 'Content-Type':'text/parameters', 'Content-Length': String(Buffer.byteLength(body)), Session: session };
+      if (authed) headers.Authorization = digest(r.www||'', 'SET_PARAMETER', uri);
+      send(`SET_PARAMETER ${uri} RTSP/1.0\r\n${Object.entries({CSeq:String(cseq++),'User-Agent':'server-panel',...headers}).map(([k,v])=>`${k}: ${v}`).join('\r\n')}\r\n\r\n${body}`);
+      socket.once('data', (d2)=>{ clearTimeout(timer); const rr=parse(d2.toString('utf8')); done({ok: rr.status>=200 && rr.status<300, status: rr.status, raw: rr.raw.slice(0,300)}); });
+    });
+    req('OPTIONS', {});
+  });
 }
 
 export async function cameraPtz(camId: string, action: string, speedInput?: number) {
@@ -662,17 +732,21 @@ export async function cameraPtz(camId: string, action: string, speedInput?: numb
   else throw new Error('ação PTZ inválida');
   return await withPtzLock(cam.id, async () => {
     const r = await onvifPost(cam, '/onvif/ptz_service', body, 5000);
-    if (!r.ok && action === 'stop') {
+    if (r.ok) return { ok: true, status: r.status, action, speed, method: 'onvif' };
+    if (action === 'stop') {
       const stopBody = `<tptz:Stop><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`;
       const r2 = await onvifPost(cam, '/onvif/ptz_service', stopBody, 5000);
       if (r2.ok) return { ok: true, status: r2.status, action, speed, fallback: 'stop' };
       const r3 = await onvifPost(cam, '/onvif/ptz_service', `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity>${panTilt(0,0)}</tptz:Velocity></tptz:ContinuousMove>`, 5000);
-      return { ok: r3.ok, status: r3.status, error: r3.error || r2.error || r.error, action, speed, fallback: 'zero-velocity' };
+      if (r3.ok) return { ok: true, status: r3.status, action, speed, fallback: 'zero-velocity' };
     }
-    if (!r.ok && action !== 'stop') {
-      await new Promise(res => setTimeout(res, 250));
-      const r2 = await onvifPost(cam, '/onvif/ptz_service', body, 5000);
-      return { ok: r2.ok, status: r2.status, error: r2.error || r.error, action, speed, retried: !r2.ok ? false : true };
+    // RTSP SET_PARAMETER fallback (Yoosee/public research); DWON typo is intentional for compatibility.
+    const cmdMap: Record<string,string> = { left:'LEFT', right:'RIGHT', up:'UP', down:'DWON', stop:'STOP' };
+    const ptzCmd = cmdMap[action];
+    if (ptzCmd) {
+      const rr = await rtspSetParameter(cam, `ptzCmd: ${ptzCmd}\r\n`);
+      if (rr.ok) return { ok: true, status: rr.status, action, speed, method: 'rtsp-set-parameter' };
+      return { ok: false, status: rr.status || r.status, error: rr.error || r.error, action, speed, method: 'onvif+rtsp-failed' };
     }
     return { ok: r.ok, status: r.status, error: r.error, action, speed };
   });
