@@ -655,40 +655,38 @@ export async function cameraLed(camId: string, mode: 'on'|'off'|'auto') {
   const cam = loadCameraConfigs().find(c => c.id === safeCamId(camId));
   if (!cam) throw new Error('camera not found');
   const attempts: any[] = [];
-  // Best-effort ONVIF probes
-  const auxCmd = mode === 'on' ? 'tt:IRCutFilterOn' : mode === 'off' ? 'tt:IRCutFilterOff' : 'tt:IRCutFilterAuto';
-  const probes: Array<{name:string; path:string; body:string}> = [
-    { name:'SendAuxiliaryCommand', path:'/onvif/device_service', body:`<tds:SendAuxiliaryCommand><tds:AuxiliaryCommand>${auxCmd}</tds:AuxiliaryCommand></tds:SendAuxiliaryCommand>` },
-    { name:'SetRelayOutputState', path:'/onvif/deviceio_service', body:`<tmd:SetRelayOutputState xmlns:tmd="http://www.onvif.org/ver10/deviceIO/wsdl"><tmd:RelayOutputToken>relay0</tmd:RelayOutputToken><tmd:LogicalState>${mode==='off'?'inactive':'active'}</tmd:LogicalState></tmd:SetRelayOutputState>` },
-  ];
+  const token = cam.profileToken || 'IPCProfilesToken0';
+  const aux = mode === 'on' ? ['tt:IRCutFilterOn','tt:WhiteLightOn','tt:LightingOn','tt:LightOn'] : mode === 'off' ? ['tt:IRCutFilterOff','tt:WhiteLightOff','tt:LightingOff','tt:LightOff'] : ['tt:IRCutFilterAuto','tt:WhiteLightAuto','tt:LightingAuto'];
+  const probes: Array<{name:string; path:string; body:string}> = [];
+  for (const a of aux) probes.push({ name:`SendAuxiliaryCommand:${a}`, path:'/onvif/device_service', body:`<tds:SendAuxiliaryCommand><tds:AuxiliaryCommand>${a}</tds:AuxiliaryCommand></tds:SendAuxiliaryCommand>` });
+  probes.push({ name:'SetRelayOutputState', path:'/onvif/deviceio_service', body:`<tmd:SetRelayOutputState xmlns:tmd="http://www.onvif.org/ver10/deviceIO/wsdl"><tmd:RelayOutputToken>relay0</tmd:RelayOutputToken><tmd:LogicalState>${mode==='off'?'inactive':'active'}</tmd:LogicalState></tmd:SetRelayOutputState>` });
+  const irMode = mode === 'on' ? 'ON' : mode === 'off' ? 'OFF' : 'AUTO';
+  probes.push({ name:'SetImagingSettings:IrCutFilter', path:'/onvif/imaging_service', body:`<timg:SetImagingSettings xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"><timg:VideoSourceToken>${token}</timg:VideoSourceToken><timg:ImagingSettings><tt:IrCutFilter xmlns:tt="http://www.onvif.org/ver10/schema">${irMode}</tt:IrCutFilter></timg:ImagingSettings><timg:ForcePersistence>true</timg:ForcePersistence></timg:SetImagingSettings>` });
   for (const p of probes) {
     try {
       const r = await onvifPost(cam, p.path, p.body, 5000);
-      const fault = /Fault|not implemented|not supported|ActionNotSupported/i.test(r.body || '');
+      const fault = /Fault|not implemented|not supported|ActionNotSupported|NoSuchService/i.test(r.body || '');
       attempts.push({ name:p.name, ok:r.ok, status:r.status, fault });
       if (r.ok && !fault) return { ok:true, supported:true, mode, method:p.name, attempts };
     } catch (e:any) { attempts.push({ name:p.name, ok:false, error:String(e?.message||e).slice(0,120) }); }
   }
-
-  // Best-effort Yoosee CGI/HTTP probes observed across firmwares (proprietary, may vary by model)
   if ((cam.brand || 'generic') === 'yoosee' || /yoosee|gwell/i.test(String(cam.model||''))) {
+    const v = mode === 'off' ? 0 : 1;
     const cgi: Array<{name:string; path:string}> = [
-      { name:'set_whiteLight_on', path:`/cgi-bin/set_whiteLight?mode=${mode==='off'?0:1}` },
-      { name:'set_ir_on', path:`/cgi-bin/set_ir?mode=${mode==='off'?0:1}` },
-      { name:'set_led_on', path:`/cgi-bin/set_led?mode=${mode==='off'?0:1}` },
-      { name:'set_lamp', path:`/cgi-bin/set_lamp?status=${mode==='off'?0:1}` },
+      { name:'set_whiteLight', path:`/cgi-bin/set_whiteLight?mode=${v}` }, { name:'get_whiteLight', path:`/cgi-bin/get_whiteLight` },
+      { name:'set_ir', path:`/cgi-bin/set_ir?mode=${v}` }, { name:'set_led', path:`/cgi-bin/set_led?mode=${v}` }, { name:'set_lamp', path:`/cgi-bin/set_lamp?status=${v}` },
     ];
     for (const p of cgi) {
       try {
         const r = await fetch(`http://${cam.ip}${p.path}`, { headers: { Authorization: 'Basic ' + Buffer.from(`${cam.username}:${cam.password}`).toString('base64') }, signal: AbortSignal.timeout(4000) as any });
         const body = await r.text().catch(()=>'');
-        const ok = r.ok && !/error|not support|404|fail/i.test(body);
+        const ok = r.ok && !/error|not support|404|fail|unauthorized/i.test(body);
         attempts.push({ name:p.name, ok, status:r.status, body: body.slice(0,120) });
-        if (ok) return { ok:true, supported:true, mode, method:p.name, attempts };
+        if (ok && !p.name.startsWith('get_')) return { ok:true, supported:true, mode, method:p.name, attempts };
       } catch (e:any) { attempts.push({ name:p.name, ok:false, error:String(e?.message||e).slice(0,120) }); }
     }
   }
-  return { ok:false, supported:false, mode, error:'LED/IR não confirmado por ONVIF/CGI nesta câmera. Yoosee costuma exigir protocolo proprietário/P2P.', attempts };
+  return { ok:false, supported:false, mode, error:'LED/luz branca não confirmado por ONVIF/CGI. Yoosee/Gwelltimes normalmente exige protocolo proprietário P2P (Cloudlinks/FPFQ).', attempts };
 }
 
 async function rtspSetParameter(cam: CameraConfig, body: string, timeoutMs=5000): Promise<{ok:boolean;status?:number;error?:string;raw?:string}> {
