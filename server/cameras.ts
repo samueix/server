@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import { spawn, ChildProcess } from 'child_process';
 import net from 'net';
+import dgram from 'dgram';
 import http from 'http';
 import https from 'https';
 import crypto from 'crypto';
@@ -469,6 +470,31 @@ export function stopGo2rtc() {
   if (go2rtcProc && !go2rtcProc.killed) try { go2rtcProc.kill('SIGTERM'); } catch {}
 }
 
+export async function discoverYooseeCameras(timeoutMs = 2500): Promise<any[]> {
+  return await new Promise((resolve) => {
+    const sock = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+    const found = new Map<string, any>();
+    const probes = [
+      Buffer.from('70021c000000000000000000737f759d00000000000001020a00c422', 'hex'),
+      Buffer.alloc(1024, 0),
+    ];
+    const done = () => { try { sock.close(); } catch {} resolve([...found.values()]); };
+    const timer = setTimeout(done, timeoutMs);
+    sock.on('message', (msg, rinfo) => {
+      const hex = msg.toString('hex');
+      const ascii = msg.toString('utf8').replace(/[^\x20-\x7E]/g, '').slice(0, 200);
+      found.set(rinfo.address, { ip: rinfo.address, port: rinfo.port, bytes: msg.length, hex: hex.slice(0, 120), ascii, source: 'xm-udp-8899' });
+    });
+    sock.on('error', () => { clearTimeout(timer); done(); });
+    sock.bind(0, () => {
+      try { sock.setBroadcast(true); } catch {}
+      for (const p of probes) {
+        try { sock.send(p, 8899, '255.255.255.255'); } catch {}
+      }
+    });
+  });
+}
+
 
 function wsse(user: string, pass: string) {
   const created = new Date().toISOString().replace(/\.\d{3}Z$/, '.000Z');
@@ -488,7 +514,7 @@ async function withPtzLock<T>(camId: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function onvifPost(cam: CameraConfig, servicePath: string, bodyXml: string, timeoutMs = 6000): Promise<{ ok: boolean; status?: number; body?: string; error?: string }> {
-  const xml = `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"><s:Header>${wsse(cam.username, cam.password)}</s:Header><s:Body>${bodyXml}</s:Body></s:Envelope>`;
+  const xml = `<?xml version="1.0" encoding="utf-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:timg="http://www.onvif.org/ver20/imaging/wsdl"><s:Header><wsa:Action>http://www.onvif.org/ver20/ptz/wsdl/${bodyXml.includes('ContinuousMove')?'ContinuousMove':bodyXml.includes('Stop')?'Stop':'Action'}</wsa:Action><wsa:To>http://${cam.ip}:${cam.onvifPort || 5000}${servicePath}</wsa:To>${wsse(cam.username, cam.password)}</s:Header><s:Body>${bodyXml}</s:Body></s:Envelope>`;
   return await new Promise((resolve) => {
     const req = http.request({ hostname: cam.ip, port: cam.onvifPort || 5000, path: servicePath, method: 'POST', timeout: timeoutMs, headers: { 'Content-Type': 'application/soap+xml; charset=utf-8', 'Content-Length': Buffer.byteLength(xml), 'Connection': 'close' } }, (res) => {
       let buf=''; res.setEncoding('utf8'); res.on('data', c=>buf+=c); res.on('end', ()=> resolve({ ok: (res.statusCode||500) < 400 && !/Fault/i.test(buf), status: res.statusCode, body: buf.slice(0, 120000) }));

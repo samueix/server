@@ -58,7 +58,7 @@ import {
 } from './server/opencode.js';
 import { getServerConfig, saveServerConfig } from './server/credentialsManager.js';
 import { runShellCommand } from './server/terminalRunner.js';
-import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities, createCameraLiveToken, getCameraLiveToken } from './server/cameras.js';
+import { getCameraStatus, getPublicCameras, proxyCameraRequest, proxyWebrtcOffer, ensureGo2rtcRunning, getCameraDetails, cameraPtz, cameraProbeRecordings, serveLiveMjpeg, serveLiveAudio, cameraLed, addCameraConfig, deleteCameraConfig, brandCapabilities, createCameraLiveToken, getCameraLiveToken, discoverYooseeCameras } from './server/cameras.js';
 import { mikrotikGetStatus, mikrotikTestConnection, mikrotikBlockDevice, mikrotikUnblockDevice, mikrotikRunPing, mikrotikMakeLeaseStatic, mikrotikTraceroute, mikrotikDnsLookup, mikrotikGetDnsSettings, mikrotikSetDnsServers, mikrotikGetLogs, mikrotikGetBandwidth } from './server/mikrotik.js';
 import { startMikrotikMonitor, getMikrotikCached, pollMikrotikOnce } from './server/mikrotikMonitor.js';
 import { listMikrotikDevices, listMikrotikEvents, listMikrotikSnapshots, setMikrotikDeviceNickname, setMikrotikDeviceIcon, addMikrotikEvent } from './server/db.js';
@@ -544,6 +544,9 @@ export function createApp() {
   });
   app.get('/api/cameras/config', requireAdminAuth, (_req, res) => {
     try { res.json({ ok:true, cameras: getPublicCameras().map(c=>({...c})) }); } catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
+  });
+  app.get('/api/cameras/discover', requireAdminAuth, async (_req, res) => {
+    try { res.json({ ok:true, cameras: await discoverYooseeCameras(3000) }); } catch (e:any) { res.status(500).json({ ok:false, error:e?.message||String(e) }); }
   });
   app.post('/api/cameras/config', requireAdminAuth, async (req, res) => {
     try {
